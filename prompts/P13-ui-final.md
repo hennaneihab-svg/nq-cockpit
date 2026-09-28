@@ -1,0 +1,4 @@
+# P13 · Interface finale
+Tâches : consolide l'UI Streamlit multipage : Cockpit (profil du jour), Radar d'événements (fiches et compte à rebours), Discipline (checklist, pause), Journal, Coaching, Laboratoire (P14), Santé des sources. Thème sombre, navigation simple, textes en français, heures d'Alger avec ET entre parenthèses pour les événements. Accessibilité : contrastes, tailles lisibles, pas d'information portée par la seule couleur.
+Ajoute une commande unique `python -m nqcockpit run` qui lance le planificateur et l'UI. Ajoute un README d'utilisation (routine quotidienne : 13h00 lire le Cockpit, 14h45 rafraîchir, 15h15 checklist, après la clôture journaliser).
+Critères d'acceptation : parcours complet testé (snapshot → profil → checklist → trade fictif → coaching) ; captures d'écran de chaque page dans le rapport ; aucune erreur dans les logs.

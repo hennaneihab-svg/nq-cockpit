@@ -1,0 +1,29 @@
+timezones:
+  display: Africa/Algiers
+  market: America/New_York
+trading_windows_algiers:      # tes kill zones
+  - {name: trade1, start: "15:30", end: "17:00"}
+  - {name: trade2, start: "17:00", end: "18:30"}
+snapshots_algiers: ["13:00", "14:45"]
+rules:
+  max_trades_per_day: 2
+  cancel_trade2_if_trade1_loss: true
+  cooldown_after_sl_minutes: 15
+  daily_loss_limit_r: 2.0
+risk:
+  instrument: MNQ            # MNQ ($2/pt) ou NQ ($20/pt)
+  risk_per_trade_pct: 0.5
+  account_size: 0            # renseigne ton compte ou la taille prop
+  prop_profile: {max_daily_loss: 0, trailing_drawdown: 0}
+events:
+  post_event_buffer_minutes: 90     # volatilité résiduelle après un événement Tier 1
+  stand_aside_before_minutes: 5
+  wait_after_minutes: 3
+  tier1: [FOMC, CPI, NFP, PCE, "FOMC Minutes", "Powell"]
+  megacaps: [NVDA, MSFT, AAPL, AMZN, GOOGL, META, AVGO, TSLA]
+levels:
+  wall_proximity_points: 40   # seuil "coincé entre deux murs"
+  stale_data_minutes: 30
+validation:
+  min_sessions: 60
+  min_event_samples: 12

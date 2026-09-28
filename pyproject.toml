@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nqcockpit"
+version = "0.1.0"
+description = "Cockpit local de préparation, discipline et mesure pour le trading NQ"
+readme = "README-START-HERE.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+    "python-dotenv",
+]
+
+[project.scripts]
+nqcockpit = "nqcockpit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    "vendor",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = []
+

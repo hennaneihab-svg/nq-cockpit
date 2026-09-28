@@ -1,0 +1,15 @@
+# Glossaire
+- **Win rate** : pourcentage de trades gagnants (exemple : 40 trades gagnants sur 100 = 40 %). Ne dit rien sur la rentabilité à lui seul.
+- **R** : le risque initial d'un trade (distance entre l'entrée et le stop), pris comme unité. Si 1R = 100 $, un gain de 200 $ = +2R, un stop touché = -1R.
+- **Espérance (en R)** : gain moyen par trade = win rate x gain moyen - (1 - win rate) x perte moyenne. Positive = rentable en moyenne, sur un échantillon suffisant.
+- **Profit factor** : total des gains / total des pertes. Au-dessus de 1 = gagnant.
+- **Drawdown** : recul maximal de ton capital (ou de ta courbe en R) depuis un sommet.
+- **Expected move** : amplitude que le marché des options anticipe pour la période (environ 1 écart-type, ~68 % des cas). Ce n'est pas un plafond ni une direction.
+- **GEX (gamma exposure)** : estimation de la position en gamma des teneurs de marché sur les options. Positif : ils tendent à amortir les mouvements ; négatif : à les amplifier. C'est un modèle avec des hypothèses.
+- **Gamma flip / zero gamma** : niveau de prix où le GEX net change de signe.
+- **Call wall / put wall** : strikes avec la plus forte concentration de gamma call (au-dessus du prix) / put (en dessous).
+- **0DTE** : options qui expirent le jour même.
+- **Open interest (OI)** : nombre de contrats d'options ouverts, publié une fois par jour.
+- **NDX / NQ** : indice Nasdaq-100 / future E-mini Nasdaq-100. Écart entre les deux = "base".
+- **Tier 1 / Tier 2** : niveaux d'importance des événements économiques (Tier 1 = FOMC, CPI, emploi, PCE…).
+- **Échantillon insuffisant** : pas assez de cas (moins de 60 séances ou 12 occurrences) pour tirer une conclusion.

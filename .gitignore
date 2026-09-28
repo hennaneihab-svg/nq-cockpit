@@ -1,0 +1,40 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache & build
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Logs & cache
+logs/*
+!logs/.gitkeep
+logs/*.log
+*.log
+.pytest_cache/
+.ruff_cache/
+
+# Vendor
+vendor/
+
+# Data & database files
+data/*.db
+data/*.sqlite
+
+# Reports
+reports/*.json
+
+# OS files
+.DS_Store
+Thumbs.db
