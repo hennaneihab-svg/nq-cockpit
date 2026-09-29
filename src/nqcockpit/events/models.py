@@ -1,0 +1,130 @@
+"""Modèles de données pour le radar d'événements NQ Cockpit."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+
+
+class DataStatus(str, Enum):
+    OK = "OK"
+    DEGRADED = "DÉGRADÉ"
+    BLOCKED = "BLOQUÉ"
+
+
+@dataclass
+class CalendarEvent:
+    """Un événement économique ou de politique monétaire."""
+
+    name: str
+    """Nom court : 'CPI', 'FOMC', 'NFP', 'FOMC Minutes', 'Powell'…"""
+
+    tier: int
+    """1 = impact majeur (RED potentiel), 2 = impact secondaire (AMBER potentiel)."""
+
+    scheduled_utc: datetime
+    """Horodatage précis en UTC. Si seule la date est connue, heure = 12:00 UTC."""
+
+    source: str
+    """Source ayant fourni cet événement : 'fed_rss', 'fed_html', 'bls', 'bea',
+    'fred', 'forexfactory', 'static'."""
+
+    description: str = ""
+    """Description longue (optionnelle)."""
+
+    consensus: str | None = None
+    """Consensus de marché (ForexFactory, si disponible)."""
+
+    previous: str | None = None
+    """Valeur précédente (ForexFactory, si disponible)."""
+
+    actual: str | None = None
+    """Valeur publiée (si déjà publié)."""
+
+    source_fetched_utc: datetime | None = None
+    """Horodatage UTC du fetch de la source."""
+
+    source_age_seconds: float = 0.0
+    """Âge de la donnée source en secondes."""
+
+    status: DataStatus = DataStatus.OK
+    """Statut de la donnée : OK / DÉGRADÉ / BLOQUÉ."""
+
+    all_sources: list[str] = field(default_factory=list)
+    """Liste de toutes les sources qui ont confirmé cet événement."""
+
+
+@dataclass
+class EarningsEvent:
+    """Résultat d'une mégacap (yfinance)."""
+
+    ticker: str
+    """Symbole boursier : 'NVDA', 'AAPL'…"""
+
+    scheduled_utc: datetime | None
+    """Date/heure de publication des résultats, si connue."""
+
+    confirmed: bool = False
+    """True si la date est confirmée par yfinance."""
+
+    eps_estimate: float | None = None
+    """Estimation EPS analyst (si disponible)."""
+
+    revenue_estimate: float | None = None
+    """Estimation chiffre d'affaires (si disponible)."""
+
+    source_fetched_utc: datetime | None = None
+    """Horodatage UTC du fetch."""
+
+    source_age_seconds: float = 0.0
+    """Âge de la donnée source en secondes."""
+
+    status: DataStatus = DataStatus.OK
+    """Statut : OK / DÉGRADÉ (yfinance absent/erreur) / BLOQUÉ."""
+
+    error_msg: str | None = None
+    """Message d'erreur si statut != OK."""
+
+
+@dataclass
+class SourceHealth:
+    """Santé d'une source de données événementielles."""
+
+    source: str
+    status: DataStatus
+    events_count: int = 0
+    error_msg: str | None = None
+    fetched_utc: datetime | None = None
+
+
+@dataclass
+class EventRiskReport:
+    """Rapport complet du radar d'événements."""
+
+    as_of_utc: datetime
+    """Horodatage UTC du rapport."""
+
+    risk_level: str
+    """'GREEN', 'AMBER' ou 'RED'."""
+
+    reason: str
+    """Explication détaillée du niveau de risque (toujours fournie)."""
+
+    events_14d: list[CalendarEvent] = field(default_factory=list)
+    """Tous les événements dans l'horizon configuré, triés par date."""
+
+    earnings_14d: list[EarningsEvent] = field(default_factory=list)
+    """Résultats de mégacaps dans l'horizon."""
+
+    divergences: list[str] = field(default_factory=list)
+    """Conflits détectés entre sources (même événement, heure différente > 5 min)."""
+
+    source_health: list[SourceHealth] = field(default_factory=list)
+    """Statut de chaque source interrogée."""
+
+    next_event_countdown: str = ""
+    """Texte affiché : 'Prochain: CPI dans 5j 14h 22m (Alger : 14 oct. 14h30)'."""
+
+    calendar_display_algiers: list[str] = field(default_factory=list)
+    """Calendrier des 14 prochains jours formaté pour affichage (heure Alger)."""

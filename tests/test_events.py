@@ -1,0 +1,302 @@
+"""Tests pour le module events (Radar d'événements P05).
+
+Couvre :
+- Changement d'heure du 1er novembre 2026 (EDT -> EST sans décalage en dur)
+- Jour sans événement (GREEN)
+- Jour avec deux événements
+- Événements Tier 1 dans la fenêtre ou dans le tampon (RED)
+- Événements Tier 2 ou mégacaps ou Tier 1 proche (AMBER)
+- Sources divergentes (> 5 min)
+- Gestion dégradée de yfinance / mégacaps
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from nqcockpit.events.classifier import classify_event, merge_and_classify
+from nqcockpit.events.earnings import fetch_earnings_events
+from nqcockpit.events.models import CalendarEvent, DataStatus, EarningsEvent
+from nqcockpit.events.risk import compute_event_risk
+
+UTC = timezone.utc
+TZ_ET = ZoneInfo("America/New_York")
+TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+
+DEFAULT_WINDOWS = [
+    {"name": "trade1", "start": "15:30", "end": "17:00"},
+    {"name": "trade2", "start": "17:00", "end": "18:30"},
+]
+DEFAULT_TIER1 = ["FOMC", "CPI", "NFP", "PCE", "FOMC Minutes", "Powell", "GDP"]
+DEFAULT_TIER2 = ["PPI", "JOLTS", "Retail Sales", "Consumer Sentiment", "ISM", "ADP"]
+
+
+def test_day_without_events_is_green() -> None:
+    """Un jour sans événement doit produire un risque GREEN avec explication."""
+    ref_utc = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    assert report.risk_level == "GREEN"
+    assert "Aucun événement significatif" in report.reason
+    assert report.as_of_utc == ref_utc
+
+
+def test_tier1_in_window_is_red() -> None:
+    """Un événement Tier 1 (ex. CPI ou FOMC) tombant dans une fenêtre d'Alger -> RED."""
+    # Le 14 oct 2026 : FOMC Minutes ou discours à 14h00 ET = 18h00 UTC = 19h00 Alger
+    # Créons un événement à 16h00 Alger = 15h00 UTC (en plein trade1 : 15h30 - 17h00 Alger)
+    event_dt_utc = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # 16h00 Alger
+    ev = CalendarEvent(
+        name="FOMC Minutes",
+        tier=1,
+        scheduled_utc=event_dt_utc,
+        source="fed_html",
+        description="Minutes FOMC",
+    )
+
+    ref_utc = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[ev],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    assert report.risk_level == "RED"
+    assert "FOMC Minutes" in report.reason
+    assert "trade1" in report.reason
+    assert "RED" in report.risk_level
+
+
+def test_tier1_post_event_buffer_is_red() -> None:
+    """Un Tier 1 avant la fenêtre mais dont le tampon (90 min) déborde sur la fenêtre -> RED."""
+    # trade1 commence à 15h30 Alger = 14h30 UTC (en EDT, UTC+1 pour Alger)
+    # Si un Tier 1 a lieu à 14h30 Alger = 13h30 UTC,
+    # avec un post_buffer de 90 min, l'impact dure jusqu'à 16h00 Alger -> déborde sur trade1 !
+    event_dt_utc = datetime(2026, 10, 2, 13, 30, tzinfo=UTC)  # 14h30 Alger
+    ev = CalendarEvent(
+        name="NFP",
+        tier=1,
+        scheduled_utc=event_dt_utc,
+        source="bls",
+        description="Non-Farm Payrolls",
+    )
+
+    ref_utc = datetime(2026, 10, 2, 10, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[ev],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    assert report.risk_level == "RED"
+    assert "NFP" in report.reason
+    assert "tampon" in report.reason or "couvre" in report.reason
+
+
+def test_tier2_near_window_is_amber() -> None:
+    """Un Tier 2 ou un Tier 1 en périphérie (zone AMBER ±2h) -> AMBER."""
+    # trade1 est 15h30 - 17h00 Alger = 14h30 - 16h00 UTC
+    # Événement Tier 2 (ex: PPI) à 13h30 Alger = 12h30 UTC (dans la zone ±2h)
+    event_dt_utc = datetime(2026, 10, 8, 12, 30, tzinfo=UTC)  # 13h30 Alger
+    ev = CalendarEvent(
+        name="PPI",
+        tier=2,
+        scheduled_utc=event_dt_utc,
+        source="bls",
+        description="Producer Price Index",
+    )
+
+    ref_utc = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[ev],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    assert report.risk_level == "AMBER"
+    assert "PPI" in report.reason
+    assert "Tier 2" in report.reason
+
+
+def test_megacap_earnings_is_amber() -> None:
+    """Une mégacap publiant ses résultats près des fenêtres déclenche un statut AMBER."""
+    # Earnings NVDA à 21h00 UTC = 22h00 Alger (hors fenêtre, mais testons à 17h00 UTC = 18h00 Alger)
+    earn_dt_utc = datetime(2026, 10, 22, 17, 0, tzinfo=UTC)  # 18h00 Alger (dans trade2)
+    earn = EarningsEvent(
+        ticker="NVDA",
+        scheduled_utc=earn_dt_utc,
+        confirmed=True,
+        eps_estimate=0.75,
+        status=DataStatus.OK,
+    )
+
+    ref_utc = datetime(2026, 10, 22, 10, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[],
+        earnings=[earn],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    assert report.risk_level == "AMBER"
+    assert "NVDA" in report.reason
+
+
+def test_two_events_same_day() -> None:
+    """Un jour avec deux événements (Tier 1 et Tier 2). Le plus restrictif (RED) prime."""
+    dt1 = datetime(2026, 10, 14, 12, 30, tzinfo=UTC)  # CPI à 08h30 ET = 13h30 Alger
+    dt2 = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)   # Fed Speech à 16h00 Alger
+    ev1 = CalendarEvent(name="CPI", tier=1, scheduled_utc=dt1, source="bls")
+    ev2 = CalendarEvent(name="Fed Speech", tier=2, scheduled_utc=dt2, source="fed_rss")
+
+    ref_utc = datetime(2026, 10, 14, 8, 0, tzinfo=UTC)
+    report = compute_event_risk(
+        events=[ev1, ev2],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    # ev2 tombe à 16h00 Alger (en plein trade1 15h30-17h00) -> Tier 2 dans fenêtre = AMBER
+    # ev1 CPI à 13h30 Alger avec tampon 90min va jusqu'à 15h00 -> proche de trade1 15h30
+    assert report.risk_level in ("RED", "AMBER")
+    assert "CPI" in report.reason or "Fed Speech" in report.reason
+
+
+def test_divergent_sources_detected() -> None:
+    """Deux sources donnant des heures différentes (>5 min) créent une alerte de divergence."""
+    # BLS indique CPI le 14 oct à 08h30 ET = 12h30 UTC
+    ev_bls = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 14, 12, 30, tzinfo=UTC),
+        source="bls",
+    )
+    # ForexFactory indique 12h45 UTC (15 min d'écart)
+    ev_ff = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 14, 12, 45, tzinfo=UTC),
+        source="forexfactory",
+        consensus="3.2%",
+    )
+
+    merged, divergences = merge_and_classify(
+        [ev_bls, ev_ff],
+        tier1_names=DEFAULT_TIER1,
+        tier2_names=DEFAULT_TIER2,
+    )
+
+    assert len(merged) == 1
+    assert len(divergences) >= 1
+    assert "DIVERGENCE" in divergences[0]
+    assert "CPI" in divergences[0]
+    # La source prioritaire (bls) est retenue pour l'heure
+    assert merged[0].scheduled_utc == datetime(2026, 10, 14, 12, 30, tzinfo=UTC)
+    # Mais consensus enrichi depuis forexfactory
+    assert merged[0].consensus == "3.2%"
+    assert set(merged[0].all_sources) == {"bls", "forexfactory"}
+
+
+def test_dst_november_1st_transition() -> None:
+    """Test du passage à l'heure d'hiver US le 1er novembre 2026 (EDT -> EST).
+
+    Règles exactes :
+    - Avant 1er nov 2026 (EDT, UTC-4) : 08h30 ET = 12h30 UTC = 13h30 Alger (UTC+1).
+    - Après 1er nov 2026 (EST, UTC-5) : 08h30 ET = 13h30 UTC = 14h30 Alger (UTC+1).
+    - Avec 90 min de post_event_buffer :
+        - Avant 1er nov : 13h30 + 90m = 15h00 Alger. Ne déborde pas sur trade1 (15h30).
+        - Après 1er nov : 14h30 + 90m = 16h00 Alger. Déborde sur trade1 (15h30-17h00) -> RED !
+    Vérifie qu'aucun décalage n'est codé en dur et que zoneinfo gère tout correctement.
+    """
+    # 1. Avant nov : 14 oct 2026 à 08h30 ET
+    dt_oct_et = datetime(2026, 10, 14, 8, 30, tzinfo=TZ_ET)
+    dt_oct_utc = dt_oct_et.astimezone(UTC)
+    dt_oct_alg = dt_oct_et.astimezone(TZ_ALGIERS)
+
+    assert dt_oct_utc.hour == 12
+    assert dt_oct_utc.minute == 30
+    assert dt_oct_alg.hour == 13
+    assert dt_oct_alg.minute == 30
+
+    ev_oct = CalendarEvent(name="CPI", tier=1, scheduled_utc=dt_oct_utc, source="bls")
+    report_oct = compute_event_risk(
+        events=[ev_oct],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=datetime(2026, 10, 14, 8, 0, tzinfo=UTC),
+    )
+    # En octobre : 13h30 + 90m = 15h00. trade1 commence à 15h30. Zone AMBER (proche) mais pas RED !
+    assert report_oct.risk_level == "AMBER"
+
+    # 2. Après nov : 12 nov 2026 à 08h30 ET (US est en EST !)
+    dt_nov_et = datetime(2026, 11, 12, 8, 30, tzinfo=TZ_ET)
+    dt_nov_utc = dt_nov_et.astimezone(UTC)
+    dt_nov_alg = dt_nov_et.astimezone(TZ_ALGIERS)
+
+    assert dt_nov_utc.hour == 13
+    assert dt_nov_utc.minute == 30
+    assert dt_nov_alg.hour == 14
+    assert dt_nov_alg.minute == 30
+
+    ev_nov = CalendarEvent(name="CPI", tier=1, scheduled_utc=dt_nov_utc, source="bls")
+    report_nov = compute_event_risk(
+        events=[ev_nov],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=datetime(2026, 11, 12, 8, 0, tzinfo=UTC),
+    )
+    # En novembre : 14h30 + 90m = 16h00. trade1 (15h30 - 17h00) est DEDANS -> RED !
+    assert report_nov.risk_level == "RED"
+    assert "tampon" in report_nov.reason or "couvre" in report_nov.reason
+
+
+def test_classifier_priorities() -> None:
+    """Vérifie le classement automatique Tier 1 vs Tier 2."""
+    ev1 = CalendarEvent(name="FOMC", tier=2, scheduled_utc=datetime.now(UTC), source="test")
+    assert classify_event(ev1, DEFAULT_TIER1, DEFAULT_TIER2) == 1
+
+    ev2 = CalendarEvent(name="PPI", tier=1, scheduled_utc=datetime.now(UTC), source="test")
+    # Si dans tier2 de config, doit être classifié Tier 2
+    assert classify_event(ev2, DEFAULT_TIER1, DEFAULT_TIER2) == 2
+
+    ev3 = CalendarEvent(
+        name="Unknown Indicator",
+        tier=2,
+        scheduled_utc=datetime.now(UTC),
+        source="test",
+    )
+    assert classify_event(ev3, DEFAULT_TIER1, DEFAULT_TIER2) == 2
+
+
+def test_earnings_degraded_cleanly(tmp_path: pytest.TempPathFactory) -> None:
+    """Vérifie que les earnings gèrent les erreurs et retournent DataStatus.DEGRADED sans crash."""
+    # Test avec un faux ticker ou environnement sans crash
+    events = fetch_earnings_events(
+        tickers=["INVALID_TICKER_XYZ"],
+        cache_dir=str(tmp_path),
+    )
+    assert len(events) == 1
+    assert events[0].ticker == "INVALID_TICKER_XYZ"
+    assert events[0].status == DataStatus.DEGRADED

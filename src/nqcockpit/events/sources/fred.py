@@ -1,0 +1,208 @@
+"""Source FRED : dates de publication des séries économiques clés.
+
+Utilise l'API FRED (clé gratuite, 120 req/min) pour récupérer les dates
+de release passées et extrapoler la prochaine date.
+Release IDs : CPI=10, PPI=46, NFP=50, GDP=53, PCE=54.
+
+Rôle : CONTRÔLE CROISÉ avec BLS/BEA, pas source primaire.
+Signale les divergences si FRED indique une date différente.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import pathlib
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from nqcockpit.events.models import CalendarEvent, DataStatus
+
+log = logging.getLogger(__name__)
+
+ET_TZ = ZoneInfo("America/New_York")
+UTC = timezone.utc
+
+# Release IDs FRED par défaut (overridable via config)
+DEFAULT_RELEASE_IDS = {
+    "CPI": 10,
+    "PPI": 46,
+    "NFP": 50,
+    "GDP": 53,
+    "PCE": 54,
+}
+
+# Heure de publication FRED pour chaque release (08h30 ET pour BLS/BEA)
+RELEASE_HOURS_ET = {
+    "CPI": (8, 30),
+    "PPI": (8, 30),
+    "NFP": (8, 30),
+    "GDP": (8, 30),
+    "PCE": (8, 30),
+}
+
+# Tiers
+RELEASE_TIERS = {
+    "CPI": 1, "NFP": 1, "GDP": 1, "PCE": 1,
+    "PPI": 2,
+}
+
+
+def _load_fred_key() -> str:
+    """Charge la clé FRED depuis l'environnement ou le fichier .env."""
+    key = os.environ.get("FRED_API_KEY", "")
+    if key:
+        return key
+    # Recherche dans .env à la racine du projet
+    for candidate in [
+        pathlib.Path.cwd() / ".env",
+        pathlib.Path(__file__).parent.parent.parent.parent.parent / ".env",
+    ]:
+        if candidate.is_file():
+            for line in candidate.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("FRED_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+    return ""
+
+
+def _fetch_release_dates(
+    release_id: int,
+    api_key: str,
+    timeout: int = 10,
+) -> list[str]:
+    """Récupère les 5 dernières dates de publication FRED pour un release_id."""
+    url = (
+        f"https://api.stlouisfed.org/fred/release/dates"
+        f"?release_id={release_id}&api_key={api_key}"
+        f"&file_type=json&sort_order=desc&limit=5"
+    )
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "NQCockpit/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        return [d.get("date", "") for d in data.get("release_dates", [])]
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+        log.warning("FRED release %s fetch error: %s", release_id, exc)
+        return []
+
+
+def _infer_next_date(past_dates: list[str]) -> str | None:
+    """Infère la prochaine date à partir des dates passées (pattern mensuel).
+
+    Calcule le delta médian entre les 3 dernières dates et l'ajoute à la plus
+    récente. Retourne None si moins de 2 dates disponibles.
+    """
+    if len(past_dates) < 2:
+        return None
+    parsed = []
+    for ds in past_dates:
+        try:
+            parsed.append(datetime.strptime(ds, "%Y-%m-%d").date())
+        except ValueError:
+            continue
+    if len(parsed) < 2:
+        return None
+    parsed.sort(reverse=True)
+    deltas = [(parsed[i] - parsed[i + 1]).days for i in range(len(parsed) - 1)]
+    median_delta = sorted(deltas)[len(deltas) // 2]
+    next_date = parsed[0] + timedelta(days=median_delta)
+    return next_date.isoformat()
+
+
+def _make_utc(date_str: str, hour_et: int, minute_et: int) -> datetime:
+    naive = datetime(
+        int(date_str[:4]),
+        int(date_str[5:7]),
+        int(date_str[8:10]),
+        hour_et,
+        minute_et,
+        tzinfo=ET_TZ,
+    )
+    return naive.astimezone(UTC)
+
+
+def fetch_fred_events(
+    release_ids: dict[str, int] | None = None,
+    now_utc: datetime | None = None,
+    horizon_days: int = 14,
+    timeout: int = 10,
+) -> tuple[list[CalendarEvent], DataStatus, str]:
+    """Fetch les dates FRED pour contrôle croisé avec BLS/BEA.
+
+    Retourne uniquement les événements futurs dans l'horizon donné.
+    Statut DÉGRADÉ si clé absente ou API inaccessible.
+
+    Returns:
+        (events, status, error_msg)
+    """
+    if now_utc is None:
+        now_utc = datetime.now(UTC)
+
+    if release_ids is None:
+        release_ids = DEFAULT_RELEASE_IDS
+
+    api_key = _load_fred_key()
+    if not api_key:
+        return (
+            [],
+            DataStatus.DEGRADED,
+            "FRED_API_KEY absente — contrôle croisé FRED indisponible",
+        )
+
+    from datetime import timedelta
+
+    horizon_end = now_utc + timedelta(days=horizon_days)
+    fetched_utc = datetime.now(UTC)
+    age_s = 0.0
+
+    events: list[CalendarEvent] = []
+    any_error = False
+
+    for name, rid in release_ids.items():
+        past_dates = _fetch_release_dates(rid, api_key, timeout=timeout)
+        if not past_dates:
+            any_error = True
+            log.warning("FRED: aucune date pour %s (id=%s)", name, rid)
+            continue
+
+        next_date_str = _infer_next_date(past_dates)
+        if next_date_str is None:
+            continue
+
+        hour_et, min_et = RELEASE_HOURS_ET.get(name, (8, 30))
+        try:
+            scheduled = _make_utc(next_date_str, hour_et, min_et)
+        except ValueError:
+            continue
+
+        if scheduled < now_utc or scheduled > horizon_end:
+            continue
+
+        tier = RELEASE_TIERS.get(name, 2)
+        events.append(
+            CalendarEvent(
+                name=name,
+                tier=tier,
+                scheduled_utc=scheduled,
+                source="fred",
+                description=(
+                    f"{name} — date extrapolée FRED (passées : "
+                    f"{', '.join(past_dates[:3])})"
+                ),
+                source_fetched_utc=fetched_utc,
+                source_age_seconds=age_s,
+                status=DataStatus.OK,
+                all_sources=["fred"],
+            )
+        )
+
+    status = DataStatus.DEGRADED if any_error else DataStatus.OK
+    error_msg = "Certaines séries FRED inaccessibles" if any_error else ""
+    events.sort(key=lambda e: e.scheduled_utc)
+    return events, status, error_msg

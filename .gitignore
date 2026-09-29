@@ -34,6 +34,7 @@ data/*.sqlite
 data/*.parquet
 data/cache/
 data/levels/
+data/events/
 
 # Reports
 reports/*.json

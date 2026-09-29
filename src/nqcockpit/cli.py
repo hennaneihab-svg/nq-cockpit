@@ -90,6 +90,18 @@ def create_parser() -> argparse.ArgumentParser:
         "fred", help="Récupère les séries FRED DGS2 et DGS10"
     )
 
+    # 7. events
+    parser_events = subparsers.add_parser(
+        "events",
+        help="Affiche le radar d'événements économiques et le risque (GREEN/AMBER/RED)",
+    )
+    parser_events.add_argument(
+        "--horizon",
+        type=int,
+        default=None,
+        help="Horizon en jours (défaut : config.events.horizon_days)",
+    )
+
     return parser
 
 
@@ -295,6 +307,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             parser.parse_args(["data", "--help"])
             return 0
+    elif args.subcommand == "events":
+        from nqcockpit.config import load_config
+        from nqcockpit.events.radar import fetch_event_radar, render_console
+
+        print("[nqcockpit] Radar d'événements en cours d'analyse...")
+        cfg = load_config(args.config)
+        report = fetch_event_radar(config=cfg, horizon_days=args.horizon)
+        print("\n" + render_console(report) + "\n")
+        return 0
 
     return 0
 

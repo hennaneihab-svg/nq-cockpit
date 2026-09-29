@@ -1,5 +1,12 @@
-"""Event radar module for NQ Cockpit.
+"""Module events — Radar d'événements NQ Cockpit."""
 
-Monitors official economic calendars (Fed, BLS, BEA) and megacap earnings,
-tracking count-downs, risk status (GREEN/AMBER/RED), and event buffers.
-"""
+from nqcockpit.events.models import CalendarEvent, EarningsEvent, EventRiskReport
+from nqcockpit.events.radar import fetch_event_radar, render_console
+
+__all__ = [
+    "CalendarEvent",
+    "EarningsEvent",
+    "EventRiskReport",
+    "fetch_event_radar",
+    "render_console",
+]

@@ -20,8 +20,25 @@ events:
   post_event_buffer_minutes: 90     # volatilité résiduelle après un événement Tier 1
   stand_aside_before_minutes: 5
   wait_after_minutes: 3
-  tier1: [FOMC, CPI, NFP, PCE, "FOMC Minutes", "Powell"]
+  tier1: [FOMC, CPI, NFP, PCE, "FOMC Minutes", "Powell", "GDP"]
+  tier2: [PPI, JOLTS, "Retail Sales", "Consumer Sentiment", "ISM", "ADP"]
   megacaps: [NVDA, MSFT, AAPL, AMZN, GOOGL, META, AVGO, TSLA]
+  horizon_days: 14
+  cache_ttl_hours: 6
+  sources:
+    fed_rss: "https://www.federalreserve.gov/feeds/press_all.xml"
+    fed_fomc_calendar: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    bls_schedule_base: "https://www.bls.gov/schedule/news_release"
+    bea_schedule: "https://www.bea.gov/news/schedule"
+    forexfactory_thisweek: "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    forexfactory_nextweek: "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
+    fred_release_ids:
+      CPI: 10
+      PPI: 46
+      NFP: 50
+      GDP: 53
+      PCE: 54
+  fomc_minutes_lag_weeks: 3
 levels:
   wall_proximity_points: 40   # seuil "coincé entre deux murs"
   stale_data_minutes: 30

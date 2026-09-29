@@ -51,7 +51,12 @@ class EventsConfig:
     stand_aside_before_minutes: int = 5
     wait_after_minutes: int = 3
     tier1: list[str] = field(default_factory=list)
+    tier2: list[str] = field(default_factory=list)
     megacaps: list[str] = field(default_factory=list)
+    horizon_days: int = 14
+    cache_ttl_hours: int = 6
+    fomc_minutes_lag_weeks: int = 3
+    sources: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -295,7 +300,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         stand_aside_before_minutes=stand_aside,
         wait_after_minutes=wait_after,
         tier1=[str(x) for x in raw_events.get("tier1", [])],
+        tier2=[str(x) for x in raw_events.get("tier2", [])],
         megacaps=[str(x) for x in raw_events.get("megacaps", [])],
+        horizon_days=int(raw_events.get("horizon_days", 14)),
+        cache_ttl_hours=int(raw_events.get("cache_ttl_hours", 6)),
+        fomc_minutes_lag_weeks=int(raw_events.get("fomc_minutes_lag_weeks", 3)),
+        sources=dict(raw_events.get("sources", {})),
     )
 
     # 7. Levels
