@@ -112,6 +112,11 @@ def _infer_next_date(past_dates: list[str]) -> str | None:
     deltas = [(parsed[i] - parsed[i + 1]).days for i in range(len(parsed) - 1)]
     median_delta = sorted(deltas)[len(deltas) // 2]
     next_date = parsed[0] + timedelta(days=median_delta)
+    # Les publications économiques gouvernementales ne sont jamais publiées le week-end
+    if next_date.weekday() == 5:  # Samedi -> Lundi
+        next_date += timedelta(days=2)
+    elif next_date.weekday() == 6:  # Dimanche -> Lundi
+        next_date += timedelta(days=1)
     return next_date.isoformat()
 
 

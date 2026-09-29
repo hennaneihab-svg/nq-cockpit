@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from nqcockpit.events.models import DataStatus, EarningsEvent
@@ -123,6 +123,8 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
                         scheduled_dt = ed.to_pydatetime()
                     elif isinstance(ed, datetime):
                         scheduled_dt = ed
+                    elif isinstance(ed, date):
+                        scheduled_dt = datetime.combine(ed, time(16, 30), tzinfo=ET_TZ)
                     if scheduled_dt is not None:
                         if scheduled_dt.tzinfo is None:
                             scheduled_dt = scheduled_dt.replace(tzinfo=ET_TZ)
@@ -140,6 +142,8 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
                         scheduled_dt = val.to_pydatetime()
                     elif isinstance(val, datetime):
                         scheduled_dt = val
+                    elif isinstance(val, date):
+                        scheduled_dt = datetime.combine(val, time(16, 30), tzinfo=ET_TZ)
                     if scheduled_dt is not None:
                         if scheduled_dt.tzinfo is None:
                             scheduled_dt = scheduled_dt.replace(tzinfo=ET_TZ)
@@ -151,8 +155,15 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         eps_est: float | None = None
         rev_est: float | None = None
         if isinstance(cal, dict):
-            eps_est = cal.get("EPS Estimate") or cal.get("Earnings Estimate")
-            rev_est = cal.get("Revenue Estimate")
+            eps_est = (
+                cal.get("EPS Estimate")
+                or cal.get("Earnings Estimate")
+                or cal.get("Earnings Average")
+            )
+            rev_est = (
+                cal.get("Revenue Estimate")
+                or cal.get("Revenue Average")
+            )
             if hasattr(eps_est, "item"):
                 eps_est = float(eps_est.item())
             elif eps_est is not None:
@@ -209,9 +220,6 @@ def fetch_earnings_events(
     if now_utc is None:
         now_utc = datetime.now(UTC)
 
-    from datetime import timedelta
-
-    horizon_end = now_utc + timedelta(days=horizon_days)
     cache_path_obj = pathlib.Path(cache_dir)
 
     results: list[EarningsEvent] = []
@@ -225,10 +233,9 @@ def fetch_earnings_events(
             ev = _fetch_yfinance_earnings(ticker)
             _save_cache(cp, ev)
 
-        # Filtrer sur l'horizon seulement si date connue
-        if ev.scheduled_utc is not None:
-            if ev.scheduled_utc < now_utc or ev.scheduled_utc > horizon_end:
-                continue  # Hors horizon : ignorer
+        # Filtrer seulement les dates déjà passées
+        if ev.scheduled_utc is not None and ev.scheduled_utc < now_utc:
+            continue
 
         results.append(ev)
 

@@ -187,12 +187,13 @@ def compute_event_risk(
         if ev.scheduled_utc < ref_utc or ev.scheduled_utc > horizon_14d:
             continue
         alg = ev.scheduled_utc.astimezone(TZ_ALGIERS)
+        et = ev.scheduled_utc.astimezone(TZ_ET)
         sym = tier_sym.get(ev.tier, "[--]")
         consensus_str = f" | fcst={ev.consensus}" if ev.consensus else ""
         previous_str = f" | prec={ev.previous}" if ev.previous else ""
         src_str = ",".join(ev.all_sources) if ev.all_sources else ev.source
         line = (
-            f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger | "
+            f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger ({et.strftime('%H:%M')} ET) | "
             f"Tier {ev.tier} | {ev.name}"
             f"{consensus_str}{previous_str} | [{src_str}]"
         )

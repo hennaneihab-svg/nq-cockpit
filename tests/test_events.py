@@ -12,15 +12,20 @@ Couvre :
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import sys
+from datetime import date, datetime, timezone
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from nqcockpit.events.classifier import classify_event, merge_and_classify
-from nqcockpit.events.earnings import fetch_earnings_events
+from nqcockpit.events.earnings import _fetch_yfinance_earnings, fetch_earnings_events
 from nqcockpit.events.models import CalendarEvent, DataStatus, EarningsEvent
 from nqcockpit.events.risk import compute_event_risk
+from nqcockpit.events.sources.bls import fetch_bls_events
+from nqcockpit.events.sources.fed import fetch_fed_events
+from nqcockpit.events.sources.fred import _infer_next_date
 
 UTC = timezone.utc
 TZ_ET = ZoneInfo("America/New_York")
@@ -300,3 +305,76 @@ def test_earnings_degraded_cleanly(tmp_path: pytest.TempPathFactory) -> None:
     assert len(events) == 1
     assert events[0].ticker == "INVALID_TICKER_XYZ"
     assert events[0].status == DataStatus.DEGRADED
+
+
+def test_fred_infer_next_date_no_weekends() -> None:
+    """Vérifie que l'inférence FRED ne retourne jamais un samedi ou un dimanche."""
+    # 2026-09-11 + 29 jours = 2026-10-10 (samedi) -> doit ajuster au lundi 2026-10-12
+    past_dates = ["2026-09-11", "2026-08-13"]
+    inferred = _infer_next_date(past_dates)
+    assert inferred is not None
+    dt = datetime.strptime(inferred, "%Y-%m-%d").date()
+    assert dt.weekday() < 5, (
+        f"Inferred date {inferred} falls on a weekend ({dt.strftime('%A')})"
+    )
+
+
+def test_earnings_date_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Vérifie que _fetch_yfinance_earnings gère datetime.date et extrait Average."""
+    mock_yf = MagicMock()
+    mock_ticker = MagicMock()
+    mock_ticker.calendar = {
+        "Earnings Date": [date(2026, 10, 29)],
+        "Earnings Average": 1.98,
+        "Revenue Average": 113000000000.0,
+    }
+    mock_yf.Ticker.return_value = mock_ticker
+    monkeypatch.setitem(sys.modules, "yfinance", mock_yf)
+
+    ev = _fetch_yfinance_earnings("AAPL")
+    assert ev.status == DataStatus.OK
+    assert ev.scheduled_utc is not None
+    assert ev.scheduled_utc.year == 2026
+    assert ev.scheduled_utc.month == 10
+    assert ev.scheduled_utc.day == 29
+    assert ev.eps_estimate == 1.98
+    assert ev.revenue_estimate == 113000000000.0
+
+
+def test_official_dates_fomc_minutes_and_cpi() -> None:
+    """Vérifie que les dates officielles (FOMC Minutes 7 oct, CPI 14 oct) sont exactes."""
+    ref_utc = datetime(2026, 9, 29, 0, 0, tzinfo=UTC)
+
+    # 1. Fed FOMC Minutes : 7 oct 2026 14h00 ET = 18h00 UTC = 19h00 Alger
+    fed_evs, _, _ = fetch_fed_events(
+        rss_url="http://invalid.url",
+        now_utc=ref_utc,
+        horizon_days=30,
+    )
+    fomc_minutes = [e for e in fed_evs if e.name == "FOMC Minutes" and e.scheduled_utc.month == 10]
+    assert len(fomc_minutes) == 1
+    ev_min = fomc_minutes[0]
+    et_min = ev_min.scheduled_utc.astimezone(TZ_ET)
+    alg_min = ev_min.scheduled_utc.astimezone(TZ_ALGIERS)
+    assert et_min.day == 7
+    assert et_min.hour == 14
+    assert et_min.minute == 0
+    assert alg_min.hour == 19
+
+    # 2. BLS CPI : 14 oct 2026 08h30 ET = 12h30 UTC = 13h30 Alger
+    bls_evs, _, _ = fetch_bls_events(
+        base_url="http://invalid.url",
+        now_utc=ref_utc,
+        horizon_days=30,
+    )
+    cpi_evs = [e for e in bls_evs if e.name == "CPI" and e.scheduled_utc.month == 10]
+    assert len(cpi_evs) == 1
+    ev_cpi = cpi_evs[0]
+    et_cpi = ev_cpi.scheduled_utc.astimezone(TZ_ET)
+    alg_cpi = ev_cpi.scheduled_utc.astimezone(TZ_ALGIERS)
+    assert et_cpi.day == 14
+    assert et_cpi.hour == 8
+    assert et_cpi.minute == 30
+    assert alg_cpi.hour == 13
+    assert alg_cpi.minute == 30
+

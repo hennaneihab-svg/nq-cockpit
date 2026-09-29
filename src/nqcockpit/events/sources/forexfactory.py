@@ -140,7 +140,7 @@ def fetch_forexfactory_events(
     error_msg = ""
     if not raw_next:
         status = DataStatus.DEGRADED
-        error_msg = "ForexFactory nextweek endpoint indisponible (404 ou réseau)"
+        error_msg = "semaine en cours OK, nextweek indisponible (404)"
 
     events: list[CalendarEvent] = []
     seen_keys: set[tuple[str, str]] = set()  # (name, date_day) pour dédoublonner

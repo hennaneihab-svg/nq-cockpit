@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 UTC = timezone.utc
 TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+TZ_ET = ZoneInfo("America/New_York")
 
 
 def fetch_event_radar(
@@ -210,6 +211,21 @@ def fetch_event_radar(
         horizon_days=horizon_days,
         cache_dir=cache_dir,
     )
+    ok_count = sum(1 for e in earnings if e.status == DataStatus.OK)
+    earnings_st = DataStatus.OK if ok_count == len(earnings) else (
+        DataStatus.DEGRADED if ok_count > 0 else DataStatus.BLOCKED
+    )
+    earnings_err = (
+        None if earnings_st == DataStatus.OK
+        else f"{len(earnings) - ok_count} tickers sans date"
+    )
+    source_health.append(SourceHealth(
+        source="yfinance_earnings",
+        status=earnings_st,
+        events_count=len(earnings),
+        error_msg=earnings_err,
+        fetched_utc=datetime.now(UTC),
+    ))
 
     # 8. Calcul du risque
     windows_dicts = [
@@ -293,11 +309,13 @@ def _export_json(report: EventRiskReport, config: AppConfig) -> None:
 
 def render_console(report: EventRiskReport) -> str:
     """Formate le rapport pour affichage console."""
+    et_now = report.as_of_utc.astimezone(TZ_ET)
     alg_now = report.as_of_utc.astimezone(TZ_ALGIERS)
     lines = [
         "=" * 70,
         "  NQ COCKPIT · RADAR D'ÉVÉNEMENTS",
-        f"  Horodatage : {alg_now.strftime('%Y-%m-%d %H:%M %Z')} | "
+        f"  Horodatage : {et_now.strftime('%Y-%m-%d %H:%M')} ET | "
+        f"{alg_now.strftime('%Y-%m-%d %H:%M')} Alger | "
         f"Risque : {report.risk_level}",
         "=" * 70,
         f"  Raison : {report.reason}",
@@ -325,11 +343,12 @@ def render_console(report: EventRiskReport) -> str:
         for e in report.earnings_14d:
             if e.scheduled_utc:
                 alg_e = e.scheduled_utc.astimezone(TZ_ALGIERS)
-                dt_str = alg_e.strftime("%d %b %H:%M Alger")
+                et_e = e.scheduled_utc.astimezone(TZ_ET)
+                dt_str = f"{alg_e.strftime('%d %b %H:%M')} Alger ({et_e.strftime('%H:%M')} ET)"
             else:
                 dt_str = "date inconnue"
             st = e.status.value
-            eps_str = f" | EPS fcst={e.eps_estimate:.2f}" if e.eps_estimate else ""
+            eps_str = f" | EPS fcst={e.eps_estimate:.2f}" if e.eps_estimate is not None else ""
             lines.append(f"    {e.ticker}: {dt_str}{eps_str} [{st}]")
 
     lines.append("-" * 70)

@@ -50,8 +50,8 @@ _FOMC_MINUTES_2026: list[dict] = [
     {"date": "2026-05-20", "meeting_date": "2026-04-29"},
     {"date": "2026-07-08", "meeting_date": "2026-06-17"},
     {"date": "2026-08-19", "meeting_date": "2026-07-29"},
-    # Minutes de la réunion Sep 15-16 : publiées ~8 oct. (extrapolé, à vérifier via RSS)
-    {"date": "2026-10-08", "meeting_date": "2026-09-16"},
+    # Minutes de la réunion Sep 15-16 : publiées 7 oct. (3 semaines après, mercredi 14h00 ET)
+    {"date": "2026-10-07", "meeting_date": "2026-09-16"},
     # Minutes d'octobre : publiées ~19 nov. (extrapolé)
     {"date": "2026-11-18", "meeting_date": "2026-10-28"},
 ]
