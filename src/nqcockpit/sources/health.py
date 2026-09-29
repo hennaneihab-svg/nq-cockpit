@@ -2,9 +2,11 @@
 
 Complies with:
 - Zero paid APIs requirement
-- Timestamps in both America/New_York and Africa/Algiers
-- Data age tracking in minutes with market session awareness
-- Strict separation between closed market and stale data
+- Timestamps in America/New_York only (console table and source_check.json)
+- Data age tracking in minutes computed in UTC, session-aware in America/New_York
+- Strict separation between closed market ("clôture") and stale data ("donnée périmée")
+- Rejection of daily midnight (00:00:00) bars to avoid artificial 1200+ min staleness
+- Missing timestamp handling ("Âge INCONNU" -> DÉGRADÉ)
 - No 2Y yield approximation (DGS2 = INDISPONIBLE without FRED key, DGS10 = ^TNX substitut yfinance)
 - User-Agent contact email configured via BLS_CONTACT_EMAIL or sources.bls_contact_email
 - No secret logging or display
@@ -18,7 +20,7 @@ import os
 import tempfile
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,7 @@ import requests
 
 from nqcockpit.config import load_config
 from nqcockpit.env import get_key, load_environment
-from nqcockpit.time import TZ_ALGIERS, TZ_NEW_YORK
+from nqcockpit.time import TZ_NEW_YORK
 
 logger = logging.getLogger("nqcockpit.sources.health")
 
@@ -56,7 +58,6 @@ class SourceCheckResult:
     category: str
     status: str  # "OK", "DÉGRADÉ", "BLOQUÉ"
     latency_ms: float
-    measured_at_algiers: str
     measured_at_ny: str
     data_timestamp: str | None = None
     data_age_minutes: float | None = None
@@ -73,7 +74,6 @@ class SourceCheckResult:
 class SourceHealthReport:
     """Consolidated source health report."""
 
-    generated_at_algiers: str
     generated_at_ny: str
     generated_at_utc: str
     summary: dict[str, int]
@@ -81,7 +81,6 @@ class SourceHealthReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "generated_at_algiers": self.generated_at_algiers,
             "generated_at_ny": self.generated_at_ny,
             "generated_at_utc": self.generated_at_utc,
             "summary": self.summary,
@@ -96,15 +95,15 @@ class SourceHealthReport:
         return p
 
     def render_console_table(self) -> str:
-        """Renders an aligned ASCII table suitable for console output."""
+        """Renders an aligned ASCII table suitable for console output in America/New_York."""
         lines = []
         border = (
             "+--------------------+---------+---------+"
-            "-------------------+-------------------+--------------------------------+"
+            "-------------------+--------------------+--------------------------------+"
         )
         header = (
             "| Source             | Statut  | Latence |"
-            " Mesure (DZ / NY)   | Donnée & Âge (min)| Plan B / Message               |"
+            " Mesure (NY)        | Donnée & Âge (min) | Plan B / Message               |"
         )
         lines.append(border)
         lines.append(header)
@@ -115,23 +114,22 @@ class SourceHealthReport:
             status = r.status.ljust(7)
             latency = f"{r.latency_ms:.0f} ms".rjust(7)
 
-            # Measurement time concise
-            dz_p = r.measured_at_algiers.split(" ")
-            dz_short = dz_p[1][:5] if len(dz_p) > 1 else ""
+            # Measurement time concise in NY
             ny_p = r.measured_at_ny.split(" ")
-            ny_short = ny_p[1][:5] if len(ny_p) > 1 else ""
-            measure_str = f"{dz_short} DZ / {ny_short} NY".center(17)
+            ny_short = f"{ny_p[1][:5]} {ny_p[2]}" if len(ny_p) > 2 else r.measured_at_ny[:8]
+            measure_str = ny_short.center(17)
 
             # Data timestamp & age
             if r.data_age_minutes is not None:
-                data_col = f"{r.data_age_minutes:.0f}m ({r.data_timestamp[:10]})"
+                ts_part = r.data_timestamp[:10] if r.data_timestamp else ""
+                data_col = f"{r.data_age_minutes:.0f}m ({ts_part})"
             elif r.data_timestamp:
                 data_col = r.data_timestamp[:17]
             else:
                 data_col = "N/A"
-            if len(data_col) > 17:
-                data_col = data_col[:14] + "..."
-            data_col = data_col.ljust(17)
+            if len(data_col) > 18:
+                data_col = data_col[:15] + "..."
+            data_col = data_col.ljust(18)
 
             # Message / Plan B
             info = r.message if r.message else (r.fallback_plan[:28] if r.fallback_plan else "OK")
@@ -199,13 +197,186 @@ def is_cme_futures_market_open(dt_ny: datetime | None = None) -> tuple[bool, str
     return True, "Session futures ouverte"
 
 
+def get_last_us_equity_close(dt_ny: datetime) -> datetime:
+    """Returns expected close (16:00 ET) for the latest US equity trading session."""
+    if dt_ny.tzinfo is None:
+        dt_ny = dt_ny.replace(tzinfo=TZ_NEW_YORK)
+    else:
+        dt_ny = dt_ny.astimezone(TZ_NEW_YORK)
+
+    weekday = dt_ny.weekday()
+    cur_time = dt_ny.time()
+
+    if weekday in (0, 1, 2, 3, 4) and cur_time >= dt_time(16, 0):
+        return datetime(dt_ny.year, dt_ny.month, dt_ny.day, 16, 0, tzinfo=TZ_NEW_YORK)
+
+    if weekday == 0:  # Monday before 16:00 -> Friday close
+        target_date = dt_ny.date() - timedelta(days=3)
+    elif weekday == 5:  # Saturday -> Friday close
+        target_date = dt_ny.date() - timedelta(days=1)
+    elif weekday == 6:  # Sunday -> Friday close
+        target_date = dt_ny.date() - timedelta(days=2)
+    else:  # Tue-Fri before 16:00 -> yesterday close
+        target_date = dt_ny.date() - timedelta(days=1)
+
+    return datetime(target_date.year, target_date.month, target_date.day, 16, 0, tzinfo=TZ_NEW_YORK)
+
+
+def get_last_cme_futures_close(dt_ny: datetime) -> datetime:
+    """Returns the expected close datetime (17:00 ET) for CME futures."""
+    if dt_ny.tzinfo is None:
+        dt_ny = dt_ny.replace(tzinfo=TZ_NEW_YORK)
+    else:
+        dt_ny = dt_ny.astimezone(TZ_NEW_YORK)
+
+    weekday = dt_ny.weekday()
+    cur_time = dt_ny.time()
+
+    if weekday in (0, 1, 2, 3, 4) and cur_time >= dt_time(17, 0):
+        return datetime(dt_ny.year, dt_ny.month, dt_ny.day, 17, 0, tzinfo=TZ_NEW_YORK)
+
+    if weekday == 5:  # Saturday -> Friday 17:00
+        fri = dt_ny.date() - timedelta(days=1)
+        return datetime(fri.year, fri.month, fri.day, 17, 0, tzinfo=TZ_NEW_YORK)
+    if weekday == 6:  # Sunday -> Friday 17:00
+        fri = dt_ny.date() - timedelta(days=2)
+        return datetime(fri.year, fri.month, fri.day, 17, 0, tzinfo=TZ_NEW_YORK)
+
+    if weekday == 0:  # Monday before 17:00 -> Friday 17:00
+        fri = dt_ny.date() - timedelta(days=3)
+        return datetime(fri.year, fri.month, fri.day, 17, 0, tzinfo=TZ_NEW_YORK)
+
+    prev = dt_ny.date() - timedelta(days=1)
+    return datetime(prev.year, prev.month, prev.day, 17, 0, tzinfo=TZ_NEW_YORK)
+
+
+def evaluate_symbol_session(
+    symbol_or_name: str,
+    quote_dt: datetime | None,
+    now_ny: datetime | None = None,
+    session_group: str | None = None,
+    stale_threshold_minutes: int = DEFAULT_STALE_THRESHOLD_MINUTES,
+    is_midnight: bool = False,
+) -> tuple[str, str, float | None, str | None]:
+    """Evaluates quote freshness according to session rules in America/New_York.
+
+    Returns: (status, message, data_age_minutes, data_timestamp_ny_str)
+    """
+    if is_midnight:
+        return (
+            "DÉGRADÉ",
+            "Horodatage minuit (00:00:00) rejeté — cotation intraday indisponible",
+            None,
+            None,
+        )
+
+    if quote_dt is None:
+        return "DÉGRADÉ", "Âge INCONNU", None, None
+
+    if now_ny is None:
+        now_ny = datetime.now(TZ_NEW_YORK)
+    elif now_ny.tzinfo is None:
+        now_ny = now_ny.replace(tzinfo=TZ_NEW_YORK)
+    else:
+        now_ny = now_ny.astimezone(TZ_NEW_YORK)
+
+    if quote_dt.tzinfo is None:
+        quote_dt = quote_dt.replace(tzinfo=timezone.utc)
+
+    quote_in_ny = quote_dt.astimezone(TZ_NEW_YORK)
+    if quote_in_ny.hour == 0 and quote_in_ny.minute == 0 and quote_in_ny.second == 0:
+        return (
+            "DÉGRADÉ",
+            "Horodatage minuit (00:00:00) rejeté — cotation intraday indisponible",
+            None,
+            None,
+        )
+
+    now_utc = now_ny.astimezone(timezone.utc)
+    quote_utc = quote_dt.astimezone(timezone.utc)
+    age_seconds = max(0.0, (now_utc - quote_utc).total_seconds())
+    age_minutes = round(age_seconds / 60.0, 1)
+
+    quote_ny_str = quote_in_ny.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    if session_group is None:
+        clean = symbol_or_name.strip()
+        if clean in ("NQ=F", "cme_futures", "CME Futures", "yfinance NQ=F"):
+            session_group = "cme_futures"
+        elif clean in (
+            "^NDX",
+            "^VIX",
+            "^VXN",
+            "CBOE NDX Options",
+            "us_equities",
+            "US Equities",
+            "yfinance ^NDX",
+            "yfinance ^VIX",
+            "yfinance ^VXN",
+        ):
+            session_group = "us_equities"
+
+    if session_group is None:
+        # Undefined session -> display age without judging
+        return "OK", f"âge non jugé ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+
+    if session_group == "us_equities":
+        is_open, _ = is_us_equity_market_open(now_ny)
+        if is_open:
+            if age_minutes <= stale_threshold_minutes:
+                return "OK", f"Donnée fraîche ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+            return (
+                "DÉGRADÉ",
+                f"donnée périmée ({age_minutes:.0f} min > seuil {stale_threshold_minutes} min)",
+                age_minutes,
+                quote_ny_str,
+            )
+        else:
+            expected_close = get_last_us_equity_close(now_ny)
+            if quote_in_ny >= expected_close - timedelta(minutes=5):
+                return "OK", f"clôture ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+            exp_str = expected_close.strftime("%Y-%m-%d 16:00 ET")
+            return (
+                "DÉGRADÉ",
+                f"donnée périmée (antérieure à la dernière clôture du {exp_str})",
+                age_minutes,
+                quote_ny_str,
+            )
+
+    if session_group == "cme_futures":
+        is_open, _ = is_cme_futures_market_open(now_ny)
+        if is_open:
+            if age_minutes <= stale_threshold_minutes:
+                return "OK", f"Donnée fraîche ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+            return (
+                "DÉGRADÉ",
+                f"donnée périmée ({age_minutes:.0f} min > seuil {stale_threshold_minutes} min)",
+                age_minutes,
+                quote_ny_str,
+            )
+        else:
+            expected_close = get_last_cme_futures_close(now_ny)
+            if quote_in_ny >= expected_close - timedelta(minutes=5):
+                return "OK", f"clôture ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+            exp_str = expected_close.strftime("%Y-%m-%d %H:%M ET")
+            return (
+                "DÉGRADÉ",
+                f"donnée périmée (antérieure à la dernière clôture du {exp_str})",
+                age_minutes,
+                quote_ny_str,
+            )
+
+
+    return "OK", f"âge non jugé ({age_minutes:.0f} min)", age_minutes, quote_ny_str
+
+
 def evaluate_data_staleness(
     data_age_minutes: float | None,
     market_is_open: bool,
     market_state_desc: str,
     stale_threshold_minutes: int = DEFAULT_STALE_THRESHOLD_MINUTES,
 ) -> tuple[str, str]:
-    """Evaluates whether data is fresh, stale (DÉGRADÉ), or normal due to market closed."""
+    """Legacy helper evaluating data freshness."""
     if data_age_minutes is None:
         return "OK", ""
     if data_age_minutes <= stale_threshold_minutes:
@@ -235,13 +406,9 @@ def get_bls_contact_email(config_email: str | None = None) -> str:
     return "contact@nqcockpit.local"
 
 
-def get_now_timestamps() -> tuple[str, str]:
-    """Returns formatted current timestamps in Africa/Algiers and America/New_York."""
-    now_ny = datetime.now(TZ_NEW_YORK)
-    now_dz = now_ny.astimezone(TZ_ALGIERS)
-    ts_dz = now_dz.strftime("%Y-%m-%d %H:%M:%S %Z")
-    ts_ny = now_ny.strftime("%Y-%m-%d %H:%M:%S %Z")
-    return ts_dz, ts_ny
+def get_now_ny_timestamp() -> str:
+    """Returns formatted current timestamp in America/New_York."""
+    return datetime.now(TZ_NEW_YORK).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def request_with_retry(
@@ -299,7 +466,7 @@ def check_cboe_ndx(
     url = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
     name = "CBOE NDX Options"
     category = "Options"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "En cas de blocage ou indisponibilité CBOE : saisie manuelle des niveaux gamma clés "
         "dans l'UI, ou scraping différé alternatif Yahoo Finance options NDX."
@@ -312,7 +479,6 @@ def check_cboe_ndx(
             category=category,
             status="BLOQUÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint=url,
             message=f"Échec réseau: {err}",
@@ -327,7 +493,6 @@ def check_cboe_ndx(
             category=category,
             status=status,
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=status_code,
             endpoint=url,
@@ -342,37 +507,53 @@ def check_cboe_ndx(
         current_price = data_block.get("current_price")
         options = data_block.get("options", [])
 
-        data_age_min: float | None = None
-        if timestamp_str:
-            try:
-                dt_data = datetime.fromisoformat(timestamp_str).replace(tzinfo=timezone.utc)
-                age_sec = (datetime.now(timezone.utc) - dt_data).total_seconds()
-                data_age_min = max(0.0, age_sec / 60.0)
-            except Exception:
-                pass
+        if not timestamp_str or not str(timestamp_str).strip():
+            return SourceCheckResult(
+                name=name,
+                category=category,
+                status="DÉGRADÉ",
+                latency_ms=latency,
+                measured_at_ny=ts_ny,
+                http_status=200,
+                endpoint=url,
+                message="Âge INCONNU (champ timestamp absent du JSON CBOE)",
+                fallback_plan=fallback,
+            )
 
-        is_open, state_desc = is_us_equity_market_open()
-        staleness_status, staleness_msg = evaluate_data_staleness(
-            data_age_minutes=data_age_min,
-            market_is_open=is_open,
-            market_state_desc=state_desc,
+        try:
+            dt_data = datetime.fromisoformat(str(timestamp_str))
+            if dt_data.tzinfo is None:
+                dt_data = dt_data.replace(tzinfo=timezone.utc)
+        except Exception:
+            return SourceCheckResult(
+                name=name,
+                category=category,
+                status="DÉGRADÉ",
+                latency_ms=latency,
+                measured_at_ny=ts_ny,
+                http_status=200,
+                endpoint=url,
+                message="Âge INCONNU (format timestamp invalide)",
+                fallback_plan=fallback,
+            )
+
+        status, session_msg, data_age_min, data_ts_ny = evaluate_symbol_session(
+            symbol_or_name=name,
+            quote_dt=dt_data,
+            session_group="us_equities",
             stale_threshold_minutes=stale_threshold_minutes,
         )
 
-        final_status = "OK" if staleness_status == "OK" else "DÉGRADÉ"
-        msg = f"OK (Spot NDX={current_price}, {len(options)} options)"
-        if staleness_status == "DÉGRADÉ":
-            msg = staleness_msg
+        msg = f"Spot NDX={current_price}, {len(options)} options | {session_msg}"
 
         return SourceCheckResult(
             name=name,
             category=category,
-            status=final_status,
+            status=status,
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
-            data_timestamp=timestamp_str,
-            data_age_minutes=round(data_age_min, 1) if data_age_min is not None else None,
+            data_timestamp=data_ts_ny,
+            data_age_minutes=data_age_min,
             http_status=200,
             endpoint=url,
             message=msg,
@@ -384,7 +565,6 @@ def check_cboe_ndx(
             category=category,
             status="DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=200,
             endpoint=url,
@@ -406,7 +586,7 @@ def check_yfinance_symbols(
     import yfinance as yf
 
     results = []
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "En cas d'échec yfinance : utilisation des dernières barres archivées en Parquet (data/) "
         "+ affichage du bandeau DÉGRADÉ, ou scraping des cotations MarketWatch / Investing."
@@ -417,28 +597,80 @@ def check_yfinance_symbols(
         start_time = time.perf_counter()
         success = False
         last_error = None
-        last_close = None
-        data_ts = None
-        data_age_min = None
+        last_close: float | None = None
+        quote_dt: datetime | None = None
+        is_midnight = False
 
         for attempt in range(1, max_retries + 1):
             try:
                 t = yf.Ticker(symbol)
-                hist = t.history(period="1d", timeout=timeout)
+                # First try 1d intraday 1m
+                hist = t.history(period="1d", interval="1m", timeout=timeout)
+                if hist.empty:
+                    # Over weekend or outside sessions, try 5d 5m for recent real bar
+                    hist = t.history(period="5d", interval="5m", timeout=timeout)
+
                 if not hist.empty:
                     last_close = float(hist["Close"].iloc[-1])
                     idx_val = hist.index[-1]
-                    data_ts = str(idx_val)
-                    if hasattr(idx_val, "timestamp"):
-                        sec_age = max(
-                            0.0,
-                            datetime.now(timezone.utc).timestamp() - idx_val.timestamp(),
-                        )
-                        data_age_min = sec_age / 60.0
+                    if hasattr(idx_val, "to_pydatetime"):
+                        quote_dt = idx_val.to_pydatetime()
+                    elif isinstance(idx_val, datetime):
+                        quote_dt = idx_val
+
+                # Check metadata regularMarketTime
+                try:
+                    meta_rmt = t.history_metadata.get("regularMarketTime")
+                    if meta_rmt is not None:
+                        if isinstance(meta_rmt, (int, float)):
+                            dt_rmt = datetime.fromtimestamp(meta_rmt, tz=timezone.utc)
+                        elif isinstance(meta_rmt, datetime):
+                            dt_rmt = (
+                                meta_rmt
+                                if meta_rmt.tzinfo
+                                else meta_rmt.replace(tzinfo=TZ_NEW_YORK)
+                            )
+                        else:
+                            dt_rmt = None
+                        if dt_rmt is not None and (quote_dt is None or dt_rmt > quote_dt):
+                            quote_dt = dt_rmt
+                except Exception:
+                    pass
+
+                # If still no quote_dt, check daily bar but reject midnight (00:00:00)
+                if quote_dt is None:
+                    daily_hist = t.history(period="1d", timeout=timeout)
+                    if not daily_hist.empty:
+                        last_close = float(daily_hist["Close"].iloc[-1])
+                        idx_val = daily_hist.index[-1]
+                        if hasattr(idx_val, "to_pydatetime"):
+                            dt_cand = idx_val.to_pydatetime()
+                        elif isinstance(idx_val, datetime):
+                            dt_cand = idx_val
+                        else:
+                            dt_cand = None
+
+                        if dt_cand is not None:
+                            ny_cand = (
+                                dt_cand.astimezone(TZ_NEW_YORK)
+                                if dt_cand.tzinfo
+                                else dt_cand.replace(tzinfo=TZ_NEW_YORK)
+                            )
+                            if (
+                                ny_cand.hour == 0
+                                and ny_cand.minute == 0
+                                and ny_cand.second == 0
+                            ):
+                                is_midnight = True
+                                quote_dt = None
+                            else:
+                                quote_dt = dt_cand
+
+                if quote_dt is not None or is_midnight or last_close is not None:
                     success = True
                     break
                 else:
-                    last_error = "Historique 1j vide (marché fermé ou symbole inconnu)"
+                    last_error = "Historique vide (marché fermé ou symbole inconnu)"
             except Exception as exc:
                 last_error = str(exc)
                 if attempt < max_retries:
@@ -447,32 +679,32 @@ def check_yfinance_symbols(
         latency = (time.perf_counter() - start_time) * 1000.0
 
         if success:
-            is_futures = symbol == "NQ=F"
-            is_open, state_desc = (
-                is_cme_futures_market_open() if is_futures else is_us_equity_market_open()
-            )
-            staleness_status, staleness_msg = evaluate_data_staleness(
-                data_age_minutes=data_age_min,
-                market_is_open=is_open,
-                market_state_desc=state_desc,
+            group = None
+            if symbol == "NQ=F":
+                group = "cme_futures"
+            elif symbol in ("^NDX", "^VIX", "^VXN"):
+                group = "us_equities"
+
+            status, session_msg, data_age_min, data_ts_ny = evaluate_symbol_session(
+                symbol_or_name=symbol,
+                quote_dt=quote_dt,
+                session_group=group,
                 stale_threshold_minutes=stale_threshold_minutes,
+                is_midnight=is_midnight,
             )
 
-            final_status = "OK" if staleness_status == "OK" else "DÉGRADÉ"
-            msg = f"Dernier cours={last_close:.2f}" if last_close is not None else "OK"
-            if staleness_status == "DÉGRADÉ":
-                msg = f"{msg} | {staleness_msg}"
+            close_str = f"Dernier cours={last_close:.2f}" if last_close is not None else ""
+            msg = f"{close_str} | {session_msg}" if close_str else session_msg
 
             results.append(
                 SourceCheckResult(
                     name=name,
                     category="Prix/Vol",
-                    status=final_status,
+                    status=status,
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
-                    data_timestamp=data_ts,
-                    data_age_minutes=round(data_age_min, 1) if data_age_min is not None else None,
+                    data_timestamp=data_ts_ny,
+                    data_age_minutes=data_age_min,
                     message=msg,
                     fallback_plan=fallback,
                 )
@@ -485,7 +717,6 @@ def check_yfinance_symbols(
                     category="Prix/Vol",
                     status=status,
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     message=f"Erreur yfinance: {last_error}",
                     fallback_plan=fallback,
@@ -508,10 +739,9 @@ def check_fred(
     - DGS2 = INDISPONIBLE (no approximation, zero invented numbers)
     - DGS10 replaceable by ^TNX marked 'substitut yfinance'
     """
-
     key = api_key if api_key is not None else get_key("FRED_API_KEY")
     results = []
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
 
     if not key or not key.strip():
         for s in series:
@@ -537,7 +767,6 @@ def check_fred(
                     category="Macro",
                     status="DÉGRADÉ",
                     latency_ms=0.0,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     endpoint="https://api.stlouisfed.org/fred/series/observations",
                     message=msg,
@@ -565,7 +794,6 @@ def check_fred(
                     category="Macro",
                     status="BLOQUÉ",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     endpoint=masked_endpoint,
                     message=f"Échec connexion FRED: {err}",
@@ -582,7 +810,6 @@ def check_fred(
                     category="Macro",
                     status="BLOQUÉ" if status_code == 400 else "DÉGRADÉ",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     http_status=status_code,
                     endpoint=masked_endpoint,
@@ -613,13 +840,12 @@ def check_fred(
                     category="Macro",
                     status="OK",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     http_status=200,
                     data_timestamp=obs_date,
                     data_age_minutes=round(data_age_min, 1) if data_age_min is not None else None,
                     endpoint=masked_endpoint,
-                    message=f"OK (Obs {obs_date} = {last_obs.get('value')}%)",
+                    message=f"OK (Obs {obs_date} = {last_obs.get('value')}%) | âge non jugé",
                     fallback_plan=fallback,
                 )
             )
@@ -630,7 +856,6 @@ def check_fred(
                     category="Macro",
                     status="DÉGRADÉ",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     http_status=200,
                     endpoint=masked_endpoint,
@@ -647,10 +872,9 @@ def check_cftc_cot(
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> SourceCheckResult:
     """Checks CFTC COT report accessibility via cot_reports."""
-
     name = "CFTC COT (cot_reports)"
     category = "Macro"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "Téléchargement direct du zip hebdomadaire CFTC (https://www.cftc.gov/files/dea/history/) "
         "ou maintien des données du dernier rapport hebdomadaire en cache local."
@@ -698,9 +922,8 @@ def check_cftc_cot(
             category=category,
             status="OK",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
-            message=f"OK ({row_count} lignes COT {current_year})",
+            message=f"OK ({row_count} lignes COT {current_year}) | âge non jugé",
             fallback_plan=fallback,
         )
     return SourceCheckResult(
@@ -708,7 +931,6 @@ def check_cftc_cot(
         category=category,
         status="DÉGRADÉ",
         latency_ms=latency,
-        measured_at_algiers=ts_dz,
         measured_at_ny=ts_ny,
         message=f"Échec cot_reports: {error_msg}",
         fallback_plan=fallback,
@@ -720,7 +942,7 @@ def check_fed_sources(
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[SourceCheckResult]:
     """Checks Federal Reserve official FOMC calendar and RSS feed pages."""
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "En cas d'indisponibilité du site de la Fed : bascule vers le calendrier ForexFactory "
         "hebdomadaire en contrôle croisé, et consultation des comptes-rendus via archives locales."
@@ -754,7 +976,6 @@ def check_fed_sources(
                     category="Events",
                     status="BLOQUÉ",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     endpoint=url,
                     message=f"Erreur de connexion Fed: {err}",
@@ -771,7 +992,6 @@ def check_fed_sources(
                     category="Events",
                     status="BLOQUÉ" if status_code in (403, 404) else "DÉGRADÉ",
                     latency_ms=latency,
-                    measured_at_algiers=ts_dz,
                     measured_at_ny=ts_ny,
                     http_status=status_code,
                     endpoint=url,
@@ -787,7 +1007,6 @@ def check_fed_sources(
                 category="Events",
                 status="OK",
                 latency_ms=latency,
-                measured_at_algiers=ts_dz,
                 measured_at_ny=ts_ny,
                 http_status=200,
                 endpoint=url,
@@ -808,7 +1027,7 @@ def check_bls(
     name = "BLS Schedule"
     category = "Events"
     url = "https://www.bls.gov/schedule/news_release/"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "Le BLS exige un email de contact dans l'en-tête User-Agent (configuré via "
         "BLS_CONTACT_EMAIL dans .env ou sources.bls_contact_email dans config.yaml). "
@@ -833,7 +1052,6 @@ def check_bls(
             category=category,
             status="BLOQUÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint=url,
             message=f"Erreur de connexion BLS: {err}",
@@ -847,7 +1065,6 @@ def check_bls(
             category=category,
             status="BLOQUÉ" if status_code == 403 else "DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=status_code,
             endpoint=url,
@@ -860,7 +1077,6 @@ def check_bls(
         category=category,
         status="OK",
         latency_ms=latency,
-        measured_at_algiers=ts_dz,
         measured_at_ny=ts_ny,
         http_status=200,
         endpoint=url,
@@ -877,7 +1093,7 @@ def check_forexfactory(
     name = "ForexFactory Calendar"
     category = "Events"
     url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "Le flux JSON ForexFactory est non officiel et peut changer de structure. "
         "En repli : exploitation directe des flux officiels Fed, BLS et BEA."
@@ -890,7 +1106,6 @@ def check_forexfactory(
             category=category,
             status="BLOQUÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint=url,
             message=f"Erreur connexion ForexFactory: {err}",
@@ -904,7 +1119,6 @@ def check_forexfactory(
             category=category,
             status="BLOQUÉ" if status_code in (403, 404) else "DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=status_code,
             endpoint=url,
@@ -920,11 +1134,10 @@ def check_forexfactory(
                 category=category,
                 status="OK",
                 latency_ms=latency,
-                measured_at_algiers=ts_dz,
                 measured_at_ny=ts_ny,
                 http_status=200,
                 endpoint=url,
-                message=f"OK ({len(events)} événements cette semaine)",
+                message=f"OK ({len(events)} événements cette semaine) | âge non jugé",
                 fallback_plan=fallback,
             )
         return SourceCheckResult(
@@ -932,7 +1145,6 @@ def check_forexfactory(
             category=category,
             status="DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=200,
             endpoint=url,
@@ -945,7 +1157,6 @@ def check_forexfactory(
             category=category,
             status="DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=200,
             endpoint=url,
@@ -963,7 +1174,7 @@ def check_gemini(
     key = api_key if api_key is not None else get_key("GEMINI_API_KEY")
     name = "Gemini API"
     category = "LLM/Brief"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "Clé gratuite sur https://aistudio.google.com. En cas d'absence de clé ou blocage, "
         "le cockpit utilise la génération déterministe de briefing sans LLM "
@@ -976,7 +1187,6 @@ def check_gemini(
             category=category,
             status="DÉGRADÉ",
             latency_ms=0.0,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint="https://generativelanguage.googleapis.com/v1beta/models",
             message="GEMINI_API_KEY non configurée dans .env (optionnel)",
@@ -993,7 +1203,6 @@ def check_gemini(
             category=category,
             status="BLOQUÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint=masked_endpoint,
             message=f"Connexion Gemini impossible: {err}",
@@ -1007,7 +1216,6 @@ def check_gemini(
             category=category,
             status="BLOQUÉ" if status_code in (400, 403) else "DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=status_code,
             endpoint=masked_endpoint,
@@ -1020,7 +1228,6 @@ def check_gemini(
         category=category,
         status="OK",
         latency_ms=latency,
-        measured_at_algiers=ts_dz,
         measured_at_ny=ts_ny,
         http_status=200,
         endpoint=masked_endpoint,
@@ -1038,7 +1245,7 @@ def check_telegram(
     token = bot_token if bot_token is not None else get_key("TELEGRAM_BOT_TOKEN")
     name = "Telegram Bot API"
     category = "Alerts"
-    ts_dz, ts_ny = get_now_timestamps()
+    ts_ny = get_now_ny_timestamp()
     fallback = (
         "Créer un bot gratuit via @BotFather sur Telegram. En repli si Telegram est indisponible : "
         "notifications système de bureau locales (bannières OS) ou e-mail SMTP."
@@ -1050,7 +1257,6 @@ def check_telegram(
             category=category,
             status="DÉGRADÉ",
             latency_ms=0.0,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint="https://api.telegram.org/bot[TOKEN]/getMe",
             message="TELEGRAM_BOT_TOKEN non configuré dans .env (optionnel)",
@@ -1067,7 +1273,6 @@ def check_telegram(
             category=category,
             status="BLOQUÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             endpoint=masked_endpoint,
             message=f"Connexion Telegram impossible: {err}",
@@ -1081,7 +1286,6 @@ def check_telegram(
             category=category,
             status="BLOQUÉ" if status_code in (401, 404) else "DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=status_code,
             endpoint=masked_endpoint,
@@ -1097,7 +1301,6 @@ def check_telegram(
             category=category,
             status="OK",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=200,
             endpoint=masked_endpoint,
@@ -1110,7 +1313,6 @@ def check_telegram(
             category=category,
             status="DÉGRADÉ",
             latency_ms=latency,
-            measured_at_algiers=ts_dz,
             measured_at_ny=ts_ny,
             http_status=200,
             endpoint=masked_endpoint,
@@ -1124,7 +1326,7 @@ def run_all_checks(
     max_retries: int = DEFAULT_MAX_RETRIES,
     load_env: bool = True,
 ) -> SourceHealthReport:
-    """Runs health checks for all data sources and compiles the report."""
+    """Runs health checks for all data sources and compiles the report in America/New_York."""
     if load_env:
         load_environment()
 
@@ -1190,11 +1392,9 @@ def run_all_checks(
         summary[r.status] = summary.get(r.status, 0) + 1
 
     now_utc = datetime.now(timezone.utc)
-    now_algiers_dt = now_utc.astimezone(TZ_ALGIERS)
     now_ny_dt = now_utc.astimezone(TZ_NEW_YORK)
 
     return SourceHealthReport(
-        generated_at_algiers=now_algiers_dt.isoformat(),
         generated_at_ny=now_ny_dt.isoformat(),
         generated_at_utc=now_utc.isoformat(),
         summary=summary,

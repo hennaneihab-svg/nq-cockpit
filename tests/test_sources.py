@@ -16,6 +16,7 @@ from nqcockpit.sources.health import (
     check_gemini,
     check_telegram,
     evaluate_data_staleness,
+    evaluate_symbol_session,
     get_bls_contact_email,
     is_cme_futures_market_open,
     is_us_equity_market_open,
@@ -62,7 +63,6 @@ def test_cboe_check_simulated_failure():
         assert "Connection refused" in res.message
         assert res.fallback_plan != ""
         assert "saisie manuelle" in res.fallback_plan.lower()
-        assert res.measured_at_algiers != ""
         assert res.measured_at_ny != ""
 
 
@@ -85,9 +85,8 @@ def test_cboe_check_simulated_success():
         assert res.status == "OK"
         assert res.http_status == 200
         assert "28120.5" in res.message
-        assert res.data_timestamp == "2026-09-28 23:38:47"
+        assert res.data_timestamp is not None
         assert res.data_age_minutes is not None
-        assert res.measured_at_algiers != ""
         assert res.measured_at_ny != ""
 
 
@@ -101,7 +100,6 @@ def test_fred_missing_key_dgs2_indisponible_dgs10_substitut():
     assert dgs2.status == "DÉGRADÉ"
     assert "DGS2 = INDISPONIBLE" in dgs2.message
     assert "aucune approximation" in dgs2.fallback_plan.lower()
-    assert dgs2.measured_at_algiers != ""
     assert dgs2.measured_at_ny != ""
 
     # DGS10
@@ -109,7 +107,6 @@ def test_fred_missing_key_dgs2_indisponible_dgs10_substitut():
     assert dgs10.status == "DÉGRADÉ"
     assert "substitut yfinance" in dgs10.message.lower()
     assert "^TNX" in dgs10.fallback_plan
-    assert dgs10.measured_at_algiers != ""
     assert dgs10.measured_at_ny != ""
 
 
@@ -231,16 +228,15 @@ def test_forexfactory_simulated_success():
 
 
 def test_source_health_report_generation(tmp_path):
-    """Verify SourceHealthReport compiles, renders table, and serializes to JSON."""
+    """Verify SourceHealthReport compiles, renders table in NY only, and serializes to JSON."""
     results = [
         SourceCheckResult(
             name="CBOE NDX",
             category="Options",
             status="OK",
             latency_ms=120.5,
-            measured_at_algiers="2026-09-29 00:30:00 +01",
             measured_at_ny="2026-09-28 19:30:00 EDT",
-            data_timestamp="2026-09-28 16:00:00",
+            data_timestamp="2026-09-28 16:00:00 EDT",
             data_age_minutes=210.0,
             message="OK",
             fallback_plan="Plan B CBOE",
@@ -250,14 +246,12 @@ def test_source_health_report_generation(tmp_path):
             category="Macro",
             status="DÉGRADÉ",
             latency_ms=0.0,
-            measured_at_algiers="2026-09-29 00:30:00 +01",
             measured_at_ny="2026-09-28 19:30:00 EDT",
             message="DGS10 remplaçable par ^TNX (substitut yfinance)",
             fallback_plan="Plan B FRED",
         ),
     ]
     report = SourceHealthReport(
-        generated_at_algiers="2026-09-29T00:30:00+01:00",
         generated_at_ny="2026-09-28T19:30:00-04:00",
         generated_at_utc="2026-09-28T23:30:00Z",
         summary={"OK": 1, "DÉGRADÉ": 1, "BLOQUÉ": 0},
@@ -268,7 +262,125 @@ def test_source_health_report_generation(tmp_path):
     assert "CBOE NDX" in table
     assert "FRED DGS10" in table
     assert "1 OK" in table
+    assert "DZ" not in table  # Algiers column strictly removed
 
     out_file = tmp_path / "source_check.json"
     report.save_json(out_file)
     assert out_file.is_file()
+    saved_data = report.to_dict()
+    assert "generated_at_algiers" not in saved_data
+    assert "generated_at_ny" in saved_data
+
+
+# --- Unit Tests a, b, c, d, e (P01-fix2) ---
+
+
+def test_quote_during_open_market_fresh_is_ok():
+    """a. Cote pendant la séance ouverte avec âge < seuil -> OK."""
+    tz_ny = ZoneInfo("America/New_York")
+    # Tuesday 11:00 AM ET (open regular equity session)
+    now_ny = datetime(2026, 9, 29, 11, 0, 0, tzinfo=tz_ny)
+    # Quote from 10:45 AM ET (15 min old, well under default 60 min threshold)
+    quote_dt = datetime(2026, 9, 29, 10, 45, 0, tzinfo=tz_ny)
+
+    status, msg, age_min, ts_str = evaluate_symbol_session(
+        symbol_or_name="^NDX",
+        quote_dt=quote_dt,
+        now_ny=now_ny,
+        session_group="us_equities",
+        stale_threshold_minutes=60,
+    )
+
+    assert status == "OK"
+    assert age_min == 15.0
+    assert "fraîche" in msg.lower()
+    assert ts_str is not None
+
+
+def test_quote_during_open_market_stale_is_degraded():
+    """b. Cote pendant la séance ouverte avec âge > seuil -> DÉGRADÉ 'donnée périmée'."""
+    tz_ny = ZoneInfo("America/New_York")
+    # Tuesday 11:00 AM ET (open regular equity session)
+    now_ny = datetime(2026, 9, 29, 11, 0, 0, tzinfo=tz_ny)
+    # Quote from 09:35 AM ET (85 min old, exceeds 60 min threshold)
+    quote_dt = datetime(2026, 9, 29, 9, 35, 0, tzinfo=tz_ny)
+
+    status, msg, age_min, ts_str = evaluate_symbol_session(
+        symbol_or_name="^NDX",
+        quote_dt=quote_dt,
+        now_ny=now_ny,
+        session_group="us_equities",
+        stale_threshold_minutes=60,
+    )
+
+    assert status == "DÉGRADÉ"
+    assert age_min == 85.0
+    assert "donnée périmée" in msg.lower()
+    assert ts_str is not None
+
+
+def test_quote_on_sunday_after_friday_close_is_ok_cloture():
+    """c. Cote un dimanche après la clôture de vendredi -> OK 'clôture'."""
+    tz_ny = ZoneInfo("America/New_York")
+    # Sunday at 14:00 ET (weekend, equity market closed)
+    now_ny = datetime(2026, 10, 4, 14, 0, 0, tzinfo=tz_ny)
+    # Quote corresponding to Friday close: 16:00 ET on Friday Oct 2, 2026
+    quote_dt = datetime(2026, 10, 2, 16, 0, 0, tzinfo=tz_ny)
+
+    status, msg, age_min, ts_str = evaluate_symbol_session(
+        symbol_or_name="^NDX",
+        quote_dt=quote_dt,
+        now_ny=now_ny,
+        session_group="us_equities",
+        stale_threshold_minutes=60,
+    )
+
+    assert status == "OK"
+    assert "clôture" in msg.lower()
+    assert age_min is not None
+    assert ts_str is not None
+
+
+def test_quote_with_midnight_timestamp_rejected_no_artificial_age():
+    """d. Cote avec timestamp à minuit (00:00:00) rejetée ou traitée -> message explicite,
+    pas d'âge artificiel de 1200+ min.
+    """
+    tz_ny = ZoneInfo("America/New_York")
+    now_ny = datetime(2026, 9, 29, 11, 0, 0, tzinfo=tz_ny)
+    # Quote timestamp at midnight (00:00:00) as produced by daily 1d bars
+    midnight_quote = datetime(2026, 9, 29, 0, 0, 0, tzinfo=tz_ny)
+
+    status, msg, age_min, ts_str = evaluate_symbol_session(
+        symbol_or_name="^NDX",
+        quote_dt=midnight_quote,
+        now_ny=now_ny,
+        session_group="us_equities",
+        stale_threshold_minutes=60,
+    )
+
+    assert status == "DÉGRADÉ"
+    assert "minuit" in msg.lower() or "00:00:00" in msg
+    assert age_min is None  # Never an artificial 1200+ min duration
+    assert ts_str is None
+
+
+def test_cboe_missing_timestamp_field_degraded_age_inconnu():
+    """e. Réponse CBOE sans champ timestamp -> DÉGRADÉ avec message 'Âge INCONNU'."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    # Payload WITHOUT 'timestamp' field
+    mock_resp.json.return_value = {
+        "data": {
+            "current_price": 28120.5,
+            "options": [{"strike": 28000, "option_type": "C"}],
+        }
+    }
+
+    with patch("nqcockpit.sources.health.request_with_retry") as mock_req:
+        mock_req.return_value = (mock_resp, 110.0, None)
+        res = check_cboe_ndx()
+
+        assert res.status == "DÉGRADÉ"
+        assert "Âge INCONNU" in res.message
+        assert res.data_age_minutes is None
+        assert res.data_timestamp is None

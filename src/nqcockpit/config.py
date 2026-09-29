@@ -73,6 +73,33 @@ class SourcesConfig:
 
 
 @dataclass(frozen=True)
+class USEquitiesSessionConfig:
+    timezone: str = "America/New_York"
+    open: str = "09:30"
+    close: str = "16:00"
+    trading_days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
+    symbols: list[str] = field(
+        default_factory=lambda: ["^NDX", "^VIX", "^VXN", "CBOE NDX Options"]
+    )
+
+
+@dataclass(frozen=True)
+class CMEFuturesSessionConfig:
+    timezone: str = "America/New_York"
+    open_sunday: str = "18:00"
+    close_friday: str = "17:00"
+    daily_halt_start: str = "17:00"
+    daily_halt_end: str = "18:00"
+    symbols: list[str] = field(default_factory=lambda: ["NQ=F"])
+
+
+@dataclass(frozen=True)
+class MarketSessionsConfig:
+    us_equities: USEquitiesSessionConfig = field(default_factory=USEquitiesSessionConfig)
+    cme_futures: CMEFuturesSessionConfig = field(default_factory=CMEFuturesSessionConfig)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -83,6 +110,8 @@ class AppConfig:
     levels: LevelsConfig
     validation: ValidationConfig
     sources: SourcesConfig = field(default_factory=SourcesConfig)
+    market_sessions: MarketSessionsConfig = field(default_factory=MarketSessionsConfig)
+
 
 
 TIME_REGEX = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -288,6 +317,59 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         stale_data_threshold_minutes=stale_thresh,
     )
 
+    # 10. Market Sessions
+    raw_sessions = data.get("market_sessions", {})
+    if not isinstance(raw_sessions, dict):
+        raise ConfigError("Invalid 'market_sessions' section in config.")
+
+    us_eq_raw = raw_sessions.get("us_equities", {})
+    if not isinstance(us_eq_raw, dict):
+        raise ConfigError("Invalid 'market_sessions.us_equities' section in config.")
+    us_tz = str(us_eq_raw.get("timezone", "America/New_York"))
+    _validate_timezone(us_tz, "market_sessions.us_equities.timezone")
+    us_open = str(us_eq_raw.get("open", "09:30"))
+    _validate_time_str(us_open, "market_sessions.us_equities.open")
+    us_close = str(us_eq_raw.get("close", "16:00"))
+    _validate_time_str(us_close, "market_sessions.us_equities.close")
+    us_days = list(us_eq_raw.get("trading_days", [0, 1, 2, 3, 4]))
+    us_symbols = [
+        str(s) for s in us_eq_raw.get("symbols", ["^NDX", "^VIX", "^VXN", "CBOE NDX Options"])
+    ]
+    us_eq_cfg = USEquitiesSessionConfig(
+        timezone=us_tz,
+        open=us_open,
+        close=us_close,
+        trading_days=us_days,
+        symbols=us_symbols,
+    )
+
+    cme_raw = raw_sessions.get("cme_futures", {})
+    if not isinstance(cme_raw, dict):
+        raise ConfigError("Invalid 'market_sessions.cme_futures' section in config.")
+    cme_tz = str(cme_raw.get("timezone", "America/New_York"))
+    _validate_timezone(cme_tz, "market_sessions.cme_futures.timezone")
+    cme_open_sun = str(cme_raw.get("open_sunday", "18:00"))
+    _validate_time_str(cme_open_sun, "market_sessions.cme_futures.open_sunday")
+    cme_close_fri = str(cme_raw.get("close_friday", "17:00"))
+    _validate_time_str(cme_close_fri, "market_sessions.cme_futures.close_friday")
+    cme_halt_start = str(cme_raw.get("daily_halt_start", "17:00"))
+    _validate_time_str(cme_halt_start, "market_sessions.cme_futures.daily_halt_start")
+    cme_halt_end = str(cme_raw.get("daily_halt_end", "18:00"))
+    _validate_time_str(cme_halt_end, "market_sessions.cme_futures.daily_halt_end")
+    cme_symbols = [str(s) for s in cme_raw.get("symbols", ["NQ=F"])]
+    cme_cfg = CMEFuturesSessionConfig(
+        timezone=cme_tz,
+        open_sunday=cme_open_sun,
+        close_friday=cme_close_fri,
+        daily_halt_start=cme_halt_start,
+        daily_halt_end=cme_halt_end,
+        symbols=cme_symbols,
+    )
+    market_sessions = MarketSessionsConfig(
+        us_equities=us_eq_cfg,
+        cme_futures=cme_cfg,
+    )
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -298,4 +380,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         levels=levels,
         validation=val,
         sources=sources,
+        market_sessions=market_sessions,
     )
+

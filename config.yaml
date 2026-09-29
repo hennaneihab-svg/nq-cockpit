@@ -30,4 +30,19 @@ validation:
 sources:
   bls_contact_email: "contact@nqcockpit.local"
   stale_data_threshold_minutes: 60
+market_sessions:
+  us_equities:
+    timezone: America/New_York
+    open: "09:30"
+    close: "16:00"
+    trading_days: [0, 1, 2, 3, 4]
+    symbols: ["^NDX", "^VIX", "^VXN", "CBOE NDX Options"]
+  cme_futures:
+    timezone: America/New_York
+    open_sunday: "18:00"
+    close_friday: "17:00"
+    daily_halt_start: "17:00"
+    daily_halt_end: "18:00"
+    symbols: ["NQ=F"]
+
 
