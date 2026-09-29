@@ -110,6 +110,53 @@ class BasisSnapshot:
 
 
 @dataclass
+class SearchStepResult:
+    """Résultat d'une étape de recherche pour la paire NQ/NDX."""
+
+    step_name: str  # "memoire" | "sqlite" | "source_distante"
+    nq_found: bool
+    nq_time_utc: datetime | None = None
+    nq_close: float | None = None
+    ndx_found: bool = False
+    ndx_time_utc: datetime | None = None
+    ndx_spot: float | None = None
+    details: str = ""
+
+
+@dataclass
+class PairResult:
+    """Résultat unique et prouvé de la recherche de paire NQ/NDX.
+
+    Lu conjointement par compute_previous_session_basis et build_diagnostic_1c.
+    """
+
+    target_utc: datetime
+    nq_bar: Bar | None = None
+    ndx_bar: Bar | None = None
+    nq_origin: str | None = None  # "memoire" | "sqlite" | "source_distante" | None
+    ndx_origin: str | None = None  # "memoire" | "sqlite" | "source_distante" | None
+    search_steps: list[SearchStepResult] = field(default_factory=list)
+    delta_t_minutes: float | None = None
+    tolerance_minutes: float = 1.0
+    is_aligned: bool = False
+    cause_code: str = "AUTRE"
+    cause_detail: str = ""
+    action_taken: str = ""
+
+    @property
+    def is_found(self) -> bool:
+        return self.nq_bar is not None and self.ndx_bar is not None
+
+    @property
+    def nq_close(self) -> float | None:
+        return self.nq_bar.close if self.nq_bar else None
+
+    @property
+    def ndx_spot(self) -> float | None:
+        return self.ndx_bar.close if self.ndx_bar else None
+
+
+@dataclass
 class RollInfo:
     """Information sur le contrat NQ actif et la détection de roll."""
 

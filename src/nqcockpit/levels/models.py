@@ -34,21 +34,25 @@ class Diagnostic1cInfo:
     nq_candidate_time_et: str | None
     nq_candidate_time_algiers: str | None
     nq_candidate_close: float | None
-    nq_bars_count_day: int
-    nq_first_bar_time: str | None
-    nq_last_bar_time: str | None
+    nq_origin: str | None = None
+    nq_bars_count_day: int = 0
+    nq_first_bar_time: str | None = None
+    nq_last_bar_time: str | None = None
     # NDX candidate
-    ndx_candidate_found: bool
-    ndx_candidate_time_et: str | None
-    ndx_candidate_time_algiers: str | None
-    ndx_candidate_spot: float | None
+    ndx_candidate_found: bool = False
+    ndx_candidate_time_et: str | None = None
+    ndx_candidate_time_algiers: str | None = None
+    ndx_candidate_spot: float | None = None
+    ndx_origin: str | None = None
+    # Search steps
+    search_steps_summary: list[str] = field(default_factory=list)
     # Timing
-    delta_t_minutes: float | None
-    tolerance_minutes: float
+    delta_t_minutes: float | None = None
+    tolerance_minutes: float = 1.0
     # Cause & Action
-    cause_code: str
-    cause_detail: str
-    action_taken: str
+    cause_code: str = "AUTRE"
+    cause_detail: str = ""
+    action_taken: str = ""
 
 
 @dataclass

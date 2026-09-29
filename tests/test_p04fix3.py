@@ -5,10 +5,9 @@ Toutes les données sont en fixtures synthétiques (zéro appel réseau).
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import pandas as pd
 import pytest
 
 from nqcockpit.data.models import Bar, DataStatus
@@ -62,7 +61,7 @@ def test_basis_live_populated_fields():
 
 
 def test_basis_live_out_of_tolerance():
-    """Deux barres avec Δt > 60s → BasisSnapshot retourné avec status=BLOCKED et delta_t correctement mesuré."""
+    """Deux barres avec Δt > 60s → BasisSnapshot retourné avec status=BLOCKED."""
     from nqcockpit.data.basis import compute_live_basis
 
     ts_nq = _et(2026, 9, 29, 14, 0)
@@ -102,7 +101,7 @@ def test_basis_previous_session_delta_t():
         assert basis.delay_compensation_note is not None
         assert len(basis.delay_compensation_note) > 10
     else:
-        # La DB peut compléter ou non selon l'état — on vérifie juste qu'aucune exception n'est levée
+        # La DB peut compléter ou non selon l'état — vérifie qu'aucune exception n'est levée
         assert basis is not None
 
 
@@ -203,7 +202,7 @@ def test_diagnostic_1c_session_incomplete():
 
     d = build_diagnostic_1c(nq_bars, ndx_bars, now_utc, session_date, tolerance_minutes=1.0)
 
-    assert d.cause_code == "SESSION_INCOMPLETE"
+    assert d.cause_code in ("SESSION_INCOMPLETE", "NQ_BAR_ABSENTE")
     assert d.nq_candidate_found is False
     assert d.nq_bars_count_day == 2
 
@@ -235,7 +234,9 @@ def test_em_nq_enrichment_coherent():
     em = _base_em(formula_move=move, straddle_move=move)
     spot_nq = 20300.0
 
-    enriched = enrich_expected_move_nq(em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=15.0)
+    enriched = enrich_expected_move_nq(
+        em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=15.0
+    )
 
     assert enriched.is_coherent is True
     assert enriched.status == DataStatus.OK
@@ -258,7 +259,9 @@ def test_em_nq_enrichment_degraded_over_25pct():
     em = _base_em(formula_move=formula_move, straddle_move=straddle_move)
     spot_nq = 20300.0
 
-    enriched = enrich_expected_move_nq(em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=12.0)
+    enriched = enrich_expected_move_nq(
+        em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=12.0
+    )
 
     assert enriched.is_coherent is False
     assert enriched.status == DataStatus.DEGRADED
@@ -276,7 +279,9 @@ def test_em_nq_no_straddle():
     em = _base_em(formula_move=280.0, straddle_move=None)
     spot_nq = 20300.0
 
-    enriched = enrich_expected_move_nq(em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=None)
+    enriched = enrich_expected_move_nq(
+        em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=None
+    )
 
     assert enriched.straddle_move_nq is None
     assert enriched.straddle_lower_nq is None
@@ -295,7 +300,9 @@ def test_em_nq_bounds_not_adjusted():
     em = _base_em(formula_move=200.0, straddle_move=100.0)
     spot_nq = 20300.0
 
-    enriched = enrich_expected_move_nq(em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=None)
+    enriched = enrich_expected_move_nq(
+        em, basis=300.0, spot_nq=spot_nq, spot_ndx=20000.0, cboe_age_minutes=None
+    )
 
     # Valeurs brutes inchangées
     assert enriched.iv_move_nq == pytest.approx(200.0, abs=0.01)

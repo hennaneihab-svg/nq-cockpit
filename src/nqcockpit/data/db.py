@@ -308,6 +308,56 @@ def get_bars(
     return result
 
 
+def get_bar_at_or_before(
+    symbol: str,
+    target_utc: datetime,
+    conn: sqlite3.Connection | None = None,
+    interval: str = "1m",
+) -> Bar | None:
+    """Récupère la barre la plus récente ayant eu lieu à ou avant target_utc.
+
+    Exécute : SELECT ... FROM bars WHERE symbol = ? AND interval = ? AND timestamp_utc <= ?
+    ORDER BY timestamp_utc DESC LIMIT 1.
+    Sans limite artificielle de 100 barres.
+    """
+    if target_utc.tzinfo is None:
+        target_utc = target_utc.replace(tzinfo=timezone.utc)
+    else:
+        target_utc = target_utc.astimezone(timezone.utc)
+
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        sql = """
+            SELECT timestamp_utc, open, high, low, close, volume
+            FROM bars
+            WHERE symbol = ? AND interval = ? AND timestamp_utc <= ?
+            ORDER BY timestamp_utc DESC
+            LIMIT 1
+        """
+        cur = conn.execute(sql, (symbol, interval, target_utc.isoformat()))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        ts = datetime.fromisoformat(row["timestamp_utc"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return Bar(
+            timestamp_utc=ts,
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=float(row["volume"]),
+        )
+    finally:
+        if close_conn:
+            conn.close()
+
+
 def insert_snapshot(
     conn: sqlite3.Connection,
     timestamp_utc: datetime,

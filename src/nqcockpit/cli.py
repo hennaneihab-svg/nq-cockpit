@@ -204,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  Formule base         : {snap.basis_formula}")
         print(f"  Méthode retenue      : {snap.basis_method}")
         if snap.basis_delay_compensation_note:
-            print(f"  Compensation retard  : {snap.basis_delay_compensation_note}")
+            print(f"  Origine données      : {snap.basis_delay_compensation_note}")
         # Valeur de la base et parité
         if snap.synthetic_basis is not None:
             p_diff = abs(snap.basis - snap.synthetic_basis)
@@ -243,13 +243,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             z_gex = f"{snap.zero_dte_net_gex / 1e6:+,.2f} M$" if snap.zero_dte_net_gex else "N/A"
             print(f"  0DTE Call/Put Wall   : NQ {z_cw} / {z_pw} (Net GEX : {z_gex})")
 
-        # --- EXPECTED MOVE (Tâche 3) ---
+        # --- EXPECTED MOVE (Tâche 4) ---
         if snap.expected_move:
             em = snap.expected_move
             print("-" * 70)
             exp_str = em.expiry.strftime("%Y-%m-%d (%A)") if em.expiry else "N/A"
-            em_age = f"{em.data_age_minutes:.1f} min" if em.data_age_minutes is not None else "N/A"
-            print(f"  EXPECTED MOVE — échéance : {exp_str} | age données : {em_age}")
+            em_age_val = em.data_age_minutes
+            em_age_str = f"{em_age_val:.1f} min" if em_age_val is not None else "N/A"
+            cboe_session_tag = ""
+            from nqcockpit.data.calendar import CALENDAR as _MCAL
+
+            if em_age_val is not None and em_age_val > 60.0:
+                cboe_session_tag = " (HORS SÉANCE)"
+            elif not _MCAL.is_us_equity_regular_hours(snap.timestamp_utc):
+                cboe_session_tag = " (HORS SÉANCE)"
+
+            print(
+                f"  EXPECTED MOVE — échéance : {exp_str} | "
+                f"âge chaîne CBOE : {em_age_str}{cboe_session_tag}"
+            )
             print(f"  IV ATM               : {em.iv_atm * 100:.2f}%")
             print(f"  Durée                : {em.days_to_expiry:.2f} j (bourse)")
             # Méthode IV
@@ -258,7 +270,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             iv_hi = em.iv_upper_nq if em.iv_upper_nq is not None else (snap.spot_nq + iv_pts)
             print(f"  Méthode IV           : +/- {iv_pts:.1f} pts NQ")
             print(f"    Bornes IV          : [{iv_lo:,.2f} .. {iv_hi:,.2f}]")
-            print("    Formule            : spot x IV x sqrt(jours/252)")
+            conv_nq_spot = snap.spot_ndx + snap.basis
+            print(
+                f"    Spot utilisé       : Spot NDX {snap.spot_ndx:,.2f} pts "
+                f"converti en NQ via base ({snap.basis:+,.2f} pts) = {conv_nq_spot:,.2f} pts"
+            )
+            print(
+                "    Formule            : spot_ndx x IV x sqrt(j/252) -> [spot_nq +/- move]"
+            )
             # Méthode Straddle
             if em.straddle_move_nq is not None:
                 s_lo = em.straddle_lower_nq if em.straddle_lower_nq is not None else "N/A"
@@ -271,9 +290,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print("  Méthode Straddle     : N/A (bid/ask ATM manquants)")
             if em.discrepancy_pct is not None:
-                coh_flag = "OK" if em.is_coherent else "DEGRADE (>25%)"
+                coh_flag = "OK" if em.is_coherent else "DÉGRADÉ (>25%)"
                 print(
-                    f"  Ecart IV vs Straddle : {em.discrepancy_pct:.1f}% [{coh_flag}]"
+                    f"  Écart IV vs Straddle : {em.discrepancy_pct:.1f}% [{coh_flag}]"
                 )
             if em.status_explanation:
                 print(f"  [!] {em.status_explanation}")
@@ -284,7 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"| NQ {snap.max_pain_nq:,.2f}"
             )
 
-        # --- DIAGNOSTIC 1c (Tâche 2) ---
+        # --- DIAGNOSTIC 1c (Tâche 3) ---
         d = snap.diagnostic_1c
         if d:
             print("-" * 70)
@@ -292,30 +311,46 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("  1. Cible             : 16:00 clôture actions")
             print(f"       ET              : {d.target_time_et}")
             print(f"       Alger           : {d.target_time_algiers}")
-            print(f"  2. Barre NQ         : {'TROUVEE' if d.nq_candidate_found else 'ABSENTE'}")
+            print("  2. Étapes de recherche :")
+            if d.search_steps_summary:
+                for step_txt in d.search_steps_summary:
+                    print(f"       - {step_txt}")
+            res_str = (
+                "PAIRE TROUVÉE"
+                if (d.nq_candidate_found and d.ndx_candidate_found)
+                else "PAIRE NON TROUVÉE"
+            )
+            print(f"  3. Résultat paire    : {res_str}")
             if d.nq_candidate_found:
-                print(f"       Close           : {d.nq_candidate_close:,.2f} pts")
-                print(f"       Horodatage ET   : {d.nq_candidate_time_et}")
-                print(f"       Horodatage Alger: {d.nq_candidate_time_algiers}")
-            print(f"       Nb barres du jour: {d.nq_bars_count_day}")
-            if d.nq_first_bar_time:
-                print(f"       Première barre  : {d.nq_first_bar_time}")
-                print(f"       Dernière barre  : {d.nq_last_bar_time}")
-            print(f"  3. Cotation NDX     : {'TROUVEE' if d.ndx_candidate_found else 'ABSENTE'}")
+                orig_nq = f", origine: {d.nq_origin}" if d.nq_origin else ""
+                print(f"       Barre NQ        : {d.nq_candidate_time_et} |")
+                print(f"                         {d.nq_candidate_time_algiers}")
+                print(f"                         [close {d.nq_candidate_close:,.2f} pts{orig_nq}]")
+            else:
+                print("       Barre NQ        : NON TROUVÉE après mémoire et SQLite")
             if d.ndx_candidate_found:
-                print(f"       Spot            : {d.ndx_candidate_spot:,.2f} pts")
-                print(f"       Horodatage ET   : {d.ndx_candidate_time_et}")
-                print(f"       Horodatage Alger: {d.ndx_candidate_time_algiers}")
+                orig_ndx = f", origine: {d.ndx_origin}" if d.ndx_origin else ""
+                print(f"       Cotation NDX    : {d.ndx_candidate_time_et} |")
+                print(f"                         {d.ndx_candidate_time_algiers}")
+                print(f"                         [spot {d.ndx_candidate_spot:,.2f} pts{orig_ndx}]")
+            else:
+                print("       Cotation NDX    : NON TROUVÉE après mémoire et SQLite")
             if d.delta_t_minutes is not None:
+                align_flag = (
+                    "OK"
+                    if (d.delta_t_minutes <= d.tolerance_minutes)
+                    else "HORS TOLÉRANCE"
+                )
                 print(
                     f"  4. Delta-t          : {d.delta_t_minutes:.2f} min "
-                    f"(tol. {d.tolerance_minutes:.1f} min)"
+                    f"(tol. {d.tolerance_minutes:.1f} min) [{align_flag}]"
                 )
             else:
                 print("  4. Delta-t          : N/A (paire incomplète)")
             print(f"  5. CAUSE            : {d.cause_code}")
             print(f"       Détail          : {d.cause_detail}")
             print(f"  6. Action prise     : {d.action_taken}")
+
 
         if snap.anomalies:
             print("-" * 70)

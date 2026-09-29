@@ -14,13 +14,20 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
 from nqcockpit.data.calendar import CALENDAR
-from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus
+from nqcockpit.data.models import (
+    Bar,
+    BasisSnapshot,
+    DataStatus,
+    PairResult,
+    SearchStepResult,
+)
 from nqcockpit.data.roll import third_friday_of_month
 
 log = logging.getLogger(__name__)
@@ -103,15 +110,228 @@ def compute_live_basis(
     )
 
 
+def find_basis_pair(
+    target: datetime,
+    nq_bars: list[Bar] | None = None,
+    ndx_bars: list[Bar] | None = None,
+    tolerance_minutes: float = 1.0,
+    conn: Any | None = None,
+    reload_source: bool = False,
+) -> PairResult:
+    """Recherche unique et ordonnée de la paire NQ / NDX à une cible temporelle.
+
+    Ordre de recherche rigoureux :
+      1. Mémoire (listes nq_bars, ndx_bars)
+      2. SQLite (table bars locale via get_bar_at_or_before)
+      3. Rechargement source distante (si demandé)
+
+    Cette fonction produit le PairResult unique qui DOIT être lu à la fois par
+    compute_previous_session_basis et build_diagnostic_1c.
+    """
+    if target.tzinfo is None:
+        target_utc = target.replace(tzinfo=timezone.utc)
+    else:
+        target_utc = target.astimezone(timezone.utc)
+
+    target_et = target_utc.astimezone(ET)
+    target_date = target_et.date()
+
+    search_steps: list[SearchStepResult] = []
+
+    # 1. Étape MÉMOIRE
+    nq_candidate_mem: Bar | None = None
+    if nq_bars:
+        valid_nq_mem = [b for b in nq_bars if b.timestamp_utc <= target_utc]
+        if valid_nq_mem:
+            nq_candidate_mem = valid_nq_mem[-1]
+
+    ndx_candidate_mem: Bar | None = None
+    if ndx_bars:
+        valid_ndx_mem = [b for b in ndx_bars if b.timestamp_utc <= target_utc]
+        if valid_ndx_mem:
+            ndx_candidate_mem = valid_ndx_mem[-1]
+
+    search_steps.append(
+        SearchStepResult(
+            step_name="memoire",
+            nq_found=nq_candidate_mem is not None,
+            nq_time_utc=nq_candidate_mem.timestamp_utc if nq_candidate_mem else None,
+            nq_close=nq_candidate_mem.close if nq_candidate_mem else None,
+            ndx_found=ndx_candidate_mem is not None,
+            ndx_time_utc=ndx_candidate_mem.timestamp_utc if ndx_candidate_mem else None,
+            ndx_spot=ndx_candidate_mem.close if ndx_candidate_mem else None,
+            details=(
+                f"NQ: {'trouvé' if nq_candidate_mem else 'non trouvé'}, "
+                f"NDX: {'trouvé' if ndx_candidate_mem else 'non trouvé'}"
+            ),
+        )
+    )
+
+    # 2. Étape SQLITE
+    from nqcockpit.data.db import get_bar_at_or_before
+
+    nq_candidate_db: Bar | None = None
+    if nq_candidate_mem is None:
+        try:
+            bar_db = get_bar_at_or_before("NQ=F", target_utc, conn=conn)
+            if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
+                nq_candidate_db = bar_db
+        except Exception as e:
+            log.warning("Erreur lecture barre NQ SQLite : %s", e)
+
+    ndx_candidate_db: Bar | None = None
+    if ndx_candidate_mem is None:
+        try:
+            bar_db = get_bar_at_or_before("^NDX", target_utc, conn=conn)
+            if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
+                ndx_candidate_db = bar_db
+        except Exception as e:
+            log.warning("Erreur lecture barre NDX SQLite : %s", e)
+
+    nq_db_det = (
+        "en mémoire" if nq_candidate_mem else ("trouvé" if nq_candidate_db else "non trouvé")
+    )
+    ndx_db_det = (
+        "en mémoire" if ndx_candidate_mem else ("trouvé" if ndx_candidate_db else "non trouvé")
+    )
+    search_steps.append(
+        SearchStepResult(
+            step_name="sqlite",
+            nq_found=nq_candidate_db is not None or nq_candidate_mem is not None,
+            nq_time_utc=(
+                nq_candidate_db.timestamp_utc
+                if nq_candidate_db
+                else (nq_candidate_mem.timestamp_utc if nq_candidate_mem else None)
+            ),
+            nq_close=(
+                nq_candidate_db.close
+                if nq_candidate_db
+                else (nq_candidate_mem.close if nq_candidate_mem else None)
+            ),
+            ndx_found=ndx_candidate_db is not None or ndx_candidate_mem is not None,
+            ndx_time_utc=(
+                ndx_candidate_db.timestamp_utc
+                if ndx_candidate_db
+                else (ndx_candidate_mem.timestamp_utc if ndx_candidate_mem else None)
+            ),
+            ndx_spot=(
+                ndx_candidate_db.close
+                if ndx_candidate_db
+                else (ndx_candidate_mem.close if ndx_candidate_mem else None)
+            ),
+            details=f"NQ: {nq_db_det}, NDX: {ndx_db_det}",
+        )
+    )
+
+    # 3. Étape SOURCE DISTANTE (rechargement)
+    search_steps.append(
+        SearchStepResult(
+            step_name="source_distante",
+            nq_found=nq_candidate_mem is not None or nq_candidate_db is not None,
+            ndx_found=ndx_candidate_mem is not None or ndx_candidate_db is not None,
+            details="non requis (données trouvées ou rechargement non sollicité)",
+        )
+    )
+
+    # Sélection des barres retenues et de leur origine
+    if nq_candidate_mem is not None:
+        final_nq = nq_candidate_mem
+        origin_nq = "memoire"
+    elif nq_candidate_db is not None:
+        final_nq = nq_candidate_db
+        origin_nq = "sqlite"
+    else:
+        final_nq = None
+        origin_nq = None
+
+    if ndx_candidate_mem is not None:
+        final_ndx = ndx_candidate_mem
+        origin_ndx = "memoire"
+    elif ndx_candidate_db is not None:
+        final_ndx = ndx_candidate_db
+        origin_ndx = "sqlite"
+    else:
+        final_ndx = None
+        origin_ndx = None
+
+    # Évaluation de la cohérence / cause
+    delta_t: float | None = None
+    is_aligned = False
+    cause_code: str
+    cause_detail: str
+    action_taken: str
+
+    if final_nq is None and final_ndx is None:
+        cause_code = "NQ_BAR_ABSENTE"
+        cause_detail = (
+            f"Aucune barre NQ ni NDX trouvée pour le {target_date.isoformat()} "
+            f"avant {target_et.strftime('%H:%M:%S ET')} après échec de toutes les étapes"
+        )
+        action_taken = "Repli sur base de parité call-put"
+    elif final_nq is None:
+        cause_code = "NQ_BAR_ABSENTE"
+        cause_detail = (
+            f"Aucune barre NQ trouvée pour le {target_date.isoformat()} "
+            f"avant {target_et.strftime('%H:%M:%S ET')} (mémoire: non trouvé, SQLite: non trouvé)"
+        )
+        action_taken = "Repli sur base de parité call-put"
+    elif final_ndx is None:
+        cause_code = "NDX_QUOTE_ABSENTE"
+        cause_detail = (
+            f"Aucune cotation NDX trouvée pour le {target_date.isoformat()} "
+            f"avant {target_et.strftime('%H:%M:%S ET')} (mémoire: non trouvé, SQLite: non trouvé)"
+        )
+        action_taken = "Repli sur base de parité call-put"
+    else:
+        delta_t = (
+            abs((final_nq.timestamp_utc - final_ndx.timestamp_utc).total_seconds())
+            / 60.0
+        )
+        if delta_t > tolerance_minutes:
+            is_aligned = False
+            cause_code = "HORS_TOLERANCE"
+            nq_time_str = final_nq.timestamp_utc.astimezone(ET).strftime("%H:%M:%S ET")
+            ndx_time_str = final_ndx.timestamp_utc.astimezone(ET).strftime("%H:%M:%S ET")
+            cause_detail = (
+                f"Paire trouvée mais Delta-t={delta_t:.2f} min > tolérance {tolerance_minutes:.1f} min. "
+                f"NQ ({origin_nq}): {nq_time_str}, NDX ({origin_ndx}): {ndx_time_str}"
+            )
+            action_taken = (
+                "Base calculée quand même avec mention 'non alignée' ; contrôle parité"
+            )
+        else:
+            is_aligned = True
+            cause_code = "PAIRE_TROUVEE"
+            cause_detail = (
+                f"Paire valide trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, Delta-t={delta_t:.2f} min)"
+            )
+            action_taken = "Base de la séance précédente retenue"
+
+    return PairResult(
+        target_utc=target_utc,
+        nq_bar=final_nq,
+        ndx_bar=final_ndx,
+        nq_origin=origin_nq,
+        ndx_origin=origin_ndx,
+        search_steps=search_steps,
+        delta_t_minutes=delta_t,
+        tolerance_minutes=tolerance_minutes,
+        is_aligned=is_aligned,
+        cause_code=cause_code,
+        cause_detail=cause_detail,
+        action_taken=action_taken,
+    )
+
+
 def compute_previous_session_basis(
     nq_bars: list[Bar],
     ndx_bars: list[Bar],
     ref_utc: datetime | None = None,
+    pair_result: PairResult | None = None,
 ) -> BasisSnapshot:
     """Trouve la dernière clôture de séance régulière actions US et calcule la base de clôture.
 
-    Sélectionne la dernière barre 1m de chaque instrument ayant eu lieu à ou avant 16:00 ET
-    du dernier jour de bourse actions.
+    Lit obligatoirement le PairResult unique (produit par find_basis_pair).
     """
     if ref_utc is None:
         ref_utc = datetime.now(timezone.utc)
@@ -120,26 +340,19 @@ def compute_previous_session_basis(
 
     session_close_utc = CALENDAR.get_last_equity_session_close(ref_utc)
 
-    # Filtrer les barres <= session_close_utc
-    valid_nq = [b for b in nq_bars if b.timestamp_utc <= session_close_utc]
-    valid_ndx = [b for b in ndx_bars if b.timestamp_utc <= session_close_utc]
+    if pair_result is None:
+        pair_result = find_basis_pair(
+            target=session_close_utc,
+            nq_bars=nq_bars,
+            ndx_bars=ndx_bars,
+            tolerance_minutes=1.0,
+        )
 
-    if not valid_nq or not valid_ndx:
-        # Fallback vers la base locale si la liste en mémoire ne couvre pas la clôture
-        try:
-            from nqcockpit.data.db import get_bars as db_get_bars
-            from nqcockpit.data.db import get_db_connection
-
-            conn = get_db_connection()
-            if not valid_nq:
-                valid_nq = db_get_bars(conn, "NQ=F", "1m", end_time=session_close_utc, limit=10)
-            if not valid_ndx:
-                valid_ndx = db_get_bars(conn, "^NDX", "1m", end_time=session_close_utc, limit=10)
-            conn.close()
-        except Exception as e:
-            log.warning("Impossible de compléter les barres depuis SQLite : %s", e)
-
-    if not valid_nq or not valid_ndx:
+    if (
+        not pair_result.is_found
+        or pair_result.nq_bar is None
+        or pair_result.ndx_bar is None
+    ):
         return BasisSnapshot(
             timestamp_utc=ref_utc,
             nq_price=0.0,
@@ -147,14 +360,17 @@ def compute_previous_session_basis(
             basis=0.0,
             is_session_basis=False,
             status=DataStatus.BLOCKED,
-            label="historique insuffisant pour la base de clôture",
+            label=f"historique insuffisant ({pair_result.cause_code})",
             method="séance précédente",
+            delta_t_minutes=pair_result.delta_t_minutes or 0.0,
+            tolerance_minutes=pair_result.tolerance_minutes,
+            is_aligned=False,
+            formula="base = NQ_close - NDX_spot",
         )
 
-    last_nq = valid_nq[-1]
-    last_ndx = valid_ndx[-1]
+    last_nq = pair_result.nq_bar
+    last_ndx = pair_result.ndx_bar
 
-    # Vérification de synchronisation à la clôture (dans la même minute)
     drift = abs((last_nq.timestamp_utc - last_ndx.timestamp_utc).total_seconds())
     is_stale_session = CALENDAR.is_more_than_one_session_stale(
         last_ndx.timestamp_utc, ref_utc=ref_utc
@@ -179,6 +395,11 @@ def compute_previous_session_basis(
         f"NQ: {nq_ny_str} [{nq_utc_str}] / NDX: {ndx_ny_str} [{ndx_utc_str}], âge {age_h:.1f} h)"
     )
 
+    proven_origin_note = (
+        f"barre NQ lue en {pair_result.nq_origin}, "
+        f"cotation NDX lue en {pair_result.ndx_origin}"
+    )
+
     return BasisSnapshot(
         timestamp_utc=last_ndx.timestamp_utc,
         nq_price=last_nq.close,
@@ -192,13 +413,10 @@ def compute_previous_session_basis(
         ndx_timestamp_utc=last_ndx.timestamp_utc,
         method="séance précédente",
         delta_t_minutes=drift / 60.0,
-        tolerance_minutes=1.0,
-        is_aligned=(drift <= 60.0 and not is_stale_session),
+        tolerance_minutes=pair_result.tolerance_minutes,
+        is_aligned=pair_result.is_aligned and not is_stale_session,
         formula="base = NQ_close - NDX_spot",
-        delay_compensation_note=(
-            "Source Yahoo Finance retardée ~15 min : barre NQ sélectionnée "
-            "correspondant à l'heure réelle de cotation NDX (heure de fermeture 16:00 ET)"
-        ),
+        delay_compensation_note=proven_origin_note,
     )
 
 

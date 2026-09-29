@@ -25,12 +25,13 @@ from nqcockpit.config import load_config
 from nqcockpit.data.basis import (
     compute_live_basis,
     compute_previous_session_basis,
+    find_basis_pair,
     synthetic_futures_basis_from_options,
 )
 from nqcockpit.data.calendar import CALENDAR
 from nqcockpit.data.cboe import CboeChainSnapshot
 from nqcockpit.data.db import apply_migrations, get_db_connection, insert_snapshot
-from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus
+from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus, PairResult
 from nqcockpit.levels import greeks
 from nqcockpit.levels.models import (
     Diagnostic1cInfo,
@@ -313,136 +314,111 @@ def _fmt_algiers(dt: datetime | None) -> str | None:
 
 
 def build_diagnostic_1c(
-    nq_bars: list[Bar],
-    ndx_bars: list[Bar],
-    ref_utc: datetime,
-    session_date: date,
+    nq_bars: list[Bar] | None = None,
+    ndx_bars: list[Bar] | None = None,
+    ref_utc: datetime | None = None,
+    session_date: date | None = None,
     tolerance_minutes: float = 1.0,
+    pair_result: PairResult | None = None,
 ) -> Diagnostic1cInfo:
-    """Construit le Diagnostic 1c pour la séance de référence précédente (j-1).
+    """Construit le Diagnostic 1c prouvé pour la séance de référence précédente.
 
-    Parcourt étape par étape la recherche de la paire NQ/NDX à 16:00 ET
-    de session_date et retourne un rapport structuré avec cause explicite.
-
-    Cause codes :
-        NQ_BAR_ABSENTE     — Aucune barre NQ au voisinage de la cible
-        NDX_QUOTE_ABSENTE  — Aucune barre NDX au voisinage de la cible
-        HORS_TOLERANCE     — Paire trouvée mais écart > tolérance
-        SESSION_INCOMPLETE — Barres du jour présentes mais pas jusqu'à 16:00 ET
-        PAIRE_TROUVEE      — Paire valide trouvée et utilisée
-        AUTRE              — Cas non couvert
+    Lit obligatoirement le PairResult UNIQUE retourné par find_basis_pair,
+    garantissant une stricte cohérence avec compute_previous_session_basis.
     """
-    # Cible : 16:00:00 ET de session_date (clôture de la séance actions)
+    if session_date is None:
+        if pair_result is not None:
+            session_date = pair_result.target_utc.astimezone(ET).date()
+        elif ref_utc is not None:
+            session_date = CALENDAR.get_last_equity_session_close(ref_utc).astimezone(ET).date()
+        else:
+            session_date = datetime.now(ET).date()
+
     target_et = datetime(
-        session_date.year, session_date.month, session_date.day,
-        16, 0, 0, tzinfo=ET,
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        16,
+        0,
+        0,
+        tzinfo=ET,
     )
     target_utc = target_et.astimezone(timezone.utc)
+
+    if pair_result is None:
+        pair_result = find_basis_pair(
+            target=target_utc,
+            nq_bars=nq_bars,
+            ndx_bars=ndx_bars,
+            tolerance_minutes=tolerance_minutes,
+        )
 
     target_et_str = target_et.strftime(_ET_FMT)
     target_alg_str = target_et.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
 
-    # Barres NQ pour ce jour précis
-    nq_day = [
-        b for b in nq_bars
-        if b.timestamp_utc.astimezone(ET).date() == session_date
-    ]
-    nq_count = len(nq_day)
-    nq_first = _fmt_et(nq_day[0].timestamp_utc) if nq_day else None
-    nq_last = _fmt_et(nq_day[-1].timestamp_utc) if nq_day else None
-
-    # Candidat NQ : barre <= 16:00 ET la plus proche par le haut
-    nq_before = [
-        b for b in nq_day if b.timestamp_utc <= target_utc
-    ]
-    nq_candidate = nq_before[-1] if nq_before else None
-
-    # Candidat NDX : idem
-    ndx_day = [
-        b for b in ndx_bars
-        if b.timestamp_utc.astimezone(ET).date() == session_date
-    ]
-    ndx_before = [
-        b for b in ndx_day if b.timestamp_utc <= target_utc
-    ]
-    ndx_candidate = ndx_before[-1] if ndx_before else None
-
-    # Delta-t
-    delta_t: float | None = None
-    if nq_candidate is not None and ndx_candidate is not None:
-        delta_t = abs(
-            (nq_candidate.timestamp_utc - ndx_candidate.timestamp_utc).total_seconds()
-        ) / 60.0
-
-    # Cause et action
-    cause_code: str
-    cause_detail: str
-    action_taken: str
-
-    if nq_count == 0:
-        cause_code = "NQ_BAR_ABSENTE"
-        cause_detail = f"Aucune barre NQ=F enregistrée pour le {session_date.isoformat()} en base"
-        action_taken = "Repli sur base de parité call-put ou base indisponible"
-    elif ndx_candidate is None:
-        cause_code = "NDX_QUOTE_ABSENTE"
-        cause_detail = (
-            f"Aucune barre ^NDX enregistrée pour le {session_date.isoformat()} "
-            f"avant 16:00 ET (barres NQ: {nq_count})"
+    # Récapitulatif structuré des étapes de recherche
+    search_steps_summary: list[str] = []
+    for step in pair_result.search_steps:
+        s_name = (
+            "Mémoire"
+            if step.step_name == "memoire"
+            else ("SQLite" if step.step_name == "sqlite" else "Source distante")
         )
-        action_taken = "Repli sur base de parité call-put"
-    elif nq_candidate is None:
-        # NQ day exists but no bar <= 16:00
-        cause_code = "SESSION_INCOMPLETE"
-        cause_detail = (
-            f"Barres NQ présentes ce jour ({nq_count}) mais aucune <= 16:00 ET. "
-            f"Première barre : {nq_first}"
+        nq_res = "NQ trouvé" if step.nq_found else "NQ non trouvé"
+        ndx_res = "NDX trouvé" if step.ndx_found else "NDX non trouvé"
+        search_steps_summary.append(
+            f"{s_name} : {nq_res} | {ndx_res} ({step.details})"
         )
-        action_taken = "Repli sur base de parité call-put"
-    elif delta_t is not None and delta_t > tolerance_minutes:
-        cause_code = "HORS_TOLERANCE"
-        cause_detail = (
-            f"Paire trouvée mais Δt = {delta_t:.2f} min > tolérance "
-            f"{tolerance_minutes:.1f} min. "
-            f"NQ: {_fmt_et(nq_candidate.timestamp_utc)}, "
-            f"NDX: {_fmt_et(ndx_candidate.timestamp_utc)}"
-        )
-        action_taken = "Base calculée quand même avec mention 'non alignée' ; contrôle parité"
-    else:
-        cause_code = "PAIRE_TROUVEE"
-        cause_detail = (
-            f"Paire valide — NQ: {_fmt_et(nq_candidate.timestamp_utc)}, "
-            f"NDX: {_fmt_et(ndx_candidate.timestamp_utc)}, "
-            f"Δt={delta_t:.2f} min" if delta_t is not None else
-            "Paire valide mais Δt incalculable"
-        )
-        action_taken = "Base de la séance précédente retenue"
+
+    nq_bar = pair_result.nq_bar
+    ndx_bar = pair_result.ndx_bar
+
+    # Statistiques barres mémoire du jour (informatif)
+    nq_count = 0
+    nq_first = None
+    nq_last = None
+    if nq_bars:
+        nq_day = [
+            b
+            for b in nq_bars
+            if b.timestamp_utc.astimezone(ET).date() == session_date
+        ]
+        nq_count = len(nq_day)
+        nq_first = _fmt_et(nq_day[0].timestamp_utc) if nq_day else None
+        nq_last = _fmt_et(nq_day[-1].timestamp_utc) if nq_day else None
 
     return Diagnostic1cInfo(
         session_date=session_date,
         target_time_et=target_et_str,
         target_time_algiers=target_alg_str,
         target_time_utc=target_utc,
-        nq_candidate_found=nq_candidate is not None,
-        nq_candidate_time_et=_fmt_et(nq_candidate.timestamp_utc) if nq_candidate else None,
+        nq_candidate_found=nq_bar is not None,
+        nq_candidate_time_et=_fmt_et(nq_bar.timestamp_utc) if nq_bar else None,
         nq_candidate_time_algiers=(
-            _fmt_algiers(nq_candidate.timestamp_utc) if nq_candidate else None
+            _fmt_algiers(nq_bar.timestamp_utc) if nq_bar else None
         ),
-        nq_candidate_close=nq_candidate.close if nq_candidate else None,
+        nq_candidate_close=nq_bar.close if nq_bar else None,
+        nq_origin=pair_result.nq_origin,
         nq_bars_count_day=nq_count,
         nq_first_bar_time=nq_first,
         nq_last_bar_time=nq_last,
-        ndx_candidate_found=ndx_candidate is not None,
-        ndx_candidate_time_et=_fmt_et(ndx_candidate.timestamp_utc) if ndx_candidate else None,
-        ndx_candidate_time_algiers=(
-            _fmt_algiers(ndx_candidate.timestamp_utc) if ndx_candidate else None
+        ndx_candidate_found=ndx_bar is not None,
+        ndx_candidate_time_et=(
+            _fmt_et(ndx_bar.timestamp_utc) if ndx_bar else None
         ),
-        ndx_candidate_spot=ndx_candidate.close if ndx_candidate else None,
-        delta_t_minutes=delta_t,
-        tolerance_minutes=tolerance_minutes,
-        cause_code=cause_code,
-        cause_detail=cause_detail,
-        action_taken=action_taken,
+        ndx_candidate_time_algiers=(
+            _fmt_algiers(ndx_bar.timestamp_utc) if ndx_bar else None
+        ),
+        ndx_candidate_spot=ndx_bar.close if ndx_bar else None,
+        ndx_origin=pair_result.ndx_origin,
+        search_steps_summary=search_steps_summary,
+        delta_t_minutes=pair_result.delta_t_minutes,
+        tolerance_minutes=pair_result.tolerance_minutes,
+        cause_code=pair_result.cause_code,
+        cause_detail=pair_result.cause_detail,
+        action_taken=pair_result.action_taken,
     )
+
 
 
 def enrich_expected_move_nq(
@@ -553,9 +529,18 @@ class LevelsEngine:
         except Exception:
             tol = 50.0
 
-        # 2. Ordre de priorité de la base NQ/NDX :
+        # 2. Recherche UNIQUE de la paire pour la séance précédente (lue par base et 1c)
+        session_close_utc = CALENDAR.get_last_equity_session_close(now_utc)
+        pair_result = find_basis_pair(
+            target=session_close_utc,
+            nq_bars=nq_bars,
+            ndx_bars=ndx_bars,
+            tolerance_minutes=1.0,
+        )
+
+        # 3. Ordre de priorité de la base NQ/NDX :
         #    (i)  Base alignée en séance (barres 1m NQ=F et ^NDX, écart <= 60s, séance en cours)
-        #    (ii) Base de la séance précédente (dernière séance complète <= 16:00 ET, même minute)
+        #    (ii) Base de la séance précédente (via pair_result unique)
         #    (iii) Base implicite par parité call-put
         #          (fallback si écart > tolérance ou barres manquantes)
         in_regular_session = CALENDAR.is_us_equity_regular_hours(now_utc)
@@ -567,7 +552,9 @@ class LevelsEngine:
                 candidate_basis = live_snap
 
         if candidate_basis is None:
-            prev_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
+            prev_snap = compute_previous_session_basis(
+                nq_bars, ndx_bars, ref_utc=now_utc, pair_result=pair_result
+            )
             if prev_snap.status != DataStatus.BLOCKED:
                 candidate_basis = prev_snap
 
@@ -802,14 +789,14 @@ class LevelsEngine:
             )
 
         # 11. Diagnostic 1c : séance de référence précédente (j-1)
-        diag_session = CALENDAR.get_last_equity_session_close(now_utc)
-        diag_session_date = diag_session.astimezone(ET).date()
+        diag_session_date = session_close_utc.astimezone(ET).date()
         diag_1c = build_diagnostic_1c(
             nq_bars=nq_bars,
             ndx_bars=ndx_bars,
             ref_utc=now_utc,
             session_date=diag_session_date,
             tolerance_minutes=1.0,
+            pair_result=pair_result,
         )
 
         # Champs horodatage de la base pour le snapshot
