@@ -64,7 +64,8 @@ class LevelsConfig:
     wall_proximity_points: float = 40.0
     stale_data_minutes: int = 30
     spot_max_age_minutes: float = 20.0
-    wall_window_pct: float = 0.10
+    wall_window_pct: float = 0.03
+    straddle_max_spread_pct: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -317,7 +318,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     wall_prox = raw_levels.get("wall_proximity_points", 40)
     stale_min = raw_levels.get("stale_data_minutes", 30)
     spot_max_age = raw_levels.get("spot_max_age_minutes", 20.0)
-    wall_win_pct = raw_levels.get("wall_window_pct", 0.10)
+    wall_win_pct = raw_levels.get("wall_window_pct", 0.03)
+    straddle_spread = raw_levels.get("straddle_max_spread_pct", 0.20)
     if not isinstance(wall_prox, (int, float)) or wall_prox <= 0:
         raise ConfigError("levels.wall_proximity_points must be a positive number.")
     if not isinstance(stale_min, int) or stale_min <= 0:
@@ -326,11 +328,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         raise ConfigError("levels.spot_max_age_minutes must be a positive number.")
     if not isinstance(wall_win_pct, (int, float)) or wall_win_pct <= 0:
         raise ConfigError("levels.wall_window_pct must be a positive number.")
+    if not isinstance(straddle_spread, (int, float)) or straddle_spread <= 0:
+        raise ConfigError("levels.straddle_max_spread_pct must be a positive number.")
     levels = LevelsConfig(
         wall_proximity_points=float(wall_prox),
         stale_data_minutes=stale_min,
         spot_max_age_minutes=float(spot_max_age),
         wall_window_pct=float(wall_win_pct),
+        straddle_max_spread_pct=float(straddle_spread),
     )
 
     # 8. Validation

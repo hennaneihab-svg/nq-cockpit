@@ -198,16 +198,16 @@ def test_useful_walls_and_global_wall_outside_window():
     basis = 2500.0  # NQ = 22500
 
     # Création d'options avec :
-    # 1. Call Wall dans la fenêtre (21 000, soit +5%) avec GEX = 100
+    # 1. Call Wall dans la fenêtre (20 400, soit +2%) avec GEX = 100
     # 2. Call Wall géant hors fenêtre (25 000, soit +25%) avec GEX = 500
-    # 3. Put Wall dans la fenêtre (19 000, soit -5%) avec GEX = -100
+    # 3. Put Wall dans la fenêtre (19 600, soit -2%) avec GEX = -100
     # 4. Put Wall géant hors fenêtre (16 000, soit -20%) avec GEX = -600
     options_data = [
         {
-            "contract": "NDX261016C21000000",
+            "contract": "NDX261016C20400000",
             "expiry": date(2026, 10, 16),
             "type": "C",
-            "strike": 21000.0,
+            "strike": 20400.0,
             "bid": 10.0,
             "ask": 11.0,
             "iv": 0.20,
@@ -226,10 +226,10 @@ def test_useful_walls_and_global_wall_outside_window():
             "gamma": 0.0001,
         },
         {
-            "contract": "NDX261016P19000000",
+            "contract": "NDX261016P19600000",
             "expiry": date(2026, 10, 16),
             "type": "P",
-            "strike": 19000.0,
+            "strike": 19600.0,
             "bid": 10.0,
             "ask": 11.0,
             "iv": 0.20,
@@ -283,13 +283,13 @@ def test_useful_walls_and_global_wall_outside_window():
         now_utc=now_utc,
     )
 
-    # Murs utiles (dans la fenêtre ±10 %)
-    assert snap.call_wall_useful_ndx == 21000.0
-    assert snap.call_wall_useful_nq == 21000.0 + basis
-    assert snap.call_wall_useful_dist_pct == 5.0
-    assert snap.put_wall_useful_ndx == 19000.0
-    assert snap.put_wall_useful_nq == 19000.0 + basis
-    assert snap.put_wall_useful_dist_pct == -5.0
+    # Murs utiles (dans la fenêtre ±3 %)
+    assert snap.call_wall_useful_ndx == 20400.0
+    assert snap.call_wall_useful_nq == 20400.0 + basis
+    assert abs(snap.call_wall_useful_dist_pct - 2.0) < 1e-4
+    assert snap.put_wall_useful_ndx == 19600.0
+    assert snap.put_wall_useful_nq == 19600.0 + basis
+    assert abs(snap.put_wall_useful_dist_pct - (-2.0)) < 1e-4
 
     # Murs globaux (hors fenêtre)
     assert snap.call_wall_global_ndx == 25000.0

@@ -56,6 +56,54 @@ class Diagnostic1cInfo:
 
 
 @dataclass
+class StraddleLegInfo:
+    """Détail d'une jambe (Call ou Put) du straddle ATM."""
+
+    option_type: str  # "C" ou "P"
+    root: str  # ex: "NDXP" ou "NDX"
+    expiry: date
+    strike: float
+    bid: float
+    ask: float
+    mid: float
+    spread_rel_pct: float  # (ask - bid) / mid * 100
+    iv: float
+    volume: float
+    quote_time_et: str | None
+    quote_time_algiers: str | None
+    is_spread_wide: bool = False
+
+
+@dataclass
+class StraddleStrikeNeighbor:
+    """Cotation et straddle pour un strike voisin."""
+
+    strike: float
+    call_mid: float
+    put_mid: float
+    straddle_mid: float
+
+
+@dataclass
+class StraddleDiagnostic:
+    """Diagnostic exhaustif du straddle ATM pour élucider l'écart avec la formule IV."""
+
+    spot_ndx_used: float
+    atm_strike: float
+    call_leg: StraddleLegInfo
+    put_leg: StraddleLegInfo
+    roots_match: bool
+    expiries_match: bool
+    straddle_points: float  # C_mid + P_mid en points d'indice purs
+    implied_iv_straddle: float  # straddle / (0.8 * spot * sqrt(j/252))
+    iv_atm_used: float
+    spread_pct_vs_iv: float  # écart relatif
+    neighbors: list[StraddleStrikeNeighbor] = field(default_factory=list)
+    is_degraded: bool = False
+    degraded_reason: str = ""
+
+
+@dataclass
 class ExpectedMoveInfo:
     """Informations complètes sur le move attendu (Expected Move)."""
 
@@ -84,6 +132,7 @@ class ExpectedMoveInfo:
     spot_nq_observed: float = 0.0
     spot_nq_converted: float = 0.0
     spread_nq_vs_converted: float = 0.0
+    straddle_diagnostic: StraddleDiagnostic | None = None
 
 
 @dataclass
@@ -156,19 +205,33 @@ class LevelsSnapshot:
     put_wall_global_dist_pts: float | None = None
     put_wall_global_dist_pct: float | None = None
     put_wall_is_outside_window: bool = False
-    wall_window_pct: float = 0.10
+    wall_window_pct: float = 0.03
 
     # Spot NQ : Fraîcheur réelle (Tâche 1)
     spot_nq_time_utc: datetime | None = None
     spot_nq_age_minutes: float | None = None
     spot_nq_is_stale: bool = False
 
-    # CBOE métadonnées de rechargement (Tâche 2)
+    # CBOE métadonnées de rechargement (Tâche 2 / 3)
     cboe_request_time_utc: datetime | None = None
     cboe_http_status: int | None = None
     cboe_duration_ms: float | None = None
     cboe_internal_timestamp_utc: datetime | None = None
     cboe_reloaded: bool = True
+    cboe_chain_age_minutes: float | None = None
+    cboe_active_quote_delay_minutes: float | None = None
+
+    # Base live et comparatif des 3 bases (Tâche 2)
+    live_basis_value: float | None = None
+    live_basis_nq_time_utc: datetime | None = None
+    live_basis_ndx_time_utc: datetime | None = None
+    live_basis_delta_t_minutes: float | None = None
+    live_basis_status: DataStatus = DataStatus.DEGRADED
+    live_basis_available: bool = False
+    live_basis_unavailable_reason: str | None = None
+    spread_live_vs_prev_basis: float | None = None
+    spread_live_vs_parity_basis: float | None = None
+    spread_prev_vs_parity_basis: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Sérialisation en dictionnaire pour export JSON et persistance."""
@@ -254,6 +317,73 @@ class LevelsSnapshot:
                 "spread_nq_vs_converted": (
                     self.expected_move.spread_nq_vs_converted if self.expected_move else 0.0
                 ),
+                "straddle_diagnostic": (
+                    {
+                        "spot_ndx_used": self.expected_move.straddle_diagnostic.spot_ndx_used,
+                        "atm_strike": self.expected_move.straddle_diagnostic.atm_strike,
+                        "roots_match": self.expected_move.straddle_diagnostic.roots_match,
+                        "expiries_match": self.expected_move.straddle_diagnostic.expiries_match,
+                        "straddle_points": (
+                            self.expected_move.straddle_diagnostic.straddle_points
+                        ),
+                        "implied_iv_straddle": (
+                            self.expected_move.straddle_diagnostic.implied_iv_straddle
+                        ),
+                        "iv_atm_used": self.expected_move.straddle_diagnostic.iv_atm_used,
+                        "spread_pct_vs_iv": (
+                            self.expected_move.straddle_diagnostic.spread_pct_vs_iv
+                        ),
+                        "is_degraded": self.expected_move.straddle_diagnostic.is_degraded,
+                        "degraded_reason": (
+                            self.expected_move.straddle_diagnostic.degraded_reason
+                        ),
+                        "call_leg": {
+                            "root": self.expected_move.straddle_diagnostic.call_leg.root,
+                            "bid": self.expected_move.straddle_diagnostic.call_leg.bid,
+                            "ask": self.expected_move.straddle_diagnostic.call_leg.ask,
+                            "mid": self.expected_move.straddle_diagnostic.call_leg.mid,
+                            "spread_rel_pct": (
+                                self.expected_move.straddle_diagnostic.call_leg.spread_rel_pct
+                            ),
+                            "iv": self.expected_move.straddle_diagnostic.call_leg.iv,
+                            "volume": self.expected_move.straddle_diagnostic.call_leg.volume,
+                            "quote_time_et": (
+                                self.expected_move.straddle_diagnostic.call_leg.quote_time_et
+                            ),
+                            "quote_time_algiers": (
+                                self.expected_move.straddle_diagnostic.call_leg.quote_time_algiers
+                            ),
+                        },
+                        "put_leg": {
+                            "root": self.expected_move.straddle_diagnostic.put_leg.root,
+                            "bid": self.expected_move.straddle_diagnostic.put_leg.bid,
+                            "ask": self.expected_move.straddle_diagnostic.put_leg.ask,
+                            "mid": self.expected_move.straddle_diagnostic.put_leg.mid,
+                            "spread_rel_pct": (
+                                self.expected_move.straddle_diagnostic.put_leg.spread_rel_pct
+                            ),
+                            "iv": self.expected_move.straddle_diagnostic.put_leg.iv,
+                            "volume": self.expected_move.straddle_diagnostic.put_leg.volume,
+                            "quote_time_et": (
+                                self.expected_move.straddle_diagnostic.put_leg.quote_time_et
+                            ),
+                            "quote_time_algiers": (
+                                self.expected_move.straddle_diagnostic.put_leg.quote_time_algiers
+                            ),
+                        },
+                        "neighbors": [
+                            {
+                                "strike": n.strike,
+                                "call_mid": n.call_mid,
+                                "put_mid": n.put_mid,
+                                "straddle_mid": n.straddle_mid,
+                            }
+                            for n in self.expected_move.straddle_diagnostic.neighbors
+                        ],
+                    }
+                    if self.expected_move and self.expected_move.straddle_diagnostic
+                    else None
+                ),
             },
             "call_wall_useful_ndx": self.call_wall_useful_ndx,
             "call_wall_useful_nq": self.call_wall_useful_nq,
@@ -274,6 +404,17 @@ class LevelsSnapshot:
             "cboe_reloaded": self.cboe_reloaded,
             "cboe_http_status": self.cboe_http_status,
             "cboe_duration_ms": self.cboe_duration_ms,
+            "cboe_chain_age_minutes": self.cboe_chain_age_minutes,
+            "cboe_active_quote_delay_minutes": self.cboe_active_quote_delay_minutes,
+            "live_basis": {
+                "value": self.live_basis_value,
+                "available": self.live_basis_available,
+                "delta_t_minutes": self.live_basis_delta_t_minutes,
+                "status": self.live_basis_status.value,
+                "unavailable_reason": self.live_basis_unavailable_reason,
+                "spread_vs_prev": self.spread_live_vs_prev_basis,
+                "spread_vs_parity": self.spread_live_vs_parity_basis,
+            },
             "max_pain_ndx": self.max_pain_ndx,
             "max_pain_nq": self.max_pain_nq,
             "max_pain_expiry": (

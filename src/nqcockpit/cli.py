@@ -181,18 +181,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         alg_tz = _ZI("Africa/Algiers")
         snap_ny = snap.timestamp_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
         snap_alg = snap.timestamp_utc.astimezone(alg_tz).strftime("%Y-%m-%d %H:%M:%S (Alger)")
-        age_val = snap.data_age_minutes
-        age_str = f"{age_val:.1f} min" if age_val is not None else "inconnu"
+        # Fraîcheur détaillée (Tâche 3)
+        cboe_chain_age_s = (
+            f"{snap.cboe_chain_age_minutes:.1f} min"
+            if snap.cboe_chain_age_minutes is not None
+            else (
+                f"{snap.data_age_minutes:.1f} min"
+                if snap.data_age_minutes is not None
+                else "inconnu"
+            )
+        )
+        cboe_quote_delay_s = (
+            f"{snap.cboe_active_quote_delay_minutes:.1f} min"
+            if snap.cboe_active_quote_delay_minutes is not None
+            else "inconnu"
+        )
 
         print("\n" + "=" * 70)
         print("  NQ COCKPIT — SNAPSHOT DE NIVEAUX & RÉGIME GAMMA")
-        print(f"  Horodatage : {snap_ny} | {snap_alg}")
-        print(f"  Age données : {age_str} | Statut : {snap.status.value}")
+        print(f"  Horodatage          : {snap_ny} | {snap_alg}")
+        print(
+            f"  Âge chaîne CBOE     : {cboe_chain_age_s} | "
+            f"Retard cotations : {cboe_quote_delay_s}"
+        )
+        print(f"  Statut global       : {snap.status.value}")
         print("=" * 70)
 
-        # --- BLOC CBOE (Tâche 2 : RECHARGEMENT PROUVÉ) ---
+        # --- BLOC CBOE (Tâche 2 : RECHARGEMENT PROUVÉ & TÂCHE 3 : RETARD RÉEL) ---
         print("-" * 70)
-        print("  SOURCE CBOE (RECHARGEMENT PROUVÉ)")
+        print("  SOURCE CBOE (RECHARGEMENT PROUVÉ & FRAÎCHEUR)")
         cboe_req_et = (
             snap.cboe_request_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
             if snap.cboe_request_time_utc
@@ -219,6 +236,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         dur_str = f"{snap.cboe_duration_ms:.1f} ms" if snap.cboe_duration_ms is not None else "N/A"
         print(f"  Code HTTP / Durée    : {snap.cboe_http_status or 200} | {dur_str}")
         print(f"  Horodatage chaîne    : {cboe_int_et} | {cboe_int_alg}")
+        print(f"  Âge chaîne JSON      : {cboe_chain_age_s}")
+        print(f"  Retard cotations act.: {cboe_quote_delay_s} (délai de rediffusion gratuit CBOE)")
         reloaded_str = "OUI (téléchargement direct forcé)" if snap.cboe_reloaded else "NON (cache)"
         print(f"  Chaîne rechargée     : {reloaded_str}")
         if snap.cboe_age_stats:
@@ -228,9 +247,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  Options exclues      : {excl_zero} contrats sans cotation (bid=0 ou ask=0)")
         print(f"  Statut source CBOE   : {snap.status.value}")
 
-        # --- SPOT NQ & NDX (Tâche 1 : ÂGE RÉEL DU SPOT NQ) ---
+        # --- SPOT NQ & NDX (Tâche 1 : ÂGE RÉEL DU SPOT NQ & TÂCHE 2 : SPOT NDX) ---
         print("-" * 70)
-        print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts")
+        ndx_ts_live_str = ""
+        if snap.live_basis_ndx_time_utc:
+            ndx_l_et = snap.live_basis_ndx_time_utc.astimezone(et_tz).strftime(
+                "%Y-%m-%d %H:%M:%S ET"
+            )
+            ndx_l_alg = snap.live_basis_ndx_time_utc.astimezone(alg_tz).strftime(
+                "%Y-%m-%d %H:%M:%S (Alger)"
+            )
+            ndx_ts_live_str = f" ({ndx_l_et} | {ndx_l_alg})"
+        print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts{ndx_ts_live_str}")
         nq_stale_flag = " [SPOT NQ PÉRIMÉ - DÉGRADÉ]" if snap.spot_nq_is_stale else " [OK]"
         nq_age_s = (
             f"{snap.spot_nq_age_minutes:.1f} min"
@@ -248,56 +276,123 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(f"    Horodatage spot NQ : {nq_bar_et} | {nq_bar_alg}")
 
-        # --- BLOC BASE ---
+        # --- BLOC BASE (TÂCHE 2 : SÉANCE PRÉCÉDENTE / PARITÉ / LIVE) ---
         print("-" * 70)
-        print("  BLOC BASE")
-        # NQ timestamp
-        if snap.basis_nq_time_utc:
-            nq_ts_et = snap.basis_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
-            nq_ts_alg = snap.basis_nq_time_utc.astimezone(alg_tz).strftime(
+        print("  BLOC BASE (SÉANCE PRÉCÉDENTE / PARITÉ / LIVE)")
+        # 1. Base séance précédente
+        if snap.basis_nq_time_utc and snap.basis_ndx_time_utc:
+            b_nq_et = snap.basis_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+            b_nq_alg = snap.basis_nq_time_utc.astimezone(alg_tz).strftime(
                 "%Y-%m-%d %H:%M:%S (Alger)"
             )
-            print(f"  NQ barre utilisée    : close={snap.basis_nq_close:,.2f} pts")
-            print(f"    Horodatage NQ      : {nq_ts_et} | {nq_ts_alg}")
-        else:
-            print("  NQ barre utilisée    : N/A")
-        # NDX/CBOE timestamp
-        if snap.basis_ndx_time_utc:
-            ndx_ts_et = snap.basis_ndx_time_utc.astimezone(et_tz).strftime(
-                "%Y-%m-%d %H:%M:%S ET"
-            )
-            ndx_ts_alg = snap.basis_ndx_time_utc.astimezone(alg_tz).strftime(
+            b_ndx_et = snap.basis_ndx_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+            b_ndx_alg = snap.basis_ndx_time_utc.astimezone(alg_tz).strftime(
                 "%Y-%m-%d %H:%M:%S (Alger)"
             )
-            print(f"  NDX/CBOE utilisé     : spot={snap.basis_ndx_spot:,.2f} pts")
-            print(f"    Horodatage NDX     : {ndx_ts_et} | {ndx_ts_alg}")
+            print(
+                f"  1. Base séance précédente : {snap.basis:+,.2f} pts "
+                f"[{snap.basis_status.value}]"
+            )
+            print(
+                f"       Barre NQ close       : {snap.basis_nq_close:,.2f} pts à "
+                f"{b_nq_et} | {b_nq_alg}"
+            )
+            print(
+                f"       Spot NDX cotation    : {snap.basis_ndx_spot:,.2f} pts à "
+                f"{b_ndx_et} | {b_ndx_alg}"
+            )
+            if snap.basis_delta_t_minutes is not None:
+                align_s = "OK" if snap.basis_is_aligned else "NON ALIGNÉE"
+                print(
+                    f"       Delta-t NQ/NDX       : {snap.basis_delta_t_minutes:.2f} min "
+                    f"(tol. {snap.basis_tolerance_minutes:.1f} min) [{align_s}]"
+                )
+            if snap.basis_delay_compensation_note:
+                print(f"       Origine données      : {snap.basis_delay_compensation_note}")
         else:
-            print("  NDX/CBOE utilisé     : N/A")
-        # Delta-t et tolérance
-        if snap.basis_delta_t_minutes is not None:
-            aligned_flag = "OK" if snap.basis_is_aligned else "NON ALIGNEE [DEGRADE]"
             print(
-                f"  Delta-t NQ/NDX       : {snap.basis_delta_t_minutes:.2f} min "
-                f"(tol. {snap.basis_tolerance_minutes:.1f} min) [{aligned_flag}]"
+                f"  1. Base séance précédente : {snap.basis:+,.2f} pts "
+                f"[{snap.basis_status.value}]"
             )
-        print(f"  Formule base         : {snap.basis_formula}")
-        print(f"  Méthode retenue      : {snap.basis_method}")
-        if snap.basis_delay_compensation_note:
-            print(f"  Origine données      : {snap.basis_delay_compensation_note}")
-        # Valeur de la base et parité
-        if snap.synthetic_basis is not None:
-            p_diff = abs(snap.basis - snap.synthetic_basis)
-            print(
-                f"  Base empirique       : {snap.basis:+,.2f} pts [{snap.basis_status.value}]"
-            )
-            print(
-                f"  Base parité          : {snap.synthetic_basis:+,.2f} pts "
-                f"(écart : {p_diff:,.2f} pts)"
-            )
-        else:
-            print(f"  Base future-spot     : {snap.basis:+,.2f} pts [{snap.basis_status.value}]")
 
-        # --- NIVEAUX & MURS UTILES (Tâche 3) ---
+        # 2. Base parité synthétique
+        synth_s = (
+            f"{snap.synthetic_basis:+,.2f} pts"
+            if snap.synthetic_basis is not None
+            else "INDISPONIBLE"
+        )
+        print(f"  2. Base parité synthétique: {synth_s}")
+
+        # 3. Base live
+        if snap.live_basis_available and snap.live_basis_value is not None:
+            l_nq_et = (
+                snap.live_basis_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+                if snap.live_basis_nq_time_utc
+                else "N/A"
+            )
+            l_nq_alg = (
+                snap.live_basis_nq_time_utc.astimezone(alg_tz).strftime(
+                    "%Y-%m-%d %H:%M:%S (Alger)"
+                )
+                if snap.live_basis_nq_time_utc
+                else "N/A"
+            )
+            l_ndx_et = (
+                snap.live_basis_ndx_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+                if snap.live_basis_ndx_time_utc
+                else "N/A"
+            )
+            l_ndx_alg = (
+                snap.live_basis_ndx_time_utc.astimezone(alg_tz).strftime(
+                    "%Y-%m-%d %H:%M:%S (Alger)"
+                )
+                if snap.live_basis_ndx_time_utc
+                else "N/A"
+            )
+            dt_s = (
+                f"{snap.live_basis_delta_t_minutes:.2f} min"
+                if snap.live_basis_delta_t_minutes is not None
+                else "N/A"
+            )
+            print(
+                f"  3. Base live              : {snap.live_basis_value:+,.2f} pts "
+                f"[{snap.live_basis_status.value}]"
+            )
+            print(f"       Barre NQ live        : {l_nq_et} | {l_nq_alg}")
+            print(f"       Spot NDX live        : {l_ndx_et} | {l_ndx_alg}")
+            print(f"       Delta-t live         : {dt_s} (tol. 1.0 min) [OK]")
+        else:
+            reason = snap.live_basis_unavailable_reason or "Données insuffisantes"
+            print(
+                f"  3. Base live              : INDISPONIBLE ({reason}) "
+                f"[{snap.live_basis_status.value}]"
+            )
+
+        # Comparatif des bases et écarts croisés
+        print("  Comparatif des 3 bases :")
+        if snap.spread_live_vs_prev_basis is not None:
+            print(
+                f"    - Écart Live vs Séance précédente   : "
+                f"{snap.spread_live_vs_prev_basis:+,.2f} pts"
+            )
+        else:
+            print("    - Écart Live vs Séance précédente   : N/A (base live indisponible)")
+        if snap.spread_live_vs_parity_basis is not None:
+            print(
+                f"    - Écart Live vs Parité              : "
+                f"{snap.spread_live_vs_parity_basis:+,.2f} pts"
+            )
+        else:
+            print("    - Écart Live vs Parité              : N/A (live ou parité indisponible)")
+        if snap.spread_prev_vs_parity_basis is not None:
+            print(
+                f"    - Écart Séance précédente vs Parité : "
+                f"{snap.spread_prev_vs_parity_basis:+,.2f} pts"
+            )
+        else:
+            print("    - Écart Séance précédente vs Parité : N/A")
+
+        # --- NIVEAUX & MURS UTILES (Tâche 4 : WALLS UTILES ±3%) ---
         print("-" * 70)
         gex_line = (
             f"  Net GEX Total        : {snap.net_gex / 1e6:+,.2f} M$/1% (Modèle, {snap.oi_flag})"
@@ -311,7 +406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         flip_nq = f"{snap.gamma_flip_nq:,.2f}" if snap.gamma_flip_nq else "ABSENT"
         print(f"  Gamma Flip (Zéro)    : NDX {flip_ndx} | NQ {flip_nq}")
 
-        # Murs utiles (dans fenêtre ±wall_window_pct, e.g. ±10 %)
+        # Murs utiles (dans fenêtre ±wall_window_pct, ex. ±3 %)
         win_str = f"±{snap.wall_window_pct * 100:.0f}%"
         cw_u_ndx = f"{snap.call_wall_useful_ndx:,.2f}" if snap.call_wall_useful_ndx else "N/A"
         cw_u_nq = f"{snap.call_wall_useful_nq:,.2f}" if snap.call_wall_useful_nq else "N/A"
@@ -379,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             z_gex = f"{snap.zero_dte_net_gex / 1e6:+,.2f} M$" if snap.zero_dte_net_gex else "N/A"
             print(f"  0DTE Call/Put Wall   : NQ {z_cw} / {z_pw} (Net GEX : {z_gex})")
 
-        # --- EXPECTED MOVE (Tâche 4 : DÉCOMPOSITION EXPLICITE DES SPOTS) ---
+        # --- EXPECTED MOVE (TÂCHE 1 : DIAGNOSTIC DU STRADDLE DÉTAILLÉ) ---
         if snap.expected_move:
             em = snap.expected_move
             print("-" * 70)
@@ -401,7 +496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  Méthode IV           : +/- {iv_pts:.1f} pts NQ")
             print(f"    Bornes IV          : [{iv_lo:,.2f} .. {iv_hi:,.2f}]")
 
-            # Tâche 4 : Décomposition explicite des spots de référence
+            # Décomposition des spots
             print("    Décomposition des spots :")
             print(f"      - Spot NDX formule             : {em.spot_ndx_used:,.2f} pts")
             print(f"      - Spot NQ observé (centrage)   : {em.spot_nq_observed:,.2f} pts")
@@ -431,6 +526,83 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             if em.status_explanation:
                 print(f"  [!] {em.status_explanation}")
+
+            # Sous-bloc DIAGNOSTIC STRADDLE DÉTAILLÉ (Tâche 1)
+            sd = em.straddle_diagnostic
+            if sd:
+                print("    --- STRADDLE DIAGNOSTIC ---")
+                print(f"      Spot NDX utilisé pour strike ATM : {sd.spot_ndx_used:,.2f} pts")
+                print(f"      Strike ATM retenu               : {sd.atm_strike:,.2f}")
+                r_match_s = (
+                    "IDENTIQUES (OK)"
+                    if sd.roots_match
+                    else f"DIVERGENTES ({sd.call_leg.root} vs {sd.put_leg.root}) [DÉGRADÉ]"
+                )
+                exp_match_s = (
+                    "IDENTIQUES (OK)"
+                    if sd.expiries_match
+                    else f"DIVERGENTES ({sd.call_leg.expiry} vs {sd.put_leg.expiry}) [DÉGRADÉ]"
+                )
+                print(
+                    f"      Racines C/P                     : Call={sd.call_leg.root}, "
+                    f"Put={sd.put_leg.root} [{r_match_s}]"
+                )
+                print(
+                    f"      Expirations C/P                 : Call={sd.call_leg.expiry}, "
+                    f"Put={sd.put_leg.expiry} [{exp_match_s}]"
+                )
+                c_spr_warn = " [LARGE - DÉGRADÉ]" if sd.call_leg.is_spread_wide else " [OK]"
+                print(
+                    f"      Jambe Call ({sd.call_leg.root:4s})             : "
+                    f"bid={sd.call_leg.bid:.2f}, ask={sd.call_leg.ask:.2f}, "
+                    f"mid={sd.call_leg.mid:.2f} | IV={sd.call_leg.iv * 100:.2f}%, "
+                    f"vol={sd.call_leg.volume:.0f}"
+                )
+                print(
+                    f"        Largeur relative Call         : "
+                    f"{sd.call_leg.spread_rel_pct:.1f}%{c_spr_warn}"
+                )
+                print(
+                    f"        Horodatage cotation Call      : "
+                    f"{sd.call_leg.quote_time_et or 'N/A'} | "
+                    f"{sd.call_leg.quote_time_algiers or 'N/A'}"
+                )
+                p_spr_warn = " [LARGE - DÉGRADÉ]" if sd.put_leg.is_spread_wide else " [OK]"
+                print(
+                    f"      Jambe Put ({sd.put_leg.root:4s})              : "
+                    f"bid={sd.put_leg.bid:.2f}, ask={sd.put_leg.ask:.2f}, "
+                    f"mid={sd.put_leg.mid:.2f} | IV={sd.put_leg.iv * 100:.2f}%, "
+                    f"vol={sd.put_leg.volume:.0f}"
+                )
+                print(
+                    f"        Largeur relative Put          : "
+                    f"{sd.put_leg.spread_rel_pct:.1f}%{p_spr_warn}"
+                )
+                print(
+                    f"        Horodatage cotation Put       : "
+                    f"{sd.put_leg.quote_time_et or 'N/A'} | "
+                    f"{sd.put_leg.quote_time_algiers or 'N/A'}"
+                )
+                print(f"      Prix Straddle pur (C+P)         : {sd.straddle_points:.2f} pts NDX")
+                print(
+                    f"      IV implicite du Straddle        : "
+                    f"{sd.implied_iv_straddle * 100:.2f}% "
+                    f"(vs IV ATM CBOE : {sd.iv_atm_used * 100:.2f}%)"
+                )
+                print(f"      Écart relatif Straddle vs IV    : {sd.spread_pct_vs_iv:.1f}%")
+                if sd.neighbors:
+                    print("      Strikes ATM voisins :")
+                    for n in sd.neighbors:
+                        is_atm_str = " (ATM)" if n.strike == sd.atm_strike else ""
+                        print(
+                            f"        Strike {n.strike:,.0f}{is_atm_str:6s} : "
+                            f"Call mid={n.call_mid:.2f}, Put mid={n.put_mid:.2f} -> "
+                            f"Straddle={n.straddle_mid:.2f} pts"
+                        )
+                diag_status_s = "DÉGRADÉ" if sd.is_degraded else "OK"
+                print(f"      Statut diagnostic Straddle      : [{diag_status_s}]")
+                if sd.degraded_reason:
+                    print(f"      Cause identifiée                : {sd.degraded_reason}")
 
         if snap.max_pain_nq:
             print(

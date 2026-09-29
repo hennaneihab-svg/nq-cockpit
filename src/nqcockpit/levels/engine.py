@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -29,7 +30,7 @@ from nqcockpit.data.basis import (
     synthetic_futures_basis_from_options,
 )
 from nqcockpit.data.calendar import CALENDAR
-from nqcockpit.data.cboe import CboeChainSnapshot
+from nqcockpit.data.cboe import OCC_RE, CboeChainSnapshot
 from nqcockpit.data.db import apply_migrations, get_db_connection, insert_snapshot
 from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus, PairResult
 from nqcockpit.levels import greeks
@@ -38,11 +39,52 @@ from nqcockpit.levels.models import (
     ExpectedMoveInfo,
     GammaWall,
     LevelsSnapshot,
+    StraddleDiagnostic,
+    StraddleLegInfo,
+    StraddleStrikeNeighbor,
 )
 
 log = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
+TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+_ALGIERS_FMT = "%Y-%m-%d %H:%M:%S (Alger)"
+_ET_FMT = "%Y-%m-%d %H:%M:%S ET"
+
+
+def _fmt_et(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(ET).strftime(_ET_FMT)
+
+
+def _fmt_algiers(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+
+
+def _format_quote_time(val: Any) -> tuple[str | None, str | None]:
+    """Formate une date/heure de cotation CBOE en ET et Alger."""
+    if not val or not isinstance(val, str):
+        return None, None
+    clean = val.strip().replace("Z", "")
+    try:
+        if "T" in clean:
+            dt_raw = datetime.fromisoformat(clean)
+        else:
+            dt_raw = datetime.strptime(clean, "%Y-%m-%d %H:%M:%S")
+        if dt_raw.tzinfo is None:
+            dt_utc = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+        else:
+            dt_utc = dt_raw.astimezone(timezone.utc)
+        et_str = dt_utc.astimezone(ET).strftime(_ET_FMT)
+        alg_str = dt_utc.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+        return et_str, alg_str
+    except Exception:
+        return str(val), str(val)
+
+
 CONTRACT_MULTIPLIER = 100.0  # Multiplicateur d'options sur indice NDX
 ZG_RANGE = 0.08  # Grille +/- 8%
 ZG_STEPS = 101
@@ -214,25 +256,175 @@ def calculate_expected_move(
     # Formule analytique : S * IV * sqrt(jours / 252)
     formula_move = float(spot * iv_atm * np.sqrt(days / 252.0))
 
-    # Prix du straddle ATM du front (C_atm + P_atm)
+    # Prix du straddle ATM du front (C_atm + P_atm) et Diagnostic Straddle détaillé
     straddle_move = None
-    atm_strike = sub_valid_iv.loc[atm_idx, "strike"]
+    straddle_diag: StraddleDiagnostic | None = None
+    atm_strike = float(sub_valid_iv.loc[atm_idx, "strike"])
     call_atm = sub[(sub["strike"] == atm_strike) & (sub["type"] == "C")]
     put_atm = sub[(sub["strike"] == atm_strike) & (sub["type"] == "P")]
 
     if not call_atm.empty and not put_atm.empty:
-        c_bid = float(call_atm.iloc[0]["bid"])
-        c_ask = float(call_atm.iloc[0]["ask"])
-        p_bid = float(put_atm.iloc[0]["bid"])
-        p_ask = float(put_atm.iloc[0]["ask"])
+        c_row = call_atm.iloc[0]
+        p_row = put_atm.iloc[0]
 
-        c_last = float(call_atm.iloc[0]["last_trade_price"])
-        p_last = float(put_atm.iloc[0]["last_trade_price"])
+        c_bid = float(c_row["bid"])
+        c_ask = float(c_row["ask"])
+        p_bid = float(p_row["bid"])
+        p_ask = float(p_row["ask"])
+
+        c_last = float(c_row["last_trade_price"])
+        p_last = float(p_row["last_trade_price"])
         c_mid = (c_bid + c_ask) / 2.0 if (c_bid + c_ask) > 0 else c_last
         p_mid = (p_bid + p_ask) / 2.0 if (p_bid + p_ask) > 0 else p_last
 
         if c_mid > 0 and p_mid > 0:
             straddle_move = float(c_mid + p_mid)
+
+        # Extraction des racines OCC
+        c_sym = str(c_row.get("contract", ""))
+        p_sym = str(p_row.get("contract", ""))
+        m_c = OCC_RE.match(c_sym)
+        m_p = OCC_RE.match(p_sym)
+        c_root = m_c.group("root") if m_c else "NDX"
+        p_root = m_p.group("root") if m_p else "NDX"
+
+        c_exp = c_row["expiry"] if isinstance(c_row["expiry"], date) else nearest_exp
+        p_exp = p_row["expiry"] if isinstance(p_row["expiry"], date) else nearest_exp
+
+        c_spread_rel = (c_ask - c_bid) / c_mid * 100.0 if c_mid > 0 else 0.0
+        p_spread_rel = (p_ask - p_bid) / p_mid * 100.0 if p_mid > 0 else 0.0
+
+        try:
+            cfg = load_config()
+            max_spread_pct = getattr(cfg.levels, "straddle_max_spread_pct", 0.20) * 100.0
+        except Exception:
+            max_spread_pct = 20.0
+
+        c_time_et, c_time_alg = _format_quote_time(c_row.get("last_trade_time"))
+        p_time_et, p_time_alg = _format_quote_time(p_row.get("last_trade_time"))
+
+        c_leg = StraddleLegInfo(
+            option_type="C",
+            root=c_root,
+            expiry=c_exp,
+            strike=atm_strike,
+            bid=c_bid,
+            ask=c_ask,
+            mid=c_mid,
+            spread_rel_pct=c_spread_rel,
+            iv=float(c_row.get("iv", 0.0)),
+            volume=float(c_row.get("volume", 0.0)),
+            quote_time_et=c_time_et,
+            quote_time_algiers=c_time_alg,
+            is_spread_wide=(c_spread_rel > max_spread_pct),
+        )
+
+        p_leg = StraddleLegInfo(
+            option_type="P",
+            root=p_root,
+            expiry=p_exp,
+            strike=atm_strike,
+            bid=p_bid,
+            ask=p_ask,
+            mid=p_mid,
+            spread_rel_pct=p_spread_rel,
+            iv=float(p_row.get("iv", 0.0)),
+            volume=float(p_row.get("volume", 0.0)),
+            quote_time_et=p_time_et,
+            quote_time_algiers=p_time_alg,
+            is_spread_wide=(p_spread_rel > max_spread_pct),
+        )
+
+        roots_match = (c_root == p_root)
+        expiries_match = (c_exp == p_exp)
+        straddle_pts = c_mid + p_mid
+
+        # IV implicite du straddle via approximation Brenner-Subrahmanyam inversée :
+        # straddle / (0.8 * spot * sqrt(j/252))
+        implied_iv = 0.0
+        denom_iv = 0.8 * spot * np.sqrt(days / 252.0)
+        if denom_iv > 0:
+            implied_iv = straddle_pts / denom_iv
+
+        spread_pct_vs_iv = 0.0
+        if formula_move > 0:
+            denom_m = max(abs(straddle_pts), abs(formula_move))
+            spread_pct_vs_iv = abs(straddle_pts - formula_move) / denom_m * 100.0
+
+        # Les 3 strikes voisins ATM (ATM-1, ATM, ATM+1)
+        unique_strikes = np.sort(sub["strike"].unique())
+        atm_pos = np.where(unique_strikes == atm_strike)[0]
+        neighbors: list[StraddleStrikeNeighbor] = []
+        if len(atm_pos) > 0:
+            idx_k = int(atm_pos[0])
+            start_k = max(0, idx_k - 1)
+            end_k = min(len(unique_strikes), idx_k + 2)
+            for k_val in unique_strikes[start_k:end_k]:
+                c_k = sub[(sub["strike"] == k_val) & (sub["type"] == "C")]
+                p_k = sub[(sub["strike"] == k_val) & (sub["type"] == "P")]
+                c_k_mid = 0.0
+                p_k_mid = 0.0
+                if not c_k.empty:
+                    cb = float(c_k.iloc[0]["bid"])
+                    ca = float(c_k.iloc[0]["ask"])
+                    cl = float(c_k.iloc[0]["last_trade_price"])
+                    c_k_mid = (cb + ca) / 2.0 if (cb + ca) > 0 else cl
+                if not p_k.empty:
+                    pb = float(p_k.iloc[0]["bid"])
+                    pa = float(p_k.iloc[0]["ask"])
+                    pl = float(p_k.iloc[0]["last_trade_price"])
+                    p_k_mid = (pb + pa) / 2.0 if (pb + pa) > 0 else pl
+                neighbors.append(
+                    StraddleStrikeNeighbor(
+                        strike=float(k_val),
+                        call_mid=c_k_mid,
+                        put_mid=p_k_mid,
+                        straddle_mid=c_k_mid + p_k_mid,
+                    )
+                )
+
+        is_diag_degraded = False
+        reasons: list[str] = []
+        if not roots_match:
+            is_diag_degraded = True
+            reasons.append(f"Racines divergentes ({c_root} vs {p_root})")
+        if not expiries_match:
+            is_diag_degraded = True
+            reasons.append(f"Échéances divergentes ({c_exp} vs {p_exp})")
+        if c_leg.is_spread_wide:
+            is_diag_degraded = True
+            reasons.append(
+                f"Spread Call relatif large ({c_spread_rel:.1f}% > {max_spread_pct:.0f}%)"
+            )
+        if p_leg.is_spread_wide:
+            is_diag_degraded = True
+            reasons.append(
+                f"Spread Put relatif large ({p_spread_rel:.1f}% > {max_spread_pct:.0f}%)"
+            )
+        if spread_pct_vs_iv > 25.0:
+            is_diag_degraded = True
+            reasons.append(
+                f"Écart Straddle vs IV ({spread_pct_vs_iv:.1f}% > 25%) : "
+                "divergence d'annualisation 0DTE entre base ACT/365 continu (CBOE IV) "
+                "et convention trading-days ACT/252 (cockpit) ; "
+                "straddle réel de marché non forcé"
+            )
+
+        straddle_diag = StraddleDiagnostic(
+            spot_ndx_used=spot,
+            atm_strike=atm_strike,
+            call_leg=c_leg,
+            put_leg=p_leg,
+            roots_match=roots_match,
+            expiries_match=expiries_match,
+            straddle_points=straddle_pts,
+            implied_iv_straddle=implied_iv,
+            iv_atm_used=iv_atm,
+            spread_pct_vs_iv=spread_pct_vs_iv,
+            neighbors=neighbors,
+            is_degraded=is_diag_degraded,
+            degraded_reason=" | ".join(reasons) if reasons else "OK",
+        )
 
     return ExpectedMoveInfo(
         formula_move=formula_move,
@@ -244,6 +436,7 @@ def calculate_expected_move(
         lower_bound_nq=0.0,  # sera rempli avec la base
         upper_bound_nq=0.0,
         expiry=nearest_exp if isinstance(nearest_exp, date) else None,
+        straddle_diagnostic=straddle_diag,
     )
 
 
@@ -296,21 +489,7 @@ def calculate_max_pain(
 
 
 
-TZ_ALGIERS = ZoneInfo("Africa/Algiers")
-_ALGIERS_FMT = "%Y-%m-%d %H:%M:%S (Alger)"
-_ET_FMT = "%Y-%m-%d %H:%M:%S ET"
 
-
-def _fmt_et(dt: datetime | None) -> str | None:
-    if dt is None:
-        return None
-    return dt.astimezone(ET).strftime(_ET_FMT)
-
-
-def _fmt_algiers(dt: datetime | None) -> str | None:
-    if dt is None:
-        return None
-    return dt.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
 
 
 def build_diagnostic_1c(
@@ -652,6 +831,80 @@ class LevelsEngine:
             "sont des « niveaux NQ (convertis) » via base"
         )
 
+        # Tâche 2 : Base Live et comparatif des 3 bases
+        live_basis_val: float | None = None
+        live_basis_nq_ts: datetime | None = None
+        live_basis_ndx_ts: datetime | None = None
+        live_basis_delta_t: float | None = None
+        live_basis_avail: bool = False
+        live_basis_status: DataStatus = DataStatus.DEGRADED
+        live_basis_unavail_reason: str | None = None
+
+        tol_live_min = 1.0
+
+        if ndx_bars and nq_bars:
+            last_ndx_bar = ndx_bars[-1]
+            live_basis_ndx_ts = last_ndx_bar.timestamp_utc
+            best_nq_match = min(
+                nq_bars,
+                key=lambda b: abs((b.timestamp_utc - last_ndx_bar.timestamp_utc).total_seconds()),
+            )
+            dt_s = abs((best_nq_match.timestamp_utc - last_ndx_bar.timestamp_utc).total_seconds())
+            live_basis_delta_t = dt_s / 60.0
+            live_basis_nq_ts = best_nq_match.timestamp_utc
+
+            if live_basis_delta_t <= tol_live_min:
+                live_basis_val = best_nq_match.close - last_ndx_bar.close
+                live_basis_avail = True
+                live_basis_status = DataStatus.OK
+            else:
+                live_basis_unavail_reason = (
+                    f"Désalignement temporel ({live_basis_delta_t:.2f} min "
+                    f"> tolérance {tol_live_min:.1f} min)"
+                )
+        elif not nq_bars and not ndx_bars:
+            live_basis_unavail_reason = "Barres NQ et cotations NDX absentes"
+        elif not nq_bars:
+            live_basis_unavail_reason = "Barres NQ absentes"
+        else:
+            live_basis_unavail_reason = "Cotations NDX absentes"
+
+        # Comparatif des 3 bases
+        prev_basis_num = candidate_basis.basis if candidate_basis else None
+        spread_live_prev = (
+            (live_basis_val - prev_basis_num)
+            if (live_basis_val is not None and prev_basis_num is not None)
+            else None
+        )
+        spread_live_parity = (
+            (live_basis_val - synth_basis)
+            if (live_basis_val is not None and synth_basis is not None)
+            else None
+        )
+        spread_prev_parity = (
+            (prev_basis_num - synth_basis)
+            if (prev_basis_num is not None and synth_basis is not None)
+            else None
+        )
+
+        # Tâche 3 : Métriques de fraîcheur CBOE distinctes
+        cboe_chain_age_min: float | None = None
+        if chain.chain_internal_timestamp_utc:
+            cboe_chain_age_min = max(
+                0.0, (now_utc - chain.chain_internal_timestamp_utc).total_seconds() / 60.0
+            )
+
+        cboe_active_delay_min: float | None = None
+        if chain.latest_quote_time_utc:
+            cboe_active_delay_min = max(
+                0.0, (now_utc - chain.latest_quote_time_utc).total_seconds() / 60.0
+            )
+
+        try:
+            cboe_delay_max = getattr(cfg.levels, "cboe_delay_max_minutes", 20.0)
+        except Exception:
+            cboe_delay_max = 20.0
+
         # 3. Filtrage strict des échéances expirées
         # Session de référence : séance en cours ou prochaine séance de bourse
         df_options = chain.options_df
@@ -699,6 +952,18 @@ class LevelsEngine:
                 cboe_duration_ms=chain.request_duration_ms,
                 cboe_internal_timestamp_utc=chain.chain_internal_timestamp_utc,
                 cboe_reloaded=chain.chain_reloaded,
+                cboe_chain_age_minutes=cboe_chain_age_min,
+                cboe_active_quote_delay_minutes=cboe_active_delay_min,
+                live_basis_value=live_basis_val,
+                live_basis_nq_time_utc=live_basis_nq_ts,
+                live_basis_ndx_time_utc=live_basis_ndx_ts,
+                live_basis_delta_t_minutes=live_basis_delta_t,
+                live_basis_status=live_basis_status,
+                live_basis_available=live_basis_avail,
+                live_basis_unavailable_reason=live_basis_unavail_reason,
+                spread_live_vs_prev_basis=spread_live_prev,
+                spread_live_vs_parity_basis=spread_live_parity,
+                spread_prev_vs_parity_basis=spread_prev_parity,
                 anomalies=anomalies,
             )
 
@@ -941,11 +1206,22 @@ class LevelsEngine:
         )
         basis_delay_note = candidate_basis.delay_compensation_note if candidate_basis else None
 
+
         # Statut global du snapshot
         global_status = chain.status
         if basis_st == DataStatus.DEGRADED and global_status == DataStatus.OK:
             global_status = DataStatus.DEGRADED
         if spot_nq_is_stale and global_status == DataStatus.OK:
+            global_status = DataStatus.DEGRADED
+        if (
+            in_regular_session
+            and cboe_active_delay_min is not None
+            and cboe_active_delay_min > cboe_delay_max
+        ):
+            anomalies.append(
+                f"DÉGRADÉ : Retard cotations CBOE {cboe_active_delay_min:.1f} min "
+                f"> seuil {cboe_delay_max:.1f} min"
+            )
             global_status = DataStatus.DEGRADED
 
         snap = LevelsSnapshot(
@@ -1022,12 +1298,25 @@ class LevelsEngine:
             spot_nq_time_utc=spot_nq_time_utc,
             spot_nq_age_minutes=spot_nq_age_min,
             spot_nq_is_stale=spot_nq_is_stale,
-            # CBOE rechargement prouvé (Tâche 2)
+            # CBOE rechargement prouvé & fraîcheur détaillée (Tâche 2 / 3)
             cboe_request_time_utc=chain.fetched_at_utc,
             cboe_http_status=chain.http_status,
             cboe_duration_ms=chain.request_duration_ms,
             cboe_internal_timestamp_utc=chain.chain_internal_timestamp_utc,
             cboe_reloaded=chain.chain_reloaded,
+            cboe_chain_age_minutes=cboe_chain_age_min,
+            cboe_active_quote_delay_minutes=cboe_active_delay_min,
+            # Base live et comparatif (Tâche 2)
+            live_basis_value=live_basis_val,
+            live_basis_nq_time_utc=live_basis_nq_ts,
+            live_basis_ndx_time_utc=live_basis_ndx_ts,
+            live_basis_delta_t_minutes=live_basis_delta_t,
+            live_basis_status=live_basis_status,
+            live_basis_available=live_basis_avail,
+            live_basis_unavailable_reason=live_basis_unavail_reason,
+            spread_live_vs_prev_basis=spread_live_prev,
+            spread_live_vs_parity_basis=spread_live_parity,
+            spread_prev_vs_parity_basis=spread_prev_parity,
         )
 
         # Enregistrement du fichier JSON horodaté
