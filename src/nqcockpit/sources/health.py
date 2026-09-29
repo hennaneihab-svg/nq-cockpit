@@ -502,29 +502,50 @@ def check_cboe_ndx(
 
     try:
         data = resp.json()
-        timestamp_str = data.get("timestamp")
         data_block = data.get("data", {})
         current_price = data_block.get("current_price")
         options = data_block.get("options", [])
 
-        if not timestamp_str or not str(timestamp_str).strip():
-            return SourceCheckResult(
-                name=name,
-                category=category,
-                status="DÉGRADÉ",
-                latency_ms=latency,
-                measured_at_ny=ts_ny,
-                http_status=200,
-                endpoint=url,
-                message="Âge INCONNU (champ timestamp absent du JSON CBOE)",
-                fallback_plan=fallback,
-            )
+        # Dérivation prioritaire à partir des horodatages des cotations d'options
+        dt_data: datetime | None = None
+        for opt in options:
+            for field_name in ("last_trade_time", "trade_time", "quote_time"):
+                val = opt.get(field_name)
+                if not val or not isinstance(val, str):
+                    continue
+                try:
+                    clean_val = val.replace("Z", "").strip()
+                    if "T" in clean_val:
+                        dt_candidate = datetime.fromisoformat(clean_val)
+                    else:
+                        dt_candidate = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
 
-        try:
-            dt_data = datetime.fromisoformat(str(timestamp_str))
-            if dt_data.tzinfo is None:
-                dt_data = dt_data.replace(tzinfo=timezone.utc)
-        except Exception:
+                    if dt_candidate.tzinfo is None:
+                        dt_candidate = dt_candidate.replace(tzinfo=timezone.utc)
+                    else:
+                        dt_candidate = dt_candidate.astimezone(timezone.utc)
+
+                    if dt_data is None or dt_candidate > dt_data:
+                        dt_data = dt_candidate
+                except Exception:
+                    continue
+
+        # Secours si aucun horodatage n'est extrait des cotations (ex: fixtures)
+        if dt_data is None:
+            timestamp_str = data.get("timestamp")
+            if timestamp_str and str(timestamp_str).strip():
+                try:
+                    clean_val = str(timestamp_str).replace("Z", "").strip()
+                    if "T" in clean_val:
+                        dt_data = datetime.fromisoformat(clean_val)
+                    else:
+                        dt_data = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
+                    if dt_data.tzinfo is None:
+                        dt_data = dt_data.replace(tzinfo=timezone.utc)
+                except Exception:
+                    dt_data = None
+
+        if dt_data is None:
             return SourceCheckResult(
                 name=name,
                 category=category,
@@ -533,7 +554,7 @@ def check_cboe_ndx(
                 measured_at_ny=ts_ny,
                 http_status=200,
                 endpoint=url,
-                message="Âge INCONNU (format timestamp invalide)",
+                message="Âge INCONNU (aucun horodatage de cotation dans les options CBOE)",
                 fallback_plan=fallback,
             )
 

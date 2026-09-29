@@ -104,12 +104,30 @@ class DataFetcher:
                 # Calcul de la latence : écart entre l'heure actuelle UTC et la dernière barre
                 latency_sec = None
                 status = DataStatus.OK
+                notes = ""
                 if bars:
                     last_bar_time = bars[-1].timestamp_utc
                     latency_sec = max(0.0, (now_utc - last_bar_time).total_seconds())
-                    # Sur NQ=F, Yahoo Finance applique souvent ~10-15 min de différé
-                    if latency_sec > 900:  # > 15 minutes
+                    age_min = latency_sec / 60.0
+
+                    from nqcockpit.config import load_config
+                    cfg = load_config()
+                    expected_delay = cfg.data.symbols_expected_delay_minutes.get(symbol, 0)
+                    margin = cfg.data.delay_margin_minutes
+                    max_allowed = expected_delay + margin if expected_delay > 0 else margin
+
+                    if expected_delay > 0 and age_min <= max_allowed:
+                        status = DataStatus.OK
+                        notes = f"source retardée d'environ {int(round(age_min))} min"
+                    elif age_min > max_allowed:
                         status = DataStatus.DEGRADED
+                        notes = (
+                            f"donnée périmée (âge {int(round(age_min))} min "
+                            f"> seuil {max_allowed} min)"
+                        )
+                    else:
+                        status = DataStatus.OK
+                        notes = f"donnée à jour (âge {int(round(age_min))} min)"
 
                 series = BarSeries(
                     symbol=symbol,
@@ -119,11 +137,7 @@ class DataFetcher:
                     fetched_at_utc=now_utc,
                     status=status,
                     latency_seconds=latency_sec,
-                    notes=(
-                        f"Succès (latence barre : {latency_sec:.0f}s)"
-                        if latency_sec
-                        else ""
-                    ),
+                    notes=notes,
                 )
 
                 # Sauvegarder dans le cache

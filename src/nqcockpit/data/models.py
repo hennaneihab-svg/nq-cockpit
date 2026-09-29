@@ -9,11 +9,23 @@ from typing import Any
 
 
 class DataStatus(str, Enum):
-    """Statuts de santé standardisés pour toute donnée du cockpit."""
+    """Statuts de santé standardisés pour toute donnée du cockpit (OK / DÉGRADÉ / BLOQUÉ)."""
 
     OK = "OK"
-    DEGRADED = "DEGRADED"
-    BLOCKED = "BLOCKED"
+    DEGRADED = "DÉGRADÉ"
+    BLOCKED = "BLOQUÉ"
+
+    @classmethod
+    def _missing_(cls, value: object) -> DataStatus | None:
+        if isinstance(value, str):
+            val_upper = value.upper()
+            if val_upper in ("DEGRADED", "DEGRADE", "DÉGRADÉ"):
+                return cls.DEGRADED
+            if val_upper in ("BLOCKED", "BLOQUE", "BLOQUÉ"):
+                return cls.BLOCKED
+            if val_upper == "OK":
+                return cls.OK
+        return None
 
 
 @dataclass(frozen=True)

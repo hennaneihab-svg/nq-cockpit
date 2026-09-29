@@ -420,3 +420,54 @@ def test_bar_archiver_with_preloaded_series(mem_db):
     saved_bars = get_bars(mem_db, "^VIX", "1m")
     assert len(saved_bars) == 2
     assert saved_bars[-1].close == 106.0
+
+
+def test_cboe_parsing_and_age_derivation():
+    """Vérifie la dérivation d'âge depuis les cotations d'options CBOE (audit P01/P02)."""
+    from nqcockpit.data.cboe import parse_cboe_payload, parse_occ
+
+    # 1. Test parse_occ
+    parsed = parse_occ("NDX260930C28000000")
+    assert parsed is not None
+    exp, cp, strike = parsed
+    assert exp == date(2026, 9, 30)
+    assert cp == "C"
+    assert strike == 28000.0
+
+    # 2. Test avec cotations horodatées
+    now_utc = datetime(2026, 9, 28, 20, 15, 0, tzinfo=timezone.utc)
+    raw = {
+        "data": {
+            "current_price": 28120.0,
+            "options": [
+                {
+                    "option": "NDX260930C28000000",
+                    "bid": 150.0,
+                    "ask": 152.0,
+                    "last_trade_time": "2026-09-28T20:00:00Z",
+                },
+            ],
+        }
+    }
+    snap = parse_cboe_payload(raw, now_utc)
+    assert snap.status == DataStatus.OK
+    assert snap.age_minutes == pytest.approx(15.0)
+    assert snap.latest_quote_time_utc == datetime(2026, 9, 28, 20, 0, 0, tzinfo=timezone.utc)
+
+    # 3. Test sans cotations horodatées -> âge inconnu = DÉGRADÉ
+    raw_no_quote_time = {
+        "data": {
+            "current_price": 28120.0,
+            "options": [
+                {
+                    "option": "NDX260930C28000000",
+                    "bid": 150.0,
+                    "ask": 152.0,
+                },
+            ],
+        }
+    }
+    snap_degraded = parse_cboe_payload(raw_no_quote_time, now_utc)
+    assert snap_degraded.status == DataStatus.DEGRADED
+    assert snap_degraded.age_minutes is None
+    assert "âge inconnu" in snap_degraded.notes.lower()

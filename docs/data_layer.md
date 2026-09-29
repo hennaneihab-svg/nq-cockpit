@@ -168,3 +168,17 @@ Conformément aux décisions de `docs/vendor_audit.md` (Section 3.1) :
 # Afficher les statistiques de la base locale
 .\.venv\Scripts\python.exe -m nqcockpit data status
 ```
+
+---
+
+## 6. Retard Mesuré et Logique de Péremption Unifiée
+
+- **Retard mesuré sur `NQ=F` (Yahoo Finance)** :
+  - En séance et continu, l'endpoint gratuit de Yahoo Finance sur `NQ=F` accuse un retard structurel mesuré de **10 à 15 minutes** par rapport au temps réel CME Globex.
+  - Ce retard est une caractéristique inhérente du flux gratuit public, et ne constitue pas une panne réseau.
+- **Règle de péremption unifiée** :
+  - Configuration : `symbols_expected_delay_minutes: {"NQ=F": 15}` et `delay_margin_minutes: 10`.
+  - Tolérance totale admissible : $15 + 10 = 25\text{ minutes}$.
+  - Si l'âge de la dernière barre $\le 25\text{ min}$ : statut **`OK`** avec mention explicite `« source retardée d'environ N min »`.
+  - Si l'âge dépasse $25\text{ min}$ : statut **`DÉGRADÉ`** avec mention `« donnée périmée »`.
+  - Si aucune donnée n'est récupérée : statut **`BLOQUÉ`**.

@@ -106,6 +106,10 @@ class DataConfig:
     intraday_intervals: list[str] = field(default_factory=lambda: ["1m", "5m"])
     basis_max_drift_seconds: float = 60.0
     stale_bar_threshold_minutes: int = 15
+    symbols_expected_delay_minutes: dict[str, int] = field(
+        default_factory=lambda: {"NQ=F": 15}
+    )
+    delay_margin_minutes: int = 10
 
 
 @dataclass(frozen=True)
@@ -384,12 +388,21 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     raw_data = data.get("data", {})
     if not isinstance(raw_data, dict):
         raw_data = {}
+    delays_raw = raw_data.get("symbols_expected_delay_minutes", {"NQ=F": 15})
+    if isinstance(delays_raw, dict):
+        delays_map = {str(k): int(v) for k, v in delays_raw.items()}
+    else:
+        delays_map = {"NQ=F": 15}
+    margin = int(raw_data.get("delay_margin_minutes", 10))
+
     data_cfg = DataConfig(
         db_path=str(raw_data.get("db_path", "data/nqcockpit.db")),
         cache_dir=str(raw_data.get("cache_dir", "data/cache")),
         intraday_intervals=list(raw_data.get("intraday_intervals", ["1m", "5m"])),
         basis_max_drift_seconds=float(raw_data.get("basis_max_drift_seconds", 60.0)),
         stale_bar_threshold_minutes=int(raw_data.get("stale_bar_threshold_minutes", 15)),
+        symbols_expected_delay_minutes=delays_map,
+        delay_margin_minutes=margin,
     )
 
     return AppConfig(
