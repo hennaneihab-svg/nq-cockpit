@@ -1,4 +1,4 @@
-"""Tests for CLI arguments and subcommands."""
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,7 +26,13 @@ def test_cli_no_args(capsys):
 @pytest.mark.parametrize("subcmd", ["run", "check-sources", "snapshot", "brief", "ui"])
 def test_cli_subcommands(subcmd, capsys):
     """Verify each required subcommand runs and outputs notification."""
-    code = main([subcmd])
-    assert code == 0
-    captured = capsys.readouterr()
-    assert f"'{subcmd}'" in captured.out
+    with patch("nqcockpit.sources.health.run_all_checks") as mock_checks:
+        mock_report = MagicMock()
+        mock_report.render_console_table.return_value = "Mock Table"
+        mock_report.save_json.return_value = "reports/source_check.json"
+        mock_checks.return_value = mock_report
+
+        code = main([subcmd])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert f"'{subcmd}'" in captured.out

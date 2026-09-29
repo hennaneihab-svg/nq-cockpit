@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 
 from nqcockpit.logging import get_logger, setup_logging
 
@@ -38,10 +37,10 @@ def test_setup_logging(tmp_path):
     assert last_record["logger"] == "nqcockpit.test_module"
 
 
-def test_secret_masking(tmp_path):
+def test_secret_masking(tmp_path, monkeypatch):
     """Verify that known secrets are masked in log records."""
     log_dir = tmp_path / "logs_mask"
-    os.environ["FRED_API_KEY"] = "super_secret_fred_key"
+    monkeypatch.setenv("FRED_API_KEY", "super_secret_fred_key")
 
     logger = setup_logging(
         level=logging.INFO,

@@ -84,7 +84,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("[nqcockpit] Commande 'run' invoquée (planificateur / exploitation).")
         return 0
     elif args.subcommand == "check-sources":
-        print("[nqcockpit] Commande 'check-sources' invoquée (santé des sources).")
+        from nqcockpit.sources.health import run_all_checks
+
+        print("[nqcockpit] Commande 'check-sources' invoquée (santé des sources)...")
+        report = run_all_checks()
+        print("\n" + report.render_console_table() + "\n")
+        report_path = report.save_json("reports/source_check.json")
+        print(f"[nqcockpit] Rapport complet enregistré dans {report_path}")
         return 0
     elif args.subcommand == "snapshot":
         print("[nqcockpit] Commande 'snapshot' invoquée (snapshot niveaux / GEX).")

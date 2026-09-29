@@ -27,3 +27,7 @@ levels:
 validation:
   min_sessions: 60
   min_event_samples: 12
+sources:
+  bls_contact_email: "contact@nqcockpit.local"
+  stale_data_threshold_minutes: 60
+

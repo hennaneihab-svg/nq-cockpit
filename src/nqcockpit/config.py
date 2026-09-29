@@ -67,6 +67,12 @@ class ValidationConfig:
 
 
 @dataclass(frozen=True)
+class SourcesConfig:
+    bls_contact_email: str = "contact@nqcockpit.local"
+    stale_data_threshold_minutes: int = 60
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -76,6 +82,7 @@ class AppConfig:
     events: EventsConfig
     levels: LevelsConfig
     validation: ValidationConfig
+    sources: SourcesConfig = field(default_factory=SourcesConfig)
 
 
 TIME_REGEX = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -268,6 +275,19 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         min_event_samples=min_event,
     )
 
+    # 9. Sources
+    raw_sources = data.get("sources", {})
+    if not isinstance(raw_sources, dict):
+        raise ConfigError("Invalid 'sources' section in config.")
+    bls_email = str(raw_sources.get("bls_contact_email", "contact@nqcockpit.local"))
+    stale_thresh = raw_sources.get("stale_data_threshold_minutes", 60)
+    if not isinstance(stale_thresh, int) or stale_thresh <= 0:
+        raise ConfigError("sources.stale_data_threshold_minutes must be a positive integer.")
+    sources = SourcesConfig(
+        bls_contact_email=bls_email,
+        stale_data_threshold_minutes=stale_thresh,
+    )
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -277,4 +297,5 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         events=events,
         levels=levels,
         validation=val,
+        sources=sources,
     )
