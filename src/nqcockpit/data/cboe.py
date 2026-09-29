@@ -48,6 +48,10 @@ class CboeChainSnapshot:
     source: str = "CBOE"
     notes: str = ""
     age_stats: dict[str, Any] = field(default_factory=dict)
+    chain_internal_timestamp_utc: datetime | None = None
+    http_status: int | None = None
+    request_duration_ms: float | None = None
+    chain_reloaded: bool = True
 
 
 def _cboe_session() -> requests.Session:
@@ -126,12 +130,14 @@ def extract_cboe_chain_age_stats(
     spot: float,
     now_utc: datetime,
 ) -> tuple[float | None, datetime | None, dict[str, Any]]:
-    """Calcule l'âge de la chaîne CBOE et les statistiques associées.
+    """Calcule l'âge des cotations CBOE et les statistiques associées.
 
-    Âge = maintenant - max(last_trade_time) parmi les options dont le strike est à ±3 % du spot.
-    Horodatages CBOE interprétés en America/New_York s'ils sont sans fuseau horaire.
+    Âge = maintenant - max(last_trade_time) parmi les options dont le strike est à ±3 % du spot
+    ayant des cotations réelles (bid > 0 et ask > 0).
+    Les contrats sans cotation (bid=0 ou ask=0) sont exclus car sans trade récent.
     """
     trades_in_band: list[tuple[datetime, float]] = []
+    excluded_zero_quotes = 0
 
     for opt in raw_options:
         strike = opt.get("strike")
@@ -149,6 +155,17 @@ def extract_cboe_chain_age_stats(
 
         # Filtre ±3% du spot
         if spot > 0 and abs(strike_val - spot) / spot > 0.03:
+            continue
+
+        # Exclusion des contrats sans cotation (bid=0 ou ask=0)
+        try:
+            bid_v = float(opt.get("bid", 0.0) or 0.0)
+            ask_v = float(opt.get("ask", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            bid_v, ask_v = 0.0, 0.0
+
+        if bid_v <= 0.0 or ask_v <= 0.0:
+            excluded_zero_quotes += 1
             continue
 
         for field_name in ("last_trade_time", "trade_time", "quote_time"):
@@ -185,7 +202,7 @@ def extract_cboe_chain_age_stats(
                 continue
 
     if not trades_in_band:
-        return None, None, {}
+        return None, None, {"count": 0, "excluded_zero_quotes": excluded_zero_quotes}
 
     ages = [t[1] for t in trades_in_band]
     latest_dt = max(t[0] for t in trades_in_band)
@@ -196,10 +213,11 @@ def extract_cboe_chain_age_stats(
 
     stats = {
         "count": n_count,
+        "excluded_zero_quotes": excluded_zero_quotes,
         "min_age_minutes": min_age,
         "median_age_minutes": med_age,
         "max_age_minutes": max_age,
-        "aggregate": "max(last_trade_time) sur strikes ±3% spot",
+        "aggregate": "max(last_trade_time) sur strikes ±3% spot (cotations actives)",
     }
     return min_age, latest_dt, stats
 
@@ -242,6 +260,23 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
         raw_options, spot, fetched_at_utc
     )
 
+    # Horodatage interne global de la chaîne CBOE (CDN JSON root ou data timestamp)
+    chain_ts_str = raw.get("timestamp") or data.get("timestamp")
+    chain_internal_dt: datetime | None = None
+    if chain_ts_str and isinstance(chain_ts_str, str):
+        clean_chain_ts = chain_ts_str.replace("Z", "").strip()
+        try:
+            if "T" in clean_chain_ts:
+                chain_internal_dt = datetime.fromisoformat(clean_chain_ts)
+            else:
+                chain_internal_dt = datetime.strptime(clean_chain_ts, "%Y-%m-%d %H:%M:%S")
+            if chain_internal_dt.tzinfo is None:
+                chain_internal_dt = chain_internal_dt.replace(tzinfo=timezone.utc)
+            else:
+                chain_internal_dt = chain_internal_dt.astimezone(timezone.utc)
+        except Exception:
+            chain_internal_dt = None
+
     if latest_quote_dt is None:
         # Repli sur l'ensemble des cotations d'options
         latest_quote_dt = extract_latest_quote_timestamp(raw_options)
@@ -249,84 +284,77 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
             age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
             age_stats = {
                 "count": len(raw_options),
+                "excluded_zero_quotes": age_stats.get("excluded_zero_quotes", 0),
                 "min_age_minutes": age_min,
                 "median_age_minutes": age_min,
                 "max_age_minutes": age_min,
                 "aggregate": "repli: toutes options",
             }
-        else:
-            # Repli sur le timestamp global du JSON si présent (ex: certaines fixtures)
-            ts_str = data.get("timestamp") or raw.get("timestamp")
-            if ts_str and isinstance(ts_str, str):
-                clean_ts = ts_str.replace("Z", "").strip()
-                try:
-                    if "T" in clean_ts:
-                        latest_quote_dt = datetime.fromisoformat(clean_ts)
-                    else:
-                        latest_quote_dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
-                    if latest_quote_dt.tzinfo is None:
-                        latest_quote_dt = (
-                            latest_quote_dt.replace(tzinfo=ET).astimezone(timezone.utc)
-                        )
-                    else:
-                        latest_quote_dt = latest_quote_dt.astimezone(timezone.utc)
-                    age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
-                    age_stats = {
-                        "count": 1,
-                        "min_age_minutes": age_min,
-                        "median_age_minutes": age_min,
-                        "max_age_minutes": age_min,
-                        "aggregate": "repli: timestamp global",
-                    }
-                except Exception:
-                    latest_quote_dt = None
+        elif chain_internal_dt is not None:
+            latest_quote_dt = chain_internal_dt
+            age_min = max(0.0, (fetched_at_utc - chain_internal_dt).total_seconds() / 60.0)
+            age_stats = {
+                "count": 1,
+                "excluded_zero_quotes": age_stats.get("excluded_zero_quotes", 0),
+                "min_age_minutes": age_min,
+                "median_age_minutes": age_min,
+                "max_age_minutes": age_min,
+                "aggregate": "repli: timestamp global chaîne",
+            }
+
+    # Statut de la source CBOE basé prioritairement sur l'horodatage interne de la chaîne
+    ref_dt = chain_internal_dt if chain_internal_dt is not None else latest_quote_dt
+    ref_age = (
+        max(0.0, (fetched_at_utc - ref_dt).total_seconds() / 60.0)
+        if ref_dt is not None
+        else age_min
+    )
 
     in_regular = CALENDAR.is_us_equity_regular_hours(fetched_at_utc)
 
-    if latest_quote_dt is not None:
+    if ref_dt is not None and ref_age is not None:
         last_close_utc = CALENDAR.get_last_equity_session_close(fetched_at_utc)
         last_close_et = last_close_utc.astimezone(ET)
         options_close_et = datetime.combine(last_close_et.date(), time(16, 15), tzinfo=ET)
         options_close_utc = options_close_et.astimezone(timezone.utc)
 
+        excl_str = f", {age_stats.get('excluded_zero_quotes', 0)} exclues sans cotation"
+        ref_dt_et_str = ref_dt.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S ET")
         if not in_regular and fetched_at_utc >= options_close_utc:
             # Hors séance et après fermeture des options (16:15 ET)
-            if latest_quote_dt.astimezone(ET).date() == last_close_et.date():
+            if ref_dt.astimezone(ET).date() == last_close_et.date():
                 status = DataStatus.OK
                 notes = (
-                    f"OK « clôture » (clôture 16:15 ET | ±3%: N={age_stats.get('count', 0)}, "
-                    f"âges: min {age_stats.get('min_age_minutes', 0.0):.1f}m / "
-                    f"méd {age_stats.get('median_age_minutes', 0.0):.1f}m / "
-                    f"max {age_stats.get('max_age_minutes', 0.0):.1f}m)"
+                    f"OK « clôture » (horodatage chaîne {ref_dt_et_str} | "
+                    f"options ±3%: N={age_stats.get('count', 0)}{excl_str})"
                 )
             else:
                 status = DataStatus.DEGRADED
                 notes = "donnée antérieure à la dernière séance de clôture"
         else:
-            fresh = age_min is not None and age_min <= 60.0
+            fresh = ref_age <= 30.0
             status = DataStatus.OK if fresh else DataStatus.DEGRADED
             notes = (
-                f"Âge dérivé (max trade ±3%) : {age_min:.1f} min | N={age_stats.get('count', 0)} "
-                f"(min {age_stats.get('min_age_minutes', 0.0):.1f}m / "
-                f"méd {age_stats.get('median_age_minutes', 0.0):.1f}m / "
-                f"max {age_stats.get('max_age_minutes', 0.0):.1f}m)"
+                f"Âge chaîne CBOE : {ref_age:.1f} min (horodatage {ref_dt_et_str}) | "
+                f"options ±3%: N={age_stats.get('count', 0)}{excl_str}"
             )
     else:
-        age_min = None
+        ref_age = None
         status = DataStatus.DEGRADED
-        notes = "Âge inconnu (aucun horodatage de cotation exploitable dans les options)"
+        notes = "Âge inconnu (aucun horodatage de cotation exploitable)"
 
     return CboeChainSnapshot(
         symbol="NDX",
         spot=spot,
         options_df=df,
-        latest_quote_time_utc=latest_quote_dt,
+        latest_quote_time_utc=ref_dt,
         fetched_at_utc=fetched_at_utc,
-        age_minutes=age_min,
+        age_minutes=ref_age,
         status=status,
         source="CBOE",
         notes=notes,
         age_stats=age_stats,
+        chain_internal_timestamp_utc=chain_internal_dt,
     )
 
 
@@ -335,13 +363,18 @@ def fetch_cboe_options_chain(
     timeout: int = 30,
     cache: DiskCache | None = None,
     max_cache_age_seconds: float = 60.0,
+    force_reload: bool = False,
 ) -> CboeChainSnapshot:
-    """Télécharge et parse la chaîne d'options CBOE avec cache optionnel."""
+    """Télécharge et parse la chaîne d'options CBOE avec mesure du rechargement réseau."""
+    import time as _time
+
     cache_key = f"cboe_chain_{cboe_symbol}"
-    if cache is not None:
+    if not force_reload and cache is not None:
         cached = cache.get(cache_key, max_age_seconds=max_cache_age_seconds)
         if cached is not None:
-            return parse_cboe_payload(cached, datetime.now(timezone.utc))
+            snap = parse_cboe_payload(cached, datetime.now(timezone.utc))
+            snap.chain_reloaded = False
+            return snap
 
     try:
         from nqcockpit.config import load_config
@@ -357,14 +390,22 @@ def fetch_cboe_options_chain(
         url = BASE_URL.format(sym=cboe_symbol)
 
     now_utc = datetime.now(timezone.utc)
+    t0 = _time.perf_counter()
     try:
         resp = _SESSION.get(url, timeout=timeout)
+        duration_ms = (_time.perf_counter() - t0) * 1000.0
+        http_code = resp.status_code
         resp.raise_for_status()
         raw = resp.json()
         if cache is not None:
             cache.set(cache_key, raw)
-        return parse_cboe_payload(raw, now_utc)
+        snap = parse_cboe_payload(raw, now_utc)
+        snap.http_status = http_code
+        snap.request_duration_ms = duration_ms
+        snap.chain_reloaded = True
+        return snap
     except Exception as e:
+        duration_ms = (_time.perf_counter() - t0) * 1000.0
         log.error("Échec du téléchargement CBOE %s: %s", cboe_symbol, e)
         return CboeChainSnapshot(
             symbol="NDX",
@@ -376,4 +417,7 @@ def fetch_cboe_options_chain(
             status=DataStatus.BLOCKED,
             source="CBOE",
             notes=f"Erreur réseau CBOE : {e}",
+            http_status=getattr(getattr(e, "response", None), "status_code", None),
+            request_duration_ms=duration_ms,
+            chain_reloaded=False,
         )

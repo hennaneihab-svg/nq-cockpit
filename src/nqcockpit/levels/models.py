@@ -80,6 +80,10 @@ class ExpectedMoveInfo:
     is_coherent: bool = True
     status: DataStatus = DataStatus.OK
     status_explanation: str | None = None
+    spot_ndx_used: float = 0.0
+    spot_nq_observed: float = 0.0
+    spot_nq_converted: float = 0.0
+    spread_nq_vs_converted: float = 0.0
 
 
 @dataclass
@@ -131,6 +135,40 @@ class LevelsSnapshot:
     basis_method: str = "paire séance précédente"
     basis_formula: str = "base = NQ_close - NDX_spot"
     basis_delay_compensation_note: str | None = None
+
+    # Murs utiles (dans fenêtre ±10 %) et globaux (Tâche 3)
+    call_wall_useful_ndx: float | None = None
+    call_wall_useful_nq: float | None = None
+    call_wall_useful_dist_pts: float | None = None
+    call_wall_useful_dist_pct: float | None = None
+    call_wall_global_ndx: float | None = None
+    call_wall_global_nq: float | None = None
+    call_wall_global_dist_pts: float | None = None
+    call_wall_global_dist_pct: float | None = None
+    call_wall_is_outside_window: bool = False
+
+    put_wall_useful_ndx: float | None = None
+    put_wall_useful_nq: float | None = None
+    put_wall_useful_dist_pts: float | None = None
+    put_wall_useful_dist_pct: float | None = None
+    put_wall_global_ndx: float | None = None
+    put_wall_global_nq: float | None = None
+    put_wall_global_dist_pts: float | None = None
+    put_wall_global_dist_pct: float | None = None
+    put_wall_is_outside_window: bool = False
+    wall_window_pct: float = 0.10
+
+    # Spot NQ : Fraîcheur réelle (Tâche 1)
+    spot_nq_time_utc: datetime | None = None
+    spot_nq_age_minutes: float | None = None
+    spot_nq_is_stale: bool = False
+
+    # CBOE métadonnées de rechargement (Tâche 2)
+    cboe_request_time_utc: datetime | None = None
+    cboe_http_status: int | None = None
+    cboe_duration_ms: float | None = None
+    cboe_internal_timestamp_utc: datetime | None = None
+    cboe_reloaded: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Sérialisation en dictionnaire pour export JSON et persistance."""
@@ -204,7 +242,38 @@ class LevelsSnapshot:
                 "upper_bound_nq": (
                     self.expected_move.upper_bound_nq if self.expected_move else None
                 ),
+                "spot_ndx_used": (
+                    self.expected_move.spot_ndx_used if self.expected_move else 0.0
+                ),
+                "spot_nq_observed": (
+                    self.expected_move.spot_nq_observed if self.expected_move else 0.0
+                ),
+                "spot_nq_converted": (
+                    self.expected_move.spot_nq_converted if self.expected_move else 0.0
+                ),
+                "spread_nq_vs_converted": (
+                    self.expected_move.spread_nq_vs_converted if self.expected_move else 0.0
+                ),
             },
+            "call_wall_useful_ndx": self.call_wall_useful_ndx,
+            "call_wall_useful_nq": self.call_wall_useful_nq,
+            "call_wall_useful_dist_pts": self.call_wall_useful_dist_pts,
+            "call_wall_useful_dist_pct": self.call_wall_useful_dist_pct,
+            "call_wall_global_ndx": self.call_wall_global_ndx,
+            "call_wall_global_nq": self.call_wall_global_nq,
+            "call_wall_is_outside_window": self.call_wall_is_outside_window,
+            "put_wall_useful_ndx": self.put_wall_useful_ndx,
+            "put_wall_useful_nq": self.put_wall_useful_nq,
+            "put_wall_useful_dist_pts": self.put_wall_useful_dist_pts,
+            "put_wall_useful_dist_pct": self.put_wall_useful_dist_pct,
+            "put_wall_global_ndx": self.put_wall_global_ndx,
+            "put_wall_global_nq": self.put_wall_global_nq,
+            "put_wall_is_outside_window": self.put_wall_is_outside_window,
+            "spot_nq_age_minutes": self.spot_nq_age_minutes,
+            "spot_nq_is_stale": self.spot_nq_is_stale,
+            "cboe_reloaded": self.cboe_reloaded,
+            "cboe_http_status": self.cboe_http_status,
+            "cboe_duration_ms": self.cboe_duration_ms,
             "max_pain_ndx": self.max_pain_ndx,
             "max_pain_nq": self.max_pain_nq,
             "max_pain_expiry": (

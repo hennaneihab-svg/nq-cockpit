@@ -486,9 +486,16 @@ def enrich_expected_move_nq(
     em.is_coherent = is_coherent
     em.status = status
     em.status_explanation = status_explanation
-    # Mettre à jour les bornes NQ de la formule IV (déjà posées par compute_snapshot)
+    # Mettre à jour les bornes NQ de la formule IV
     em.lower_bound_nq = spot_nq - iv_move_nq
     em.upper_bound_nq = spot_nq + iv_move_nq
+
+    # Tâche 4 : Distinction claire spot NDX formule vs spot NQ centrage
+    spot_nq_conv = spot_ndx + basis
+    em.spot_ndx_used = spot_ndx
+    em.spot_nq_observed = spot_nq
+    em.spot_nq_converted = spot_nq_conv
+    em.spread_nq_vs_converted = spot_nq - spot_nq_conv
     return em
 
 
@@ -593,22 +600,52 @@ class LevelsEngine:
                 basis_st = DataStatus.BLOCKED
                 anomalies.append("Aucune base disponible (ni barres ni parité)")
 
-        # Spot NQ = dernier cours observé de NQ=F avec son horodatage et son retard
+        # Spot NQ = dernier cours observé de NQ=F avec son horodatage et son âge réel (Tâche 1)
         # Ne présente JAMAIS un NQ dérivé comme un cours.
         # Prix NQ valide : multiple de 0,25.
+        spot_nq_age_min: float | None = None
+        spot_nq_is_stale = False
+        spot_nq_time_utc: datetime | None = None
+
+        try:
+            cfg = load_config()
+            spot_max_age = getattr(cfg.levels, "spot_max_age_minutes", 20.0)
+            wall_win_pct = getattr(cfg.levels, "wall_window_pct", 0.10)
+        except Exception:
+            spot_max_age = 20.0
+            wall_win_pct = 0.10
+
+        from nqcockpit.sources.health import is_cme_futures_market_open
+
         if nq_bars:
             latest_obs_nq = nq_bars[-1]
             spot_nq = round(latest_obs_nq.close * 4.0) / 4.0
-            nq_ts_ny = latest_obs_nq.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
-            nq_ts_utc = latest_obs_nq.timestamp_utc.strftime("%H:%M:%SZ")
-            spot_delay_note = "source retardée d'environ 15 min"
+            spot_nq_time_utc = latest_obs_nq.timestamp_utc
+            spot_nq_age_min = max(0.0, (now_utc - spot_nq_time_utc).total_seconds() / 60.0)
+            nq_ts_ny = spot_nq_time_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S ET")
+            nq_ts_alg = spot_nq_time_utc.astimezone(TZ_ALGIERS).strftime(
+                "%Y-%m-%d %H:%M:%S (Alger)"
+            )
+
+            cme_is_open = is_cme_futures_market_open(now_utc)
+            if cme_is_open and spot_nq_age_min > spot_max_age:
+                spot_nq_is_stale = True
+                spot_delay_note = (
+                    f"SPOT NQ PÉRIMÉ (âge {spot_nq_age_min:.1f} min > seuil {spot_max_age:.1f} min)"
+                )
+                anomalies.append(f"DÉGRADÉ : {spot_delay_note}")
+            else:
+                spot_delay_note = f"âge réel {spot_nq_age_min:.1f} min"
+
             anomalies.append(
                 f"Spot NQ observé : {spot_nq:,.2f} pts"
-                f" (cours NQ=F à {nq_ts_ny} [{nq_ts_utc}], {spot_delay_note})"
+                f" (cours NQ=F à {nq_ts_ny} | {nq_ts_alg}, {spot_delay_note})"
             )
         else:
             spot_nq = round((spot_ndx + basis_val) * 4.0) / 4.0 if spot_ndx > 0 else 0.0
-            spot_delay_note = "cours estimé via NDX + base"
+            spot_delay_note = "cours estimé via NDX + base (barres NQ absentes)"
+            spot_nq_is_stale = True
+            anomalies.append("Spot NQ : barres NQ=F absentes, repli cours estimé")
 
         anomalies.append(
             "Niveaux NQ : tous les niveaux NQ (Flip, Walls, Expected Move, Max Pain) "
@@ -654,6 +691,14 @@ class LevelsEngine:
                 put_wall_nq=None,
                 reference_session_date=ref_session_date,
                 spot_nq_delay_note=spot_delay_note,
+                spot_nq_time_utc=spot_nq_time_utc,
+                spot_nq_age_minutes=spot_nq_age_min,
+                spot_nq_is_stale=spot_nq_is_stale,
+                cboe_request_time_utc=chain.fetched_at_utc,
+                cboe_http_status=chain.http_status,
+                cboe_duration_ms=chain.request_duration_ms,
+                cboe_internal_timestamp_utc=chain.chain_internal_timestamp_utc,
+                cboe_reloaded=chain.chain_reloaded,
                 anomalies=anomalies,
             )
 
@@ -682,20 +727,105 @@ class LevelsEngine:
                     "Flip absent : aucun passage par zéro dans la plage +/- 8% (régime très stable)"
                 )
 
-        # 6. Murs de Gamma (Toutes échéances non expirées)
+        # 6. Murs de Gamma (Toutes échéances non expirées) — TÂCHE 3
         by_strike = df_gex.groupby("strike")["gex"].sum()
-        calls_above = by_strike[(by_strike.index >= spot_ndx) & (by_strike > 0)]
-        puts_below = by_strike[(by_strike.index <= spot_ndx) & (by_strike < 0)]
 
-        call_wall_ndx = float(calls_above.idxmax()) if len(calls_above) else None
-        call_wall_nq = (
-            round((call_wall_ndx + basis_val) * 4.0) / 4.0 if call_wall_ndx is not None else None
+        # Murs globaux (sur tout le spectre de strikes)
+        calls_above_all = by_strike[(by_strike.index >= spot_ndx) & (by_strike > 0)]
+        puts_below_all = by_strike[(by_strike.index <= spot_ndx) & (by_strike < 0)]
+
+        call_wall_global_ndx = float(calls_above_all.idxmax()) if len(calls_above_all) else None
+        call_wall_global_nq = (
+            round((call_wall_global_ndx + basis_val) * 4.0) / 4.0
+            if call_wall_global_ndx is not None
+            else None
+        )
+        put_wall_global_ndx = float(puts_below_all.idxmin()) if len(puts_below_all) else None
+        put_wall_global_nq = (
+            round((put_wall_global_ndx + basis_val) * 4.0) / 4.0
+            if put_wall_global_ndx is not None
+            else None
         )
 
-        put_wall_ndx = float(puts_below.idxmin()) if len(puts_below) else None
-        put_wall_nq = (
-            round((put_wall_ndx + basis_val) * 4.0) / 4.0 if put_wall_ndx is not None else None
+        # Murs utiles restreints à la fenêtre configurée (±wall_win_pct, ex. ±10 %)
+        k_upper_bound = spot_ndx * (1.0 + wall_win_pct)
+        k_lower_bound = spot_ndx * (1.0 - wall_win_pct)
+
+        calls_useful = by_strike[
+            (by_strike.index >= spot_ndx) & (by_strike.index <= k_upper_bound) & (by_strike > 0)
+        ]
+        puts_useful = by_strike[
+            (by_strike.index <= spot_ndx) & (by_strike.index >= k_lower_bound) & (by_strike < 0)
+        ]
+
+        call_wall_useful_ndx = (
+            float(calls_useful.idxmax()) if len(calls_useful) else call_wall_global_ndx
         )
+        call_wall_useful_nq = (
+            round((call_wall_useful_ndx + basis_val) * 4.0) / 4.0
+            if call_wall_useful_ndx is not None
+            else None
+        )
+        put_wall_useful_ndx = (
+            float(puts_useful.idxmin()) if len(puts_useful) else put_wall_global_ndx
+        )
+        put_wall_useful_nq = (
+            round((put_wall_useful_ndx + basis_val) * 4.0) / 4.0
+            if put_wall_useful_ndx is not None
+            else None
+        )
+
+        # Distances au spot NQ (en points et en %)
+        cw_useful_dist_pts = (
+            (call_wall_useful_nq - spot_nq) if (call_wall_useful_nq and spot_nq) else None
+        )
+        cw_useful_dist_pct = (
+            ((call_wall_useful_ndx - spot_ndx) / spot_ndx * 100.0)
+            if (call_wall_useful_ndx and spot_ndx > 0)
+            else None
+        )
+        pw_useful_dist_pts = (
+            (put_wall_useful_nq - spot_nq) if (put_wall_useful_nq and spot_nq) else None
+        )
+        pw_useful_dist_pct = (
+            ((put_wall_useful_ndx - spot_ndx) / spot_ndx * 100.0)
+            if (put_wall_useful_ndx and spot_ndx > 0)
+            else None
+        )
+
+        cw_global_dist_pts = (
+            (call_wall_global_nq - spot_nq) if (call_wall_global_nq and spot_nq) else None
+        )
+        cw_global_dist_pct = (
+            ((call_wall_global_ndx - spot_ndx) / spot_ndx * 100.0)
+            if (call_wall_global_ndx and spot_ndx > 0)
+            else None
+        )
+        pw_global_dist_pts = (
+            (put_wall_global_nq - spot_nq) if (put_wall_global_nq and spot_nq) else None
+        )
+        pw_global_dist_pct = (
+            ((put_wall_global_ndx - spot_ndx) / spot_ndx * 100.0)
+            if (put_wall_global_ndx and spot_ndx > 0)
+            else None
+        )
+
+        cw_is_outside = (
+            call_wall_global_ndx is not None
+            and call_wall_useful_ndx is not None
+            and call_wall_global_ndx != call_wall_useful_ndx
+        )
+        pw_is_outside = (
+            put_wall_global_ndx is not None
+            and put_wall_useful_ndx is not None
+            and put_wall_global_ndx != put_wall_useful_ndx
+        )
+
+        # Les murs standards exposés sont les murs utiles
+        call_wall_ndx = call_wall_useful_ndx
+        call_wall_nq = call_wall_useful_nq
+        put_wall_ndx = put_wall_useful_ndx
+        put_wall_nq = put_wall_useful_nq
 
         # Top 5 Murs en GEX absolu
         top_abs = by_strike.abs().nlargest(5)
@@ -815,6 +945,8 @@ class LevelsEngine:
         global_status = chain.status
         if basis_st == DataStatus.DEGRADED and global_status == DataStatus.OK:
             global_status = DataStatus.DEGRADED
+        if spot_nq_is_stale and global_status == DataStatus.OK:
+            global_status = DataStatus.DEGRADED
 
         snap = LevelsSnapshot(
             timestamp_utc=now_utc,
@@ -866,6 +998,36 @@ class LevelsEngine:
             basis_method=basis_method_str,
             basis_formula="base = NQ_close - NDX_spot",
             basis_delay_compensation_note=basis_delay_note,
+            # Murs utiles et globaux (Tâche 3)
+            call_wall_useful_ndx=call_wall_useful_ndx,
+            call_wall_useful_nq=call_wall_useful_nq,
+            call_wall_useful_dist_pts=cw_useful_dist_pts,
+            call_wall_useful_dist_pct=cw_useful_dist_pct,
+            call_wall_global_ndx=call_wall_global_ndx,
+            call_wall_global_nq=call_wall_global_nq,
+            call_wall_global_dist_pts=cw_global_dist_pts,
+            call_wall_global_dist_pct=cw_global_dist_pct,
+            call_wall_is_outside_window=cw_is_outside,
+            put_wall_useful_ndx=put_wall_useful_ndx,
+            put_wall_useful_nq=put_wall_useful_nq,
+            put_wall_useful_dist_pts=pw_useful_dist_pts,
+            put_wall_useful_dist_pct=pw_useful_dist_pct,
+            put_wall_global_ndx=put_wall_global_ndx,
+            put_wall_global_nq=put_wall_global_nq,
+            put_wall_global_dist_pts=pw_global_dist_pts,
+            put_wall_global_dist_pct=pw_global_dist_pct,
+            put_wall_is_outside_window=pw_is_outside,
+            wall_window_pct=wall_win_pct,
+            # Spot NQ fraîcheur réelle (Tâche 1)
+            spot_nq_time_utc=spot_nq_time_utc,
+            spot_nq_age_minutes=spot_nq_age_min,
+            spot_nq_is_stale=spot_nq_is_stale,
+            # CBOE rechargement prouvé (Tâche 2)
+            cboe_request_time_utc=chain.fetched_at_utc,
+            cboe_http_status=chain.http_status,
+            cboe_duration_ms=chain.request_duration_ms,
+            cboe_internal_timestamp_utc=chain.chain_internal_timestamp_utc,
+            cboe_reloaded=chain.chain_reloaded,
         )
 
         # Enregistrement du fichier JSON horodaté

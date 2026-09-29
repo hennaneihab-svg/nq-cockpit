@@ -139,8 +139,8 @@ def test_diagnostic_1c_paire_trouvee():
 
 def test_diagnostic_1c_nq_bar_absente():
     """Aucune barre NQ → cause_code = NQ_BAR_ABSENTE."""
-    session_date = date(2026, 9, 29)
-    now_utc = _et(2026, 9, 29, 20, 0)
+    session_date = date(2026, 9, 15)
+    now_utc = _et(2026, 9, 15, 20, 0)
 
     d = build_diagnostic_1c([], [], now_utc, session_date)
 
@@ -151,12 +151,12 @@ def test_diagnostic_1c_nq_bar_absente():
 
 def test_diagnostic_1c_ndx_absente():
     """NQ présent mais NDX absent → cause_code = NDX_QUOTE_ABSENTE."""
-    session_date = date(2026, 9, 29)
-    now_utc = _et(2026, 9, 29, 20, 0)
+    session_date = date(2026, 9, 15)
+    now_utc = _et(2026, 9, 15, 20, 0)
 
     nq_bars = [
-        _bar(_et(2026, 9, 29, 15, 59), 20500.0),
-        _bar(_et(2026, 9, 29, 16, 0), 20510.0),
+        _bar(_et(2026, 9, 15, 15, 59), 20500.0),
+        _bar(_et(2026, 9, 15, 16, 0), 20510.0),
     ]
 
     d = build_diagnostic_1c(nq_bars, [], now_utc, session_date)
@@ -169,12 +169,12 @@ def test_diagnostic_1c_ndx_absente():
 
 def test_diagnostic_1c_hors_tolerance():
     """Paire trouvée mais Δt > tolérance → HORS_TOLERANCE."""
-    session_date = date(2026, 9, 29)
-    now_utc = _et(2026, 9, 29, 20, 0)
+    session_date = date(2026, 9, 15)
+    now_utc = _et(2026, 9, 15, 20, 0)
 
-    nq_bars = [_bar(_et(2026, 9, 29, 16, 0), 20510.0)]
+    nq_bars = [_bar(_et(2026, 9, 15, 16, 0), 20510.0)]
     ndx_bars = [
-        _bar(_et(2026, 9, 29, 15, 55), 20200.0)  # 5 minutes d'écart
+        _bar(_et(2026, 9, 15, 15, 55), 20200.0)  # 5 minutes d'écart
     ]
 
     d = build_diagnostic_1c(nq_bars, ndx_bars, now_utc, session_date, tolerance_minutes=1.0)
@@ -188,16 +188,16 @@ def test_diagnostic_1c_hors_tolerance():
 
 def test_diagnostic_1c_session_incomplete():
     """Barres NQ présentes mais aucune avant 16:00 ET → SESSION_INCOMPLETE."""
-    session_date = date(2026, 9, 29)
-    now_utc = _et(2026, 9, 29, 20, 0)
+    session_date = date(2026, 9, 15)
+    now_utc = _et(2026, 9, 15, 20, 0)
 
     # Barres qui commencent après 16:00 (ex : futures de nuit)
     nq_bars = [
-        _bar(_et(2026, 9, 29, 16, 1), 20515.0),  # 16:01 — après clôture
-        _bar(_et(2026, 9, 29, 17, 0), 20520.0),
+        _bar(_et(2026, 9, 15, 16, 1), 20515.0),  # 16:01 — après clôture
+        _bar(_et(2026, 9, 15, 17, 0), 20520.0),
     ]
     ndx_bars = [
-        _bar(_et(2026, 9, 29, 15, 59), 20200.0),
+        _bar(_et(2026, 9, 15, 15, 59), 20200.0),
     ]
 
     d = build_diagnostic_1c(nq_bars, ndx_bars, now_utc, session_date, tolerance_minutes=1.0)

@@ -81,13 +81,21 @@ def test_cboe_check_simulated_success():
     with patch("nqcockpit.sources.health.request_with_retry") as mock_req:
         mock_req.return_value = (mock_resp, 140.0, None)
 
-        res = check_cboe_ndx()
-        assert res.status == "OK"
-        assert res.http_status == 200
-        assert "28120.5" in res.message
-        assert res.data_timestamp is not None
-        assert res.data_age_minutes is not None
-        assert res.measured_at_ny != ""
+        # 1. Cas hors séance US (ex: 02:00 UTC) -> statut OK attendu
+        closed_session_ref = datetime(2026, 9, 29, 2, 0, tzinfo=ZoneInfo("UTC"))
+        res_closed = check_cboe_ndx(ref_time_utc=closed_session_ref)
+        assert res_closed.status == "OK"
+        assert res_closed.http_status == 200
+        assert "28120.5" in res_closed.message
+        assert res_closed.data_timestamp is not None
+        assert res_closed.data_age_minutes is not None
+        assert res_closed.measured_at_ny != ""
+
+        # 2. Cas en pleine séance US (ex: 15:00 UTC) avec donnée de la veille -> DÉGRADÉ attendu
+        open_session_ref = datetime(2026, 9, 29, 15, 0, tzinfo=ZoneInfo("UTC"))
+        res_open = check_cboe_ndx(ref_time_utc=open_session_ref)
+        assert res_open.status == "DÉGRADÉ"
+        assert res_open.http_status == 200
 
 
 def test_fred_missing_key_dgs2_indisponible_dgs10_substitut():

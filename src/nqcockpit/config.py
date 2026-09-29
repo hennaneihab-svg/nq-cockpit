@@ -63,6 +63,8 @@ class EventsConfig:
 class LevelsConfig:
     wall_proximity_points: float = 40.0
     stale_data_minutes: int = 30
+    spot_max_age_minutes: float = 20.0
+    wall_window_pct: float = 0.10
 
 
 @dataclass(frozen=True)
@@ -314,13 +316,21 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         raise ConfigError("Missing or invalid 'levels' section in config.")
     wall_prox = raw_levels.get("wall_proximity_points", 40)
     stale_min = raw_levels.get("stale_data_minutes", 30)
+    spot_max_age = raw_levels.get("spot_max_age_minutes", 20.0)
+    wall_win_pct = raw_levels.get("wall_window_pct", 0.10)
     if not isinstance(wall_prox, (int, float)) or wall_prox <= 0:
         raise ConfigError("levels.wall_proximity_points must be a positive number.")
     if not isinstance(stale_min, int) or stale_min <= 0:
         raise ConfigError("levels.stale_data_minutes must be a positive integer.")
+    if not isinstance(spot_max_age, (int, float)) or spot_max_age <= 0:
+        raise ConfigError("levels.spot_max_age_minutes must be a positive number.")
+    if not isinstance(wall_win_pct, (int, float)) or wall_win_pct <= 0:
+        raise ConfigError("levels.wall_window_pct must be a positive number.")
     levels = LevelsConfig(
         wall_proximity_points=float(wall_prox),
         stale_data_minutes=stale_min,
+        spot_max_age_minutes=float(spot_max_age),
+        wall_window_pct=float(wall_win_pct),
     )
 
     # 8. Validation

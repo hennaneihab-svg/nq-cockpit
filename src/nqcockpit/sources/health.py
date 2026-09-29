@@ -461,6 +461,7 @@ def check_cboe_ndx(
     timeout: float = DEFAULT_TIMEOUT,
     max_retries: int = DEFAULT_MAX_RETRIES,
     stale_threshold_minutes: int = DEFAULT_STALE_THRESHOLD_MINUTES,
+    ref_time_utc: datetime | None = None,
 ) -> SourceCheckResult:
     """Checks CBOE delayed quotes options NDX JSON endpoint."""
     try:
@@ -513,7 +514,7 @@ def check_cboe_ndx(
         from nqcockpit.data.cboe import parse_cboe_payload
 
         data = resp.json()
-        now_utc = datetime.now(timezone.utc)
+        now_utc = ref_time_utc if ref_time_utc is not None else datetime.now(timezone.utc)
         chain_snap = parse_cboe_payload(data, fetched_at_utc=now_utc)
         dt_data = chain_snap.latest_quote_time_utc
         current_price = chain_snap.spot
@@ -537,6 +538,7 @@ def check_cboe_ndx(
             quote_dt=dt_data,
             session_group="us_equities",
             stale_threshold_minutes=stale_threshold_minutes,
+            now_ny=now_utc.astimezone(TZ_NEW_YORK),
         )
 
         msg = f"Spot NDX={current_price}, {options_count} options | {session_msg}"

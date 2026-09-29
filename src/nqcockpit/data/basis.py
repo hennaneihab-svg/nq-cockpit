@@ -293,7 +293,8 @@ def find_basis_pair(
             nq_time_str = final_nq.timestamp_utc.astimezone(ET).strftime("%H:%M:%S ET")
             ndx_time_str = final_ndx.timestamp_utc.astimezone(ET).strftime("%H:%M:%S ET")
             cause_detail = (
-                f"Paire trouvée mais Delta-t={delta_t:.2f} min > tolérance {tolerance_minutes:.1f} min. "
+                f"Paire trouvée mais Delta-t={delta_t:.2f} min > tolérance "
+                f"{tolerance_minutes:.1f} min. "
                 f"NQ ({origin_nq}): {nq_time_str}, NDX ({origin_ndx}): {ndx_time_str}"
             )
             action_taken = (
@@ -303,7 +304,8 @@ def find_basis_pair(
             is_aligned = True
             cause_code = "PAIRE_TROUVEE"
             cause_detail = (
-                f"Paire valide trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, Delta-t={delta_t:.2f} min)"
+                f"Paire valide trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, "
+                f"Delta-t={delta_t:.2f} min)"
             )
             action_taken = "Base de la séance précédente retenue"
 

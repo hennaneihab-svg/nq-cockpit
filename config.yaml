@@ -42,6 +42,8 @@ events:
 levels:
   wall_proximity_points: 40   # seuil "coincé entre deux murs"
   stale_data_minutes: 30
+  spot_max_age_minutes: 20.0  # seuil d'âge max pour le spot NQ pendant les heures de cotation CME
+  wall_window_pct: 0.10       # fenêtre de recherche des murs utiles autour du spot (±10 %)
 validation:
   min_sessions: 60
   min_event_samples: 12

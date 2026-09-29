@@ -129,25 +129,48 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.subcommand == "snapshot":
 
         from nqcockpit.data.cboe import fetch_cboe_options_chain
-        from nqcockpit.data.db import get_bars, get_db_connection
+        from nqcockpit.data.db import get_bars, get_db_connection, insert_bars
         from nqcockpit.data.fetcher import DataFetcher
         from nqcockpit.levels.engine import LevelsEngine
 
         print("[nqcockpit] Commande 'snapshot' invoquée (niveaux gamma)...")
-        chain = fetch_cboe_options_chain()
 
+        # 1. CBOE : Rechargement forcé en direct avec capture des métadonnées (Tâche 2)
+        chain = fetch_cboe_options_chain(force_reload=True)
+
+        # 2. SPOT NQ & NDX : Toujours tenter le flux direct en premier (Tâche 1)
+        # Évite le court-circuit par d'anciennes barres SQLite archivées la veille
+        fetcher = DataFetcher()
         conn = get_db_connection()
-        nq_bars = get_bars(conn, "NQ=F", "1m", limit=100)
-        ndx_bars = get_bars(conn, "^NDX", "1m", limit=100)
-        conn.close()
+        nq_bars = []
+        ndx_bars = []
 
-        # Si la base ne contient pas de barres, récupération à la volée
-        if not nq_bars or not ndx_bars:
-            fetcher = DataFetcher()
-            if not nq_bars:
-                nq_bars = fetcher.fetch_yahoo_bars("NQ=F", interval="1m", period="1d").bars
-            if not ndx_bars:
-                ndx_bars = fetcher.fetch_yahoo_bars("^NDX", interval="1m", period="1d").bars
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+        now_req_utc = _dt.now(_tz.utc)
+
+        try:
+            live_nq = fetcher.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
+            if live_nq.bars:
+                nq_bars = live_nq.bars
+                insert_bars(conn, nq_bars, "NQ=F", "1m", "yahoo", now_req_utc)
+        except Exception as e:
+            print(f"[!] Avertissement réseau NQ=F ({e}) : repli sur SQLite local.")
+
+        try:
+            live_ndx = fetcher.fetch_yahoo_bars("^NDX", interval="1m", period="1d")
+            if live_ndx.bars:
+                ndx_bars = live_ndx.bars
+                insert_bars(conn, ndx_bars, "^NDX", "1m", "yahoo", now_req_utc)
+        except Exception as e:
+            print(f"[!] Avertissement réseau ^NDX ({e}) : repli sur SQLite local.")
+
+        # Repli SQLite si la requête réseau n'a pas retourné de barres
+        if not nq_bars:
+            nq_bars = get_bars(conn, "NQ=F", "1m", limit=100)
+        if not ndx_bars:
+            ndx_bars = get_bars(conn, "^NDX", "1m", limit=100)
+        conn.close()
 
         engine = LevelsEngine()
         snap = engine.compute_snapshot(chain=chain, nq_bars=nq_bars, ndx_bars=ndx_bars)
@@ -166,10 +189,66 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  Horodatage : {snap_ny} | {snap_alg}")
         print(f"  Age données : {age_str} | Statut : {snap.status.value}")
         print("=" * 70)
-        print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts")
-        print(f"  Spot NQ              : {snap.spot_nq:,.2f} pts")
 
-        # --- BLOC BASE (Tâche 1) ---
+        # --- BLOC CBOE (Tâche 2 : RECHARGEMENT PROUVÉ) ---
+        print("-" * 70)
+        print("  SOURCE CBOE (RECHARGEMENT PROUVÉ)")
+        cboe_req_et = (
+            snap.cboe_request_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+            if snap.cboe_request_time_utc
+            else "N/A"
+        )
+        cboe_req_alg = (
+            snap.cboe_request_time_utc.astimezone(alg_tz).strftime("%Y-%m-%d %H:%M:%S (Alger)")
+            if snap.cboe_request_time_utc
+            else "N/A"
+        )
+        cboe_int_et = (
+            snap.cboe_internal_timestamp_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+            if snap.cboe_internal_timestamp_utc
+            else "N/A"
+        )
+        cboe_int_alg = (
+            snap.cboe_internal_timestamp_utc.astimezone(alg_tz).strftime(
+                "%Y-%m-%d %H:%M:%S (Alger)"
+            )
+            if snap.cboe_internal_timestamp_utc
+            else "N/A"
+        )
+        print(f"  Heure requête HTTP   : {cboe_req_et} | {cboe_req_alg}")
+        dur_str = f"{snap.cboe_duration_ms:.1f} ms" if snap.cboe_duration_ms is not None else "N/A"
+        print(f"  Code HTTP / Durée    : {snap.cboe_http_status or 200} | {dur_str}")
+        print(f"  Horodatage chaîne    : {cboe_int_et} | {cboe_int_alg}")
+        reloaded_str = "OUI (téléchargement direct forcé)" if snap.cboe_reloaded else "NON (cache)"
+        print(f"  Chaîne rechargée     : {reloaded_str}")
+        if snap.cboe_age_stats:
+            excl_zero = snap.cboe_age_stats.get("excluded_zero_quotes", 0)
+            n_active = snap.cboe_age_stats.get("count", 0)
+            print(f"  Options actives (±3%): {n_active} contrats (bid>0, ask>0)")
+            print(f"  Options exclues      : {excl_zero} contrats sans cotation (bid=0 ou ask=0)")
+        print(f"  Statut source CBOE   : {snap.status.value}")
+
+        # --- SPOT NQ & NDX (Tâche 1 : ÂGE RÉEL DU SPOT NQ) ---
+        print("-" * 70)
+        print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts")
+        nq_stale_flag = " [SPOT NQ PÉRIMÉ - DÉGRADÉ]" if snap.spot_nq_is_stale else " [OK]"
+        nq_age_s = (
+            f"{snap.spot_nq_age_minutes:.1f} min"
+            if snap.spot_nq_age_minutes is not None
+            else "inconnu"
+        )
+        print(
+            f"  Spot NQ (observé)    : {snap.spot_nq:,.2f} pts "
+            f"(âge réel : {nq_age_s}){nq_stale_flag}"
+        )
+        if snap.spot_nq_time_utc:
+            nq_bar_et = snap.spot_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
+            nq_bar_alg = snap.spot_nq_time_utc.astimezone(alg_tz).strftime(
+                "%Y-%m-%d %H:%M:%S (Alger)"
+            )
+            print(f"    Horodatage spot NQ : {nq_bar_et} | {nq_bar_alg}")
+
+        # --- BLOC BASE ---
         print("-" * 70)
         print("  BLOC BASE")
         # NQ timestamp
@@ -218,7 +297,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(f"  Base future-spot     : {snap.basis:+,.2f} pts [{snap.basis_status.value}]")
 
-        # --- NIVEAUX ---
+        # --- NIVEAUX & MURS UTILES (Tâche 3) ---
         print("-" * 70)
         gex_line = (
             f"  Net GEX Total        : {snap.net_gex / 1e6:+,.2f} M$/1% (Modèle, {snap.oi_flag})"
@@ -231,53 +310,109 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         flip_nq = f"{snap.gamma_flip_nq:,.2f}" if snap.gamma_flip_nq else "ABSENT"
         print(f"  Gamma Flip (Zéro)    : NDX {flip_ndx} | NQ {flip_nq}")
-        cw_ndx = f"{snap.call_wall_ndx:,.2f}" if snap.call_wall_ndx else "N/A"
-        cw_nq = f"{snap.call_wall_nq:,.2f}" if snap.call_wall_nq else "N/A"
-        print(f"  Call Wall (Résist.)  : NDX {cw_ndx} | NQ {cw_nq}")
-        pw_ndx = f"{snap.put_wall_ndx:,.2f}" if snap.put_wall_ndx else "N/A"
-        pw_nq = f"{snap.put_wall_nq:,.2f}" if snap.put_wall_nq else "N/A"
-        print(f"  Put Wall (Support)   : NDX {pw_ndx} | NQ {pw_nq}")
+
+        # Murs utiles (dans fenêtre ±wall_window_pct, e.g. ±10 %)
+        win_str = f"±{snap.wall_window_pct * 100:.0f}%"
+        cw_u_ndx = f"{snap.call_wall_useful_ndx:,.2f}" if snap.call_wall_useful_ndx else "N/A"
+        cw_u_nq = f"{snap.call_wall_useful_nq:,.2f}" if snap.call_wall_useful_nq else "N/A"
+        cw_dist = ""
+        if (
+            snap.call_wall_useful_dist_pts is not None
+            and snap.call_wall_useful_dist_pct is not None
+        ):
+            cw_dist = (
+                f" (dist: {snap.call_wall_useful_dist_pts:+,.2f} pts / "
+                f"{snap.call_wall_useful_dist_pct:+.2f}%)"
+            )
+        print(f"  Call Wall utile ({win_str}) : NDX {cw_u_ndx} | NQ {cw_u_nq}{cw_dist}")
+
+        if snap.call_wall_is_outside_window and snap.call_wall_global_ndx:
+            cw_g_ndx = f"{snap.call_wall_global_ndx:,.2f}"
+            cw_g_nq = f"{snap.call_wall_global_nq:,.2f}" if snap.call_wall_global_nq else "N/A"
+            cw_g_dist = ""
+            if (
+                snap.call_wall_global_dist_pts is not None
+                and snap.call_wall_global_dist_pct is not None
+            ):
+                cw_g_dist = (
+                    f" (dist: {snap.call_wall_global_dist_pts:+,.2f} pts / "
+                    f"{snap.call_wall_global_dist_pct:+.2f}%)"
+                )
+            print(
+                f"    -> Mur Call global (hors fenêtre) : "
+                f"NDX {cw_g_ndx} | NQ {cw_g_nq}{cw_g_dist}"
+            )
+
+        pw_u_ndx = f"{snap.put_wall_useful_ndx:,.2f}" if snap.put_wall_useful_ndx else "N/A"
+        pw_u_nq = f"{snap.put_wall_useful_nq:,.2f}" if snap.put_wall_useful_nq else "N/A"
+        pw_dist = ""
+        if (
+            snap.put_wall_useful_dist_pts is not None
+            and snap.put_wall_useful_dist_pct is not None
+        ):
+            pw_dist = (
+                f" (dist: {snap.put_wall_useful_dist_pts:+,.2f} pts / "
+                f"{snap.put_wall_useful_dist_pct:+.2f}%)"
+            )
+        print(f"  Put Wall utile ({win_str})  : NDX {pw_u_ndx} | NQ {pw_u_nq}{pw_dist}")
+
+        if snap.put_wall_is_outside_window and snap.put_wall_global_ndx:
+            pw_g_ndx = f"{snap.put_wall_global_ndx:,.2f}"
+            pw_g_nq = f"{snap.put_wall_global_nq:,.2f}" if snap.put_wall_global_nq else "N/A"
+            pw_g_dist = ""
+            if (
+                snap.put_wall_global_dist_pts is not None
+                and snap.put_wall_global_dist_pct is not None
+            ):
+                pw_g_dist = (
+                    f" (dist: {snap.put_wall_global_dist_pts:+,.2f} pts / "
+                    f"{snap.put_wall_global_dist_pct:+.2f}%)"
+                )
+            print(
+                f"    -> Mur Put global (hors fenêtre)  : "
+                f"NDX {pw_g_ndx} | NQ {pw_g_nq}{pw_g_dist}"
+            )
+
         if snap.zero_dte_call_wall_nq or snap.zero_dte_put_wall_nq:
             z_cw = f"{snap.zero_dte_call_wall_nq:,.2f}" if snap.zero_dte_call_wall_nq else "N/A"
             z_pw = f"{snap.zero_dte_put_wall_nq:,.2f}" if snap.zero_dte_put_wall_nq else "N/A"
             z_gex = f"{snap.zero_dte_net_gex / 1e6:+,.2f} M$" if snap.zero_dte_net_gex else "N/A"
             print(f"  0DTE Call/Put Wall   : NQ {z_cw} / {z_pw} (Net GEX : {z_gex})")
 
-        # --- EXPECTED MOVE (Tâche 4) ---
+        # --- EXPECTED MOVE (Tâche 4 : DÉCOMPOSITION EXPLICITE DES SPOTS) ---
         if snap.expected_move:
             em = snap.expected_move
             print("-" * 70)
             exp_str = em.expiry.strftime("%Y-%m-%d (%A)") if em.expiry else "N/A"
             em_age_val = em.data_age_minutes
             em_age_str = f"{em_age_val:.1f} min" if em_age_val is not None else "N/A"
-            cboe_session_tag = ""
-            from nqcockpit.data.calendar import CALENDAR as _MCAL
-
-            if em_age_val is not None and em_age_val > 60.0:
-                cboe_session_tag = " (HORS SÉANCE)"
-            elif not _MCAL.is_us_equity_regular_hours(snap.timestamp_utc):
-                cboe_session_tag = " (HORS SÉANCE)"
 
             print(
                 f"  EXPECTED MOVE — échéance : {exp_str} | "
-                f"âge chaîne CBOE : {em_age_str}{cboe_session_tag}"
+                f"âge chaîne CBOE : {em_age_str}"
             )
             print(f"  IV ATM               : {em.iv_atm * 100:.2f}%")
             print(f"  Durée                : {em.days_to_expiry:.2f} j (bourse)")
+
             # Méthode IV
             iv_pts = em.iv_move_nq if em.iv_move_nq is not None else em.formula_move
             iv_lo = em.iv_lower_nq if em.iv_lower_nq is not None else (snap.spot_nq - iv_pts)
             iv_hi = em.iv_upper_nq if em.iv_upper_nq is not None else (snap.spot_nq + iv_pts)
             print(f"  Méthode IV           : +/- {iv_pts:.1f} pts NQ")
             print(f"    Bornes IV          : [{iv_lo:,.2f} .. {iv_hi:,.2f}]")
-            conv_nq_spot = snap.spot_ndx + snap.basis
+
+            # Tâche 4 : Décomposition explicite des spots de référence
+            print("    Décomposition des spots :")
+            print(f"      - Spot NDX formule             : {em.spot_ndx_used:,.2f} pts")
+            print(f"      - Spot NQ observé (centrage)   : {em.spot_nq_observed:,.2f} pts")
             print(
-                f"    Spot utilisé       : Spot NDX {snap.spot_ndx:,.2f} pts "
-                f"converti en NQ via base ({snap.basis:+,.2f} pts) = {conv_nq_spot:,.2f} pts"
+                f"      - NDX converti (NDX + base)    : {em.spot_nq_converted:,.2f} pts "
+                f"(base {snap.basis:+,.2f} pts)"
             )
-            print(
-                "    Formule            : spot_ndx x IV x sqrt(j/252) -> [spot_nq +/- move]"
-            )
+            spread_sign = f"{em.spread_nq_vs_converted:+,.2f}"
+            print(f"      - Écart NQ observé vs converti : {spread_sign} pts")
+            print("    Formule            : spot_ndx x IV x sqrt(j/252) -> [spot_nq +/- move]")
+
             # Méthode Straddle
             if em.straddle_move_nq is not None:
                 s_lo = em.straddle_lower_nq if em.straddle_lower_nq is not None else "N/A"
