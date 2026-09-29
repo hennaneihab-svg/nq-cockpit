@@ -286,14 +286,14 @@ def get_bars(
         query.append("AND timestamp_utc <= ?")
         params.append(end_time.isoformat())
 
-    query.append("ORDER BY timestamp_utc ASC LIMIT ?")
+    query.append("ORDER BY timestamp_utc DESC LIMIT ?")
     params.append(limit)
 
     cur = conn.execute(" ".join(query), params)
     rows = cur.fetchall()
 
     result: list[Bar] = []
-    for r in rows:
+    for r in reversed(rows):
         ts = datetime.fromisoformat(r["timestamp_utc"])
         result.append(
             Bar(
@@ -405,3 +405,64 @@ def insert_trade(
             ),
         )
     return cur.lastrowid or 0
+
+
+def get_db_diagnostic_1c(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Diagnostic pour le problème 1c : paires utilisées, barres du 28/09, comptage 7j."""
+    cur_old_nq = conn.execute(
+        "SELECT timestamp_utc, close FROM bars WHERE symbol = 'NQ=F' AND interval = '1m' "
+        "ORDER BY timestamp_utc ASC LIMIT 100"
+    )
+    old_nq_rows = cur_old_nq.fetchall()
+    cur_old_ndx = conn.execute(
+        "SELECT timestamp_utc, close FROM bars WHERE symbol = '^NDX' AND interval = '1m' "
+        "ORDER BY timestamp_utc ASC LIMIT 100"
+    )
+    old_ndx_rows = cur_old_ndx.fetchall()
+
+    cur_last_28_nq = conn.execute(
+        "SELECT timestamp_utc, open, high, low, close FROM bars "
+        "WHERE symbol = 'NQ=F' AND interval = '1m' AND timestamp_utc LIKE '2026-09-28%' "
+        "ORDER BY timestamp_utc DESC LIMIT 1"
+    )
+    last_28_nq = cur_last_28_nq.fetchone()
+
+    cur_last_28_ndx = conn.execute(
+        "SELECT timestamp_utc, open, high, low, close FROM bars "
+        "WHERE symbol = '^NDX' AND interval = '1m' AND timestamp_utc LIKE '2026-09-28%' "
+        "ORDER BY timestamp_utc DESC LIMIT 1"
+    )
+    last_28_ndx = cur_last_28_ndx.fetchone()
+
+    cur_close_28_nq = conn.execute(
+        "SELECT timestamp_utc, close FROM bars "
+        "WHERE symbol = 'NQ=F' AND interval = '1m' "
+        "AND timestamp_utc <= '2026-09-28T20:00:00+00:00' "
+        "ORDER BY timestamp_utc DESC LIMIT 1"
+    )
+    close_28_nq = cur_close_28_nq.fetchone()
+
+    cur_close_28_ndx = conn.execute(
+        "SELECT timestamp_utc, close FROM bars "
+        "WHERE symbol = '^NDX' AND interval = '1m' "
+        "AND timestamp_utc <= '2026-09-28T20:00:00+00:00' "
+        "ORDER BY timestamp_utc DESC LIMIT 1"
+    )
+    close_28_ndx = cur_close_28_ndx.fetchone()
+
+    cur_counts = conn.execute(
+        "SELECT symbol, SUBSTR(timestamp_utc, 1, 10) as day, COUNT(*) as cnt "
+        "FROM bars WHERE interval = '1m' "
+        "GROUP BY symbol, day ORDER BY symbol, day DESC"
+    )
+    counts = cur_counts.fetchall()
+
+    return {
+        "old_used_nq": dict(old_nq_rows[-1]) if old_nq_rows else None,
+        "old_used_ndx": dict(old_ndx_rows[-1]) if old_ndx_rows else None,
+        "last_28_nq": dict(last_28_nq) if last_28_nq else None,
+        "last_28_ndx": dict(last_28_ndx) if last_28_ndx else None,
+        "close_28_nq": dict(close_28_nq) if close_28_nq else None,
+        "close_28_ndx": dict(close_28_ndx) if close_28_ndx else None,
+        "counts": [dict(r) for r in counts],
+    }

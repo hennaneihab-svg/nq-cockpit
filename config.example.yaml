@@ -46,6 +46,12 @@ market_sessions:
     daily_halt_start: "17:00"
     daily_halt_end: "18:00"
     symbols: ["NQ=F"]
+  cboe_options:
+    timezone: America/New_York
+    open: "09:30"
+    close: "16:15"
+    trading_days: [0, 1, 2, 3, 4]
+    symbols: ["CBOE NDX Options"]
 data:
   db_path: "data/nqcockpit.db"
   cache_dir: "data/cache"

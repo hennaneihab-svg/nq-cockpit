@@ -379,3 +379,221 @@ def test_expected_move_0dte_fraction() -> None:
 
     days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, exp_today)
     assert pytest.approx(days, abs=0.01) == 0.5
+
+
+def test_reference_session_monday_evening(tmp_path: Path):
+    """Fixture test (1) : Lundi 21:37 ET.
+
+    - Échéance du lundi exclue.
+    - Session de référence = mardi.
+    - Expected Move basé sur l'échéance du mardi avec jours = 1,0.
+    - 0DTE = mardi.
+    """
+    engine = LevelsEngine(output_dir=tmp_path)
+    # Lundi 28 sept 2026 21:37 ET = Mardi 29 sept 2026 01:37 UTC
+    now_utc = datetime(2026, 9, 29, 1, 37, 0, tzinfo=timezone.utc)
+
+    exp_monday = date(2026, 9, 28)
+    exp_tuesday = date(2026, 9, 29)
+    exp_friday = date(2026, 10, 2)
+
+    rows = []
+    spot = 20000.0
+    for exp in (exp_monday, exp_tuesday, exp_friday):
+        for k in (19800, 20000, 20200):
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_C_{k}",
+                    "expiry": exp,
+                    "type": "C",
+                    "strike": float(k),
+                    "bid": 50.0,
+                    "ask": 52.0,
+                    "iv": 0.20,
+                    "open_interest": 1000.0,
+                    "volume": 100.0,
+                    "delta": 0.5,
+                    "gamma": 0.001,
+                    "last_trade_price": 51.0,
+                    "last_trade_time": "2026-09-28 16:14:59",
+                }
+            )
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_P_{k}",
+                    "expiry": exp,
+                    "type": "P",
+                    "strike": float(k),
+                    "bid": 50.0,
+                    "ask": 52.0,
+                    "iv": 0.20,
+                    "open_interest": 1000.0,
+                    "volume": 100.0,
+                    "delta": -0.5,
+                    "gamma": 0.001,
+                    "last_trade_price": 51.0,
+                    "last_trade_time": "2026-09-28 16:14:59",
+                }
+            )
+
+    df_chain = pd.DataFrame(rows)
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=spot,
+        options_df=df_chain,
+        latest_quote_time_utc=now_utc - timedelta(hours=5),
+        fetched_at_utc=now_utc,
+        age_minutes=300.0,
+        status=DataStatus.OK,
+    )
+
+    t_close = datetime(2026, 9, 28, 20, 0, tzinfo=timezone.utc)
+    nq_bars = [Bar(timestamp_utc=t_close, open=20280.0, high=20285.0, low=20275.0, close=20280.0)]
+    ndx_bars = [Bar(timestamp_utc=t_close, open=20000.0, high=20005.0, low=19995.0, close=20000.0)]
+
+    snap = engine.compute_snapshot(chain=chain, nq_bars=nq_bars, ndx_bars=ndx_bars, now_utc=now_utc)
+
+    # 1. Échéance du lundi exclue
+    assert snap.reference_session_date == exp_tuesday
+    assert any("Échéances expirées exclues" in a for a in snap.anomalies)
+
+    # 2. 0DTE = mardi
+    assert snap.zero_dte_expiry == exp_tuesday
+
+    # 3. Expected move basé sur mardi avec jours = 1.0
+    assert snap.expected_move is not None
+    assert snap.expected_move.expiry == exp_tuesday
+    assert snap.expected_move.days_to_expiry == 1.0
+
+
+def test_reference_session_tuesday_morning_fraction(tmp_path: Path):
+    """Fixture test (2) : Mardi 10:00 ET.
+
+    - 0DTE = mardi avec fraction de jour.
+    """
+    engine = LevelsEngine(output_dir=tmp_path)
+    # Mardi 29 sept 2026 10:00 ET = 14:00 UTC
+    now_utc = datetime(2026, 9, 29, 14, 0, 0, tzinfo=timezone.utc)
+
+    exp_tuesday = date(2026, 9, 29)
+    exp_friday = date(2026, 10, 2)
+
+    rows = []
+    spot = 20000.0
+    for exp in (exp_tuesday, exp_friday):
+        for k in (19800, 20000, 20200):
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_C_{k}",
+                    "expiry": exp,
+                    "type": "C",
+                    "strike": float(k),
+                    "bid": 50.0,
+                    "ask": 52.0,
+                    "iv": 0.20,
+                    "open_interest": 1000.0,
+                    "volume": 100.0,
+                    "delta": 0.5,
+                    "gamma": 0.001,
+                    "last_trade_price": 51.0,
+                    "last_trade_time": "2026-09-29 09:59:00",
+                }
+            )
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_P_{k}",
+                    "expiry": exp,
+                    "type": "P",
+                    "strike": float(k),
+                    "bid": 50.0,
+                    "ask": 52.0,
+                    "iv": 0.20,
+                    "open_interest": 1000.0,
+                    "volume": 100.0,
+                    "delta": -0.5,
+                    "gamma": 0.001,
+                    "last_trade_price": 51.0,
+                    "last_trade_time": "2026-09-29 09:59:00",
+                }
+            )
+
+    df_chain = pd.DataFrame(rows)
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=spot,
+        options_df=df_chain,
+        latest_quote_time_utc=now_utc - timedelta(minutes=1),
+        fetched_at_utc=now_utc,
+        age_minutes=1.0,
+        status=DataStatus.OK,
+    )
+
+    nq_bars = [Bar(timestamp_utc=now_utc, open=20280.0, high=20285.0, low=20275.0, close=20280.0)]
+    ndx_bars = [Bar(timestamp_utc=now_utc, open=20000.0, high=20005.0, low=19995.0, close=20000.0)]
+
+    snap = engine.compute_snapshot(chain=chain, nq_bars=nq_bars, ndx_bars=ndx_bars, now_utc=now_utc)
+
+    # Session de référence et 0DTE = mardi
+    assert snap.reference_session_date == exp_tuesday
+    assert snap.zero_dte_expiry == exp_tuesday
+
+    # Fraction de séance : de 10:00 à 16:00 = 6.0 heures / 6.5 heures = 0.923 jour
+    assert snap.expected_move is not None
+    assert snap.expected_move.expiry == exp_tuesday
+    assert pytest.approx(snap.expected_move.days_to_expiry, abs=0.01) == 6.0 / 6.5
+
+
+def test_expected_move_order_of_magnitude_22pct():
+    """Fixture test (3) : Ordre de grandeur.
+
+    IV ATM ≈ 22 % donne un Expected Move à 1 jour ≈ 1,39 % du spot.
+    Formule : S * 0.22 * sqrt(1 / 252) ≈ S * 0.0138586 ≈ 1.39 % de S.
+    """
+    spot = 20000.0
+    iv_atm = 0.22
+
+    df = pd.DataFrame(
+        [
+            {
+                "contract": "NDX_2026-09-29_C_20000",
+                "expiry": date(2026, 9, 29),
+                "type": "C",
+                "strike": 20000.0,
+                "bid": 100.0,
+                "ask": 102.0,
+                "iv": iv_atm,
+                "open_interest": 1000.0,
+                "volume": 100.0,
+                "delta": 0.5,
+                "gamma": 0.001,
+                "last_trade_price": 101.0,
+                "last_trade_time": "2026-09-28 16:14:59",
+            },
+            {
+                "contract": "NDX_2026-09-29_P_20000",
+                "expiry": date(2026, 9, 29),
+                "type": "P",
+                "strike": 20000.0,
+                "bid": 100.0,
+                "ask": 102.0,
+                "iv": iv_atm,
+                "open_interest": 1000.0,
+                "volume": 100.0,
+                "delta": -0.5,
+                "gamma": 0.001,
+                "last_trade_price": 101.0,
+                "last_trade_time": "2026-09-28 16:14:59",
+            },
+        ]
+    )
+
+    # Référence hors séance pour avoir days = 1.0
+    ref_utc = datetime(2026, 9, 29, 1, 37, 0, tzinfo=timezone.utc)
+    em = calculate_expected_move(df, spot, ref_utc=ref_utc)
+
+    assert em is not None
+    assert em.days_to_expiry == 1.0
+    ratio = em.formula_move / spot
+    # 1.38586 % ≈ 1.39 %
+    assert abs(ratio - 0.0139) < 0.0005
+    assert pytest.approx(ratio * 100.0, abs=0.05) == 1.39

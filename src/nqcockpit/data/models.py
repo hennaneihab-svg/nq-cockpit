@@ -99,6 +99,9 @@ class BasisSnapshot:
     age_minutes: float | None = None
     synthetic_basis: float | None = None
     basis_spread_delta: float | None = None
+    nq_timestamp_utc: datetime | None = None
+    ndx_timestamp_utc: datetime | None = None
+    method: str = "live"
 
 
 @dataclass

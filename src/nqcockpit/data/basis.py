@@ -63,11 +63,26 @@ def compute_live_basis(
 
     basis_val = nq_bar.close - ndx_bar.close
     status = DataStatus.OK
+    nq_ny_str = nq_bar.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
+    ndx_ny_str = ndx_bar.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
+    nq_utc_str = nq_bar.timestamp_utc.strftime("%H:%M:%SZ")
+    ndx_utc_str = ndx_bar.timestamp_utc.strftime("%H:%M:%SZ")
+
     if not in_regular_session:
         status = DataStatus.DEGRADED
-        label = "base de la séance précédente"
+        method_str = "séance précédente"
+        label = (
+            f"base de la séance précédente (méthode: {method_str} | "
+            f"NQ: {nq_ny_str} [{nq_utc_str}]"
+            f" / NDX: {ndx_ny_str} [{ndx_utc_str}], âge: {age_min:.1f} min)"
+        )
     else:
-        label = "base en séance"
+        method_str = "séance en cours (direct)"
+        label = (
+            f"base en séance (méthode: {method_str} | "
+            f"NQ: {nq_ny_str} [{nq_utc_str}]"
+            f" / NDX: {ndx_ny_str} [{ndx_utc_str}], âge: {age_min:.1f} min)"
+        )
 
     return BasisSnapshot(
         timestamp_utc=nq_bar.timestamp_utc,
@@ -78,6 +93,9 @@ def compute_live_basis(
         status=status,
         label=label,
         age_minutes=age_min,
+        nq_timestamp_utc=nq_bar.timestamp_utc,
+        ndx_timestamp_utc=ndx_bar.timestamp_utc,
+        method=method_str,
     )
 
 
@@ -103,6 +121,21 @@ def compute_previous_session_basis(
     valid_ndx = [b for b in ndx_bars if b.timestamp_utc <= session_close_utc]
 
     if not valid_nq or not valid_ndx:
+        # Fallback vers la base locale si la liste en mémoire ne couvre pas la clôture
+        try:
+            from nqcockpit.data.db import get_bars as db_get_bars
+            from nqcockpit.data.db import get_db_connection
+
+            conn = get_db_connection()
+            if not valid_nq:
+                valid_nq = db_get_bars(conn, "NQ=F", "1m", end_time=session_close_utc, limit=10)
+            if not valid_ndx:
+                valid_ndx = db_get_bars(conn, "^NDX", "1m", end_time=session_close_utc, limit=10)
+            conn.close()
+        except Exception as e:
+            log.warning("Impossible de compléter les barres depuis SQLite : %s", e)
+
+    if not valid_nq or not valid_ndx:
         return BasisSnapshot(
             timestamp_utc=ref_utc,
             nq_price=0.0,
@@ -111,6 +144,7 @@ def compute_previous_session_basis(
             is_session_basis=False,
             status=DataStatus.BLOCKED,
             label="historique insuffisant pour la base de clôture",
+            method="séance précédente",
         )
 
     last_nq = valid_nq[-1]
@@ -131,6 +165,16 @@ def compute_previous_session_basis(
     age_h = age_min / 60.0
     basis_val = last_nq.close - last_ndx.close
 
+    nq_ny_str = last_nq.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
+    ndx_ny_str = last_ndx.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
+    nq_utc_str = last_nq.timestamp_utc.strftime("%H:%M:%SZ")
+    ndx_utc_str = last_ndx.timestamp_utc.strftime("%H:%M:%SZ")
+
+    label = (
+        f"base de la séance précédente (méthode: séance précédente | "
+        f"NQ: {nq_ny_str} [{nq_utc_str}] / NDX: {ndx_ny_str} [{ndx_utc_str}], âge {age_h:.1f} h)"
+    )
+
     return BasisSnapshot(
         timestamp_utc=last_ndx.timestamp_utc,
         nq_price=last_nq.close,
@@ -138,8 +182,11 @@ def compute_previous_session_basis(
         basis=basis_val,
         is_session_basis=False,
         status=status,
-        label=f"base de la séance précédente (âge {age_h:.1f} h)",
+        label=label,
         age_minutes=age_min,
+        nq_timestamp_utc=last_nq.timestamp_utc,
+        ndx_timestamp_utc=last_ndx.timestamp_utc,
+        method="séance précédente",
     )
 
 

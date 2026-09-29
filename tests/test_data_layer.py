@@ -472,3 +472,17 @@ def test_cboe_parsing_and_age_derivation():
     assert snap_degraded.status == DataStatus.DEGRADED
     assert snap_degraded.age_minutes is None
     assert "âge inconnu" in snap_degraded.notes.lower()
+
+
+def test_run_diagnostic_1c():
+    """Exécute et imprime le diagnostic réel de la base pour le problème 1c."""
+    import json
+
+    from nqcockpit.data.db import get_db_connection, get_db_diagnostic_1c
+
+    conn = get_db_connection("data/nqcockpit.db")
+    diag = get_db_diagnostic_1c(conn)
+    conn.close()
+    print("\n--- DIAGNOSTIC 1C RESULT ---")
+    print(json.dumps(diag, indent=2))
+    assert diag is not None

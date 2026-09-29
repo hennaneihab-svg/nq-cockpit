@@ -33,6 +33,7 @@ class ExpectedMoveInfo:
     upper_bound_ndx: float
     lower_bound_nq: float
     upper_bound_nq: float
+    expiry: date | None = None
 
 
 @dataclass
@@ -63,9 +64,14 @@ class LevelsSnapshot:
     zero_dte_put_wall_ndx: float | None = None
     zero_dte_put_wall_nq: float | None = None
     zero_dte_net_gex: float | None = None
+    zero_dte_expiry: date | None = None
     expected_move: ExpectedMoveInfo | None = None
     max_pain_ndx: float | None = None
     max_pain_nq: float | None = None
+    max_pain_expiry: date | None = None
+    reference_session_date: date | None = None
+    spot_nq_delay_note: str | None = None
+    cboe_age_stats: dict[str, Any] = field(default_factory=dict)
     oi_flag: str = "OI de la veille"
     anomalies: list[str] = field(default_factory=list)
 
@@ -111,6 +117,7 @@ class LevelsSnapshot:
                 "put_wall_ndx": self.zero_dte_put_wall_ndx,
                 "put_wall_nq": self.zero_dte_put_wall_nq,
                 "net_gex": self.zero_dte_net_gex,
+                "expiry": self.zero_dte_expiry.isoformat() if self.zero_dte_expiry else None,
             },
             "expected_move": {
                 "formula_move": (
@@ -120,6 +127,14 @@ class LevelsSnapshot:
                     self.expected_move.straddle_move if self.expected_move else None
                 ),
                 "iv_atm": self.expected_move.iv_atm if self.expected_move else None,
+                "days_to_expiry": (
+                    self.expected_move.days_to_expiry if self.expected_move else None
+                ),
+                "expiry": (
+                    self.expected_move.expiry.isoformat()
+                    if self.expected_move and self.expected_move.expiry
+                    else None
+                ),
                 "lower_bound_ndx": (
                     self.expected_move.lower_bound_ndx if self.expected_move else None
                 ),
@@ -135,6 +150,16 @@ class LevelsSnapshot:
             },
             "max_pain_ndx": self.max_pain_ndx,
             "max_pain_nq": self.max_pain_nq,
+            "max_pain_expiry": (
+                self.max_pain_expiry.isoformat() if self.max_pain_expiry else None
+            ),
+            "reference_session_date": (
+                self.reference_session_date.isoformat()
+                if self.reference_session_date
+                else None
+            ),
+            "spot_nq_delay_note": self.spot_nq_delay_note,
+            "cboe_age_stats": self.cboe_age_stats,
             "oi_flag": self.oi_flag,
             "anomalies": self.anomalies,
         }

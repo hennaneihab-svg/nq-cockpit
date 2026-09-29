@@ -7,6 +7,7 @@ from nqcockpit.levels.engine import (
     calculate_max_pain,
     calculate_zero_gamma,
     compute_gamma_exposure,
+    get_reference_session_date,
 )
 from nqcockpit.levels.models import ExpectedMoveInfo, GammaWall, LevelsSnapshot
 from nqcockpit.levels.scheduler import LevelsScheduler, compare_snapshots
@@ -18,6 +19,7 @@ __all__ = [
     "calculate_zero_gamma",
     "calculate_expected_move",
     "calculate_max_pain",
+    "get_reference_session_date",
     "ExpectedMoveInfo",
     "GammaWall",
     "LevelsSnapshot",

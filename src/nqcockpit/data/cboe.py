@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from nqcockpit.data.cache import DiskCache
+from nqcockpit.data.calendar import CALENDAR
 from nqcockpit.data.models import DataStatus
 
 log = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ class CboeChainSnapshot:
     status: DataStatus
     source: str = "CBOE"
     notes: str = ""
+    age_stats: dict[str, Any] = field(default_factory=dict)
 
 
 def _cboe_session() -> requests.Session:
@@ -78,10 +82,7 @@ def parse_occ(symbol: str) -> tuple[date, str, float] | None:
 
 
 def extract_latest_quote_timestamp(raw_options: list[dict]) -> datetime | None:
-    """Extrait l'horodatage le plus récent parmi les trades et quotes des options.
-
-    Recherche les champs 'last_trade_time', 'trade_time', ou 'quote_time'.
-    """
+    """Extrait l'horodatage le plus récent parmi les trades et quotes des options."""
     latest_dt: datetime | None = None
 
     for opt in raw_options:
@@ -89,20 +90,28 @@ def extract_latest_quote_timestamp(raw_options: list[dict]) -> datetime | None:
             val = opt.get(field_name)
             if not val or not isinstance(val, str):
                 continue
+            clean_val = val.strip()
             try:
-                # Format CBOE fréquent : '2026-09-28T19:59:45' ou '2026-09-28 19:59:45'
-                clean_val = val.replace("Z", "").strip()
-                if "T" in clean_val:
-                    dt = datetime.fromisoformat(clean_val)
+                if clean_val.endswith("Z"):
+                    clean_ts = clean_val[:-1]
+                    if "T" in clean_ts:
+                        dt = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
+                    else:
+                        dt = datetime.strptime(
+                            clean_ts, "%Y-%m-%d %H:%M:%S"
+                        ).replace(tzinfo=timezone.utc)
+                elif "T" in clean_val:
+                    dt_raw = datetime.fromisoformat(clean_val)
+                    if dt_raw.tzinfo is None:
+                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        dt = dt_raw.astimezone(timezone.utc)
                 else:
-                    dt = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
-
-                if dt.tzinfo is None:
-                    # Les cotations CBOE sont généralement en heure locale ET ou UTC
-                    # On les interprète en UTC
-                    dt = dt.replace(tzinfo=timezone.utc)
-                else:
-                    dt = dt.astimezone(timezone.utc)
+                    dt_raw = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
+                    if dt_raw.tzinfo is None:
+                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        dt = dt_raw.astimezone(timezone.utc)
 
                 if latest_dt is None or dt > latest_dt:
                     latest_dt = dt
@@ -110,6 +119,89 @@ def extract_latest_quote_timestamp(raw_options: list[dict]) -> datetime | None:
                 continue
 
     return latest_dt
+
+
+def extract_cboe_chain_age_stats(
+    raw_options: list[dict],
+    spot: float,
+    now_utc: datetime,
+) -> tuple[float | None, datetime | None, dict[str, Any]]:
+    """Calcule l'âge de la chaîne CBOE et les statistiques associées.
+
+    Âge = maintenant - max(last_trade_time) parmi les options dont le strike est à ±3 % du spot.
+    Horodatages CBOE interprétés en America/New_York s'ils sont sans fuseau horaire.
+    """
+    trades_in_band: list[tuple[datetime, float]] = []
+
+    for opt in raw_options:
+        strike = opt.get("strike")
+        if strike is None:
+            parsed = parse_occ(opt.get("option", ""))
+            if parsed:
+                strike = parsed[2]
+        if strike is None:
+            continue
+
+        try:
+            strike_val = float(strike)
+        except (ValueError, TypeError):
+            continue
+
+        # Filtre ±3% du spot
+        if spot > 0 and abs(strike_val - spot) / spot > 0.03:
+            continue
+
+        for field_name in ("last_trade_time", "trade_time", "quote_time"):
+            val = opt.get(field_name)
+            if not val or not isinstance(val, str):
+                continue
+            clean_val = val.strip()
+            try:
+                if clean_val.endswith("Z"):
+                    clean_ts = clean_val[:-1]
+                    if "T" in clean_ts:
+                        dt = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
+                    else:
+                        dt = datetime.strptime(
+                            clean_ts, "%Y-%m-%d %H:%M:%S"
+                        ).replace(tzinfo=timezone.utc)
+                elif "T" in clean_val:
+                    dt_raw = datetime.fromisoformat(clean_val)
+                    if dt_raw.tzinfo is None:
+                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        dt = dt_raw.astimezone(timezone.utc)
+                else:
+                    dt_raw = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
+                    if dt_raw.tzinfo is None:
+                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        dt = dt_raw.astimezone(timezone.utc)
+
+                age_m = max(0.0, (now_utc - dt).total_seconds() / 60.0)
+                trades_in_band.append((dt, age_m))
+                break
+            except Exception:
+                continue
+
+    if not trades_in_band:
+        return None, None, {}
+
+    ages = [t[1] for t in trades_in_band]
+    latest_dt = max(t[0] for t in trades_in_band)
+    min_age = min(ages)
+    med_age = float(np.median(ages))
+    max_age = max(ages)
+    n_count = len(trades_in_band)
+
+    stats = {
+        "count": n_count,
+        "min_age_minutes": min_age,
+        "median_age_minutes": med_age,
+        "max_age_minutes": max_age,
+        "aggregate": "max(last_trade_time) sur strikes ±3% spot",
+    }
+    return min_age, latest_dt, stats
 
 
 def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot:
@@ -145,34 +237,81 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
 
     df = pd.DataFrame(rows)
 
-    # Dérivation de l'âge à partir des horodatages de cotations d'options
-    latest_quote_dt = extract_latest_quote_timestamp(raw_options)
-    field_used = "cotations d'options"
+    # Dérivation de l'âge à partir des options dans la bande ±3% du spot
+    age_min, latest_quote_dt, age_stats = extract_cboe_chain_age_stats(
+        raw_options, spot, fetched_at_utc
+    )
 
     if latest_quote_dt is None:
-        # Repli si aucun horodatage n'est extrait des cotations (ex: fixtures)
-        ts_str = data.get("timestamp") or raw.get("timestamp")
-        if ts_str and isinstance(ts_str, str):
-            clean_ts = ts_str.replace("Z", "").strip()
-            try:
-                if "T" in clean_ts:
-                    latest_quote_dt = datetime.fromisoformat(clean_ts)
-                else:
-                    latest_quote_dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
-                if latest_quote_dt.tzinfo is None:
-                    latest_quote_dt = latest_quote_dt.replace(tzinfo=timezone.utc)
-                else:
-                    latest_quote_dt = latest_quote_dt.astimezone(timezone.utc)
-                field_used = "timestamp global"
-            except Exception:
-                latest_quote_dt = None
+        # Repli sur l'ensemble des cotations d'options
+        latest_quote_dt = extract_latest_quote_timestamp(raw_options)
+        if latest_quote_dt is not None:
+            age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
+            age_stats = {
+                "count": len(raw_options),
+                "min_age_minutes": age_min,
+                "median_age_minutes": age_min,
+                "max_age_minutes": age_min,
+                "aggregate": "repli: toutes options",
+            }
+        else:
+            # Repli sur le timestamp global du JSON si présent (ex: certaines fixtures)
+            ts_str = data.get("timestamp") or raw.get("timestamp")
+            if ts_str and isinstance(ts_str, str):
+                clean_ts = ts_str.replace("Z", "").strip()
+                try:
+                    if "T" in clean_ts:
+                        latest_quote_dt = datetime.fromisoformat(clean_ts)
+                    else:
+                        latest_quote_dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+                    if latest_quote_dt.tzinfo is None:
+                        latest_quote_dt = (
+                            latest_quote_dt.replace(tzinfo=ET).astimezone(timezone.utc)
+                        )
+                    else:
+                        latest_quote_dt = latest_quote_dt.astimezone(timezone.utc)
+                    age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
+                    age_stats = {
+                        "count": 1,
+                        "min_age_minutes": age_min,
+                        "median_age_minutes": age_min,
+                        "max_age_minutes": age_min,
+                        "aggregate": "repli: timestamp global",
+                    }
+                except Exception:
+                    latest_quote_dt = None
+
+    in_regular = CALENDAR.is_us_equity_regular_hours(fetched_at_utc)
 
     if latest_quote_dt is not None:
-        age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
-        status = DataStatus.OK if age_min <= 60.0 else DataStatus.DEGRADED
-        notes = f"Âge dérivé ({field_used}) : {age_min:.1f} min"
+        last_close_utc = CALENDAR.get_last_equity_session_close(fetched_at_utc)
+        last_close_et = last_close_utc.astimezone(ET)
+        options_close_et = datetime.combine(last_close_et.date(), time(16, 15), tzinfo=ET)
+        options_close_utc = options_close_et.astimezone(timezone.utc)
+
+        if not in_regular and fetched_at_utc >= options_close_utc:
+            # Hors séance et après fermeture des options (16:15 ET)
+            if latest_quote_dt.astimezone(ET).date() == last_close_et.date():
+                status = DataStatus.OK
+                notes = (
+                    f"OK « clôture » (clôture 16:15 ET | ±3%: N={age_stats.get('count', 0)}, "
+                    f"âges: min {age_stats.get('min_age_minutes', 0.0):.1f}m / "
+                    f"méd {age_stats.get('median_age_minutes', 0.0):.1f}m / "
+                    f"max {age_stats.get('max_age_minutes', 0.0):.1f}m)"
+                )
+            else:
+                status = DataStatus.DEGRADED
+                notes = "donnée antérieure à la dernière séance de clôture"
+        else:
+            fresh = age_min is not None and age_min <= 60.0
+            status = DataStatus.OK if fresh else DataStatus.DEGRADED
+            notes = (
+                f"Âge dérivé (max trade ±3%) : {age_min:.1f} min | N={age_stats.get('count', 0)} "
+                f"(min {age_stats.get('min_age_minutes', 0.0):.1f}m / "
+                f"méd {age_stats.get('median_age_minutes', 0.0):.1f}m / "
+                f"max {age_stats.get('max_age_minutes', 0.0):.1f}m)"
+            )
     else:
-        # Horodatage introuvable dans les cotations -> âge inconnu = DÉGRADÉ
         age_min = None
         status = DataStatus.DEGRADED
         notes = "Âge inconnu (aucun horodatage de cotation exploitable dans les options)"
@@ -187,6 +326,7 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
         status=status,
         source="CBOE",
         notes=notes,
+        age_stats=age_stats,
     )
 
 

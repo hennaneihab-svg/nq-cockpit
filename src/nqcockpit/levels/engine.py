@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,7 @@ from nqcockpit.data.basis import (
 from nqcockpit.data.calendar import CALENDAR
 from nqcockpit.data.cboe import CboeChainSnapshot
 from nqcockpit.data.db import apply_migrations, get_db_connection, insert_snapshot
-from nqcockpit.data.models import Bar, DataStatus
+from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus
 from nqcockpit.levels import greeks
 from nqcockpit.levels.models import ExpectedMoveInfo, GammaWall, LevelsSnapshot
 
@@ -126,6 +126,36 @@ def calculate_zero_gamma(
     return zero_spot
 
 
+def get_reference_session_date(ref_utc: datetime) -> date:
+    """Détermine la session de référence selon le calendrier US actions.
+
+    Session de référence = la séance en cours si la séance US est ouverte,
+    sinon la prochaine séance de bourse (pandas_market_calendars).
+    """
+    if ref_utc.tzinfo is None:
+        ref_utc = ref_utc.replace(tzinfo=timezone.utc)
+
+    ref_et = ref_utc.astimezone(ET)
+    ref_d = ref_et.date()
+
+    if CALENDAR.is_us_equity_regular_hours(ref_utc):
+        return ref_d
+
+    # Si jour ouvré avant l'ouverture de 09:30 ET : la séance de référence est aujourd'hui
+    if CALENDAR.is_trading_day(ref_d) and ref_et.time() < time(9, 30):
+        return ref_d
+
+    # Après la clôture (>= 16:00 ET) ou week-end/férié : prochaine séance de bourse
+    start_d = ref_d + timedelta(days=1)
+    end_d = ref_d + timedelta(days=12)
+    valid = CALENDAR._nasdaq.valid_days(
+        start_date=start_d.isoformat(), end_date=end_d.isoformat()
+    )
+    if len(valid) > 0:
+        return valid[0].date()
+    return ref_d + timedelta(days=1)
+
+
 def calculate_expected_move(
     df: pd.DataFrame,
     spot: float,
@@ -134,24 +164,36 @@ def calculate_expected_move(
 ) -> ExpectedMoveInfo | None:
     """Calcule le move attendu 1 sigma (formule analytique ET straddle ATM du front).
 
-    Formule analytique : S * IV_ATM * sqrt(jours / 252) où 'jours' représente
-    les jours de bourse effectifs restants (CALENDAR), avec fraction pour 0DTE.
+    Formule analytique : S * IV_ATM * sqrt(jours / 252) avec jours en jours de bourse.
+    La fraction de jour du 0DTE ne s'applique que pendant la séance.
+    Hors séance, la durée est le temps de bourse entre maintenant et l'échéance (ex: 1.0 j).
     """
     if df.empty:
         return None
 
     if ref_utc is None:
-        ref_utc = datetime.now(timezone.utc)
+        if today_date is not None:
+            ref_utc = datetime.combine(today_date, time(12, 0), tzinfo=ET).astimezone(timezone.utc)
+        else:
+            ref_utc = datetime.now(timezone.utc)
     elif ref_utc.tzinfo is None:
         ref_utc = ref_utc.replace(tzinfo=timezone.utc)
 
+    ref_session = get_reference_session_date(ref_utc)
     nearest_exp = df["expiry"].min()
     sub = df[df["expiry"] == nearest_exp]
     if sub.empty:
         return None
 
+    in_regular = CALENDAR.is_us_equity_regular_hours(ref_utc)
     if isinstance(nearest_exp, date):
-        days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
+        if nearest_exp == ref_session:
+            if in_regular:
+                days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
+            else:
+                days = 1.0
+        else:
+            days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
     else:
         days = 1.0
 
@@ -195,15 +237,30 @@ def calculate_expected_move(
         upper_bound_ndx=spot + formula_move,
         lower_bound_nq=0.0,  # sera rempli avec la base
         upper_bound_nq=0.0,
+        expiry=nearest_exp if isinstance(nearest_exp, date) else None,
     )
 
 
-def calculate_max_pain(df: pd.DataFrame) -> float | None:
-    """Calcule le strike Max Pain (minimisant la valeur intrinsèque des options à l'expiration)."""
+def calculate_max_pain(
+    df: pd.DataFrame,
+    target_expiry: date | None = None,
+) -> float | None:
+    """Calcule le strike Max Pain pour UNE échéance spécifique.
+
+    Si target_expiry n'est pas spécifié, prend l'échéance la plus proche.
+    Jamais toutes échéances confondues.
+    """
     if df.empty:
         return None
 
-    valid = df[df["open_interest"] > 0]
+    if target_expiry is None:
+        target_expiry = df["expiry"].min()
+
+    sub = df[df["expiry"] == target_expiry]
+    if sub.empty:
+        return None
+
+    valid = sub[sub["open_interest"] > 0]
     if valid.empty:
         return None
 
@@ -254,41 +311,114 @@ class LevelsEngine:
 
         anomalies: list[str] = []
         spot_ndx = chain.spot
+        ref_session_date = get_reference_session_date(now_utc)
 
-        # 1. Validation de la base NQ/NDX
-        if nq_bars and ndx_bars:
-            latest_nq = nq_bars[-1]
-            latest_ndx = ndx_bars[-1]
-            in_regular_session = CALENDAR.is_us_equity_regular_hours(now_utc)
-            if in_regular_session:
-                basis_snap = compute_live_basis(latest_nq, latest_ndx, now_utc=now_utc)
-                if basis_snap.status == DataStatus.BLOCKED:
-                    basis_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
+        # 1. Base synthétique par parité Call-Put
+        synth_basis = synthetic_futures_basis_from_options(
+            chain.options_df,
+            spot_ndx,
+            today_date=ref_session_date,
+        )
+
+        try:
+            cfg = load_config()
+            tol = getattr(cfg.data, "parity_basis_tolerance_points", 50.0)
+        except Exception:
+            tol = 50.0
+
+        # 2. Ordre de priorité de la base NQ/NDX :
+        #    (i)  Base alignée en séance (barres 1m NQ=F et ^NDX, écart <= 60s, séance en cours)
+        #    (ii) Base de la séance précédente (dernière séance complète <= 16:00 ET, même minute)
+        #    (iii) Base implicite par parité call-put
+        #          (fallback si écart > tolérance ou barres manquantes)
+        in_regular_session = CALENDAR.is_us_equity_regular_hours(now_utc)
+        candidate_basis: BasisSnapshot | None = None
+
+        if in_regular_session and nq_bars and ndx_bars:
+            live_snap = compute_live_basis(nq_bars[-1], ndx_bars[-1], now_utc=now_utc)
+            if live_snap.status != DataStatus.BLOCKED:
+                candidate_basis = live_snap
+
+        if candidate_basis is None:
+            prev_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
+            if prev_snap.status != DataStatus.BLOCKED:
+                candidate_basis = prev_snap
+
+        use_parity_fallback = False
+        if candidate_basis is not None:
+            if synth_basis is not None:
+                parity_diff = abs(candidate_basis.basis - synth_basis)
+                if parity_diff > tol:
+                    use_parity_fallback = True
                     anomalies.append(
-                        "Barres direct désalignées (> 60s) : repli sur clôture précédente"
+                        f"Écart base empirique ({candidate_basis.basis:+.2f})"
+                        f" vs parité ({synth_basis:+.2f})"
+                        f" = {parity_diff:.1f} pts > tolérance ({tol:.1f} pts)"
+                        " : repli sur parité"
                     )
+            if not use_parity_fallback:
+                basis_val = candidate_basis.basis
+                basis_lbl = candidate_basis.label
+                basis_st = candidate_basis.status
             else:
-                basis_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
-                if basis_snap.status == DataStatus.DEGRADED:
-                    anomalies.append(
-                        "Base de clôture précédente dégradée (> 1 séance de bourse ou désalignée)"
-                    )
+                basis_val = synth_basis if synth_basis is not None else candidate_basis.basis
+                basis_lbl = "base implicite (parité)"
+                basis_st = DataStatus.DEGRADED
         else:
-            basis_snap = None
-            anomalies.append("Aucune barre NQ/NDX disponible pour la base")
+            if synth_basis is not None:
+                basis_val = synth_basis
+                basis_lbl = "base implicite (parité)"
+                basis_st = DataStatus.DEGRADED
+                anomalies.append(
+                    "Barres NQ/NDX indisponibles : "
+                    "utilisation de la base implicite (parité)"
+                )
+            else:
+                basis_val = 0.0
+                basis_lbl = "base indisponible"
+                basis_st = DataStatus.BLOCKED
+                anomalies.append("Aucune base disponible (ni barres ni parité)")
 
-        basis_val = basis_snap.basis if basis_snap else 0.0
-        basis_lbl = basis_snap.label if basis_snap else "base indisponible"
-        basis_st = basis_snap.status if basis_snap else DataStatus.BLOCKED
-        spot_nq = spot_ndx + basis_val if spot_ndx > 0 else 0.0
+        # Spot NQ = dernier cours observé de NQ=F avec son horodatage et son retard
+        # Ne présente JAMAIS un NQ dérivé comme un cours.
+        # Prix NQ valide : multiple de 0,25.
+        if nq_bars:
+            latest_obs_nq = nq_bars[-1]
+            spot_nq = round(latest_obs_nq.close * 4.0) / 4.0
+            nq_ts_ny = latest_obs_nq.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
+            nq_ts_utc = latest_obs_nq.timestamp_utc.strftime("%H:%M:%SZ")
+            spot_delay_note = "source retardée d'environ 15 min"
+            anomalies.append(
+                f"Spot NQ observé : {spot_nq:,.2f} pts"
+                f" (cours NQ=F à {nq_ts_ny} [{nq_ts_utc}], {spot_delay_note})"
+            )
+        else:
+            spot_nq = round((spot_ndx + basis_val) * 4.0) / 4.0 if spot_ndx > 0 else 0.0
+            spot_delay_note = "cours estimé via NDX + base"
 
-        # Vérification base anormale (> 2% du spot)
-        if spot_ndx > 0 and abs(basis_val) > 0.02 * spot_ndx:
-            anomalies.append(f"Base NQ/NDX anormale : {basis_val:+.1f} pts (> 2% du spot)")
+        anomalies.append(
+            "Niveaux NQ : tous les niveaux NQ (Flip, Walls, Expected Move, Max Pain) "
+            "sont des « niveaux NQ (convertis) » via base"
+        )
 
-        # 2. Gestion chaîne vide
-        if chain.options_df.empty:
-            anomalies.append("Chaîne d'options CBOE vide")
+        # 3. Filtrage strict des échéances expirées
+        # Session de référence : séance en cours ou prochaine séance de bourse
+        df_options = chain.options_df
+        if not df_options.empty and "expiry" in df_options.columns:
+            expired_mask = df_options["expiry"] < ref_session_date
+            n_expired = int(expired_mask.sum())
+            if n_expired > 0:
+                expired_dates = sorted(df_options.loc[expired_mask, "expiry"].unique())
+                exp_str = ", ".join(d.isoformat() for d in expired_dates)
+                anomalies.append(
+                    f"Échéances expirées exclues (< {ref_session_date.isoformat()}) : "
+                    f"{n_expired} options ({exp_str})"
+                )
+                df_options = df_options[~expired_mask].copy()
+
+        # Gestion chaîne vide
+        if df_options.empty:
+            anomalies.append("Chaîne d'options CBOE vide (ou toutes échéances expirées)")
             return LevelsSnapshot(
                 timestamp_utc=now_utc,
                 source_timestamp_utc=chain.latest_quote_time_utc,
@@ -299,7 +429,7 @@ class LevelsEngine:
                 basis=basis_val,
                 basis_label=basis_lbl,
                 basis_status=basis_st,
-                synthetic_basis=None,
+                synthetic_basis=synth_basis,
                 net_gex=0.0,
                 regime="INDISPONIBLE",
                 gamma_flip_ndx=None,
@@ -308,14 +438,15 @@ class LevelsEngine:
                 call_wall_nq=None,
                 put_wall_ndx=None,
                 put_wall_nq=None,
+                reference_session_date=ref_session_date,
+                spot_nq_delay_note=spot_delay_note,
                 anomalies=anomalies,
             )
 
-        # 3. Calcul GEX
-        df_gex = compute_gamma_exposure(chain.options_df, spot_ndx)
+        # 4. Calcul GEX sur les options non expirées
+        df_gex = compute_gamma_exposure(df_options, spot_ndx)
         net_gex = float(df_gex["gex"].sum())
 
-        # Régime (volatilité, aucun biais directionnel)
         if net_gex > 0:
             regime = "AMORTISSEUR (volatilité comprimée)"
         elif net_gex < 0:
@@ -323,7 +454,7 @@ class LevelsEngine:
         else:
             regime = "NEUTRE"
 
-        # 4. Zéro Gamma (Gamma Flip)
+        # 5. Zéro Gamma (Gamma Flip)
         res_profile = calculate_gamma_profile(df_gex, spot_ndx)
         flip_ndx = None
         flip_nq = None
@@ -331,23 +462,26 @@ class LevelsEngine:
             grid, prof = res_profile
             flip_ndx = calculate_zero_gamma(grid, prof, spot_ndx)
             if flip_ndx is not None:
-                flip_nq = flip_ndx + basis_val
+                flip_nq = round((flip_ndx + basis_val) * 4.0) / 4.0
             else:
                 anomalies.append(
                     "Flip absent : aucun passage par zéro dans la plage +/- 8% (régime très stable)"
                 )
 
-        # 5. Murs de Gamma (Toutes échéances)
-        # Agrégation par strike
+        # 6. Murs de Gamma (Toutes échéances non expirées)
         by_strike = df_gex.groupby("strike")["gex"].sum()
         calls_above = by_strike[(by_strike.index >= spot_ndx) & (by_strike > 0)]
         puts_below = by_strike[(by_strike.index <= spot_ndx) & (by_strike < 0)]
 
         call_wall_ndx = float(calls_above.idxmax()) if len(calls_above) else None
-        call_wall_nq = (call_wall_ndx + basis_val) if call_wall_ndx is not None else None
+        call_wall_nq = (
+            round((call_wall_ndx + basis_val) * 4.0) / 4.0 if call_wall_ndx is not None else None
+        )
 
         put_wall_ndx = float(puts_below.idxmin()) if len(puts_below) else None
-        put_wall_nq = (put_wall_ndx + basis_val) if put_wall_ndx is not None else None
+        put_wall_nq = (
+            round((put_wall_ndx + basis_val) * 4.0) / 4.0 if put_wall_ndx is not None else None
+        )
 
         # Top 5 Murs en GEX absolu
         top_abs = by_strike.abs().nlargest(5)
@@ -361,13 +495,12 @@ class LevelsEngine:
                     gex=val,
                     type=w_type,
                     rank=rank,
-                    nq_strike=float(k) + basis_val,
+                    nq_strike=round((float(k) + basis_val) * 4.0) / 4.0,
                 )
             )
 
-        # 6. Niveaux 0DTE séparés
-        nearest_exp = df_gex["expiry"].min()
-        df_0dte = df_gex[df_gex["expiry"] == nearest_exp]
+        # 7. Niveaux 0DTE : strictement options où expiry == ref_session_date
+        df_0dte = df_gex[df_gex["expiry"] == ref_session_date]
         z_call_ndx, z_call_nq = None, None
         z_put_ndx, z_put_nq = None, None
         z_net_gex = None
@@ -380,40 +513,59 @@ class LevelsEngine:
 
             if len(z_above):
                 z_call_ndx = float(z_above.idxmax())
-                z_call_nq = z_call_ndx + basis_val
+                z_call_nq = round((z_call_ndx + basis_val) * 4.0) / 4.0
             if len(z_below):
                 z_put_ndx = float(z_below.idxmin())
-                z_put_nq = z_put_ndx + basis_val
+                z_put_nq = round((z_put_ndx + basis_val) * 4.0) / 4.0
 
-        # 7. Expected Move
+            anomalies.append(
+                f"0DTE : échéance {ref_session_date.isoformat()} (session de référence)"
+            )
+        else:
+            anomalies.append(
+                f"0DTE : aucune option active"
+                f" pour la date de référence {ref_session_date.isoformat()}"
+            )
+
+        # 8. Expected Move sur l'échéance la plus proche non expirée
         em_info = calculate_expected_move(df_gex, spot_ndx, ref_utc=now_utc)
         if em_info is not None:
             em_info.lower_bound_nq = em_info.lower_bound_ndx + basis_val
             em_info.upper_bound_nq = em_info.upper_bound_ndx + basis_val
+            exp_str = em_info.expiry.isoformat() if em_info.expiry else "N/A"
+            straddle_s = f"{em_info.straddle_move:.1f} pts" if em_info.straddle_move else "N/A"
+            anomalies.append(
+                f"Expected Move (échéance {exp_str}) : IV ATM {em_info.iv_atm * 100:.2f} %, "
+                f"Straddle ATM {straddle_s}, durée {em_info.days_to_expiry:.2f} j"
+            )
 
-        # 8. Max Pain
-        mp_ndx = calculate_max_pain(df_gex)
-        mp_nq = (mp_ndx + basis_val) if mp_ndx is not None else None
+        # 9. Max Pain calculé strictement PAR échéance (front / référence)
+        target_mp_exp = df_gex["expiry"].min()
+        mp_ndx = calculate_max_pain(df_gex, target_expiry=target_mp_exp)
+        mp_nq = round((mp_ndx + basis_val) * 4.0) / 4.0 if mp_ndx is not None else None
+        if target_mp_exp:
+            exp_mp_str = (
+                target_mp_exp.isoformat()
+                if isinstance(target_mp_exp, date)
+                else str(target_mp_exp)
+            )
+            anomalies.append(
+                f"Max Pain calculé pour l'échéance {exp_mp_str} : "
+                f"NDX {mp_ndx:,.2f} | niveau NQ (converti) {mp_nq:,.2f}"
+            )
 
-        # 9. Base synthétique par parité Call-Put et seuil de tolérance
-        synth_basis = synthetic_futures_basis_from_options(
-            chain.options_df,
-            spot_ndx,
-            today_date=now_utc.astimezone(ET).date(),
-        )
-        if synth_basis is not None:
-            try:
-                cfg = load_config()
-                tol = getattr(cfg.data, "parity_basis_tolerance_points", 50.0)
-            except Exception:
-                tol = 50.0
-            parity_diff = abs(basis_val - synth_basis)
-            if parity_diff > tol:
-                basis_st = DataStatus.DEGRADED
-                anomalies.append(
-                    f"Écart base future-spot vs parité Call-Put ({parity_diff:.1f} pts) "
-                    f"> tolérance ({tol:.1f} pts)"
-                )
+        # 10. Statistiques d'âge de la chaîne CBOE
+        if chain.age_stats:
+            c_cnt = chain.age_stats.get("count", 0)
+            c_min = chain.age_stats.get("min_age_minutes", 0.0)
+            c_med = chain.age_stats.get("median_age_minutes", 0.0)
+            c_max = chain.age_stats.get("max_age_minutes", 0.0)
+            anomalies.append(
+                f"Chaîne CBOE (options ±3% spot) : N={c_cnt} options | "
+                f"âges: min {c_min:.1f} min, "
+                f"méd {c_med:.1f} min, max {c_max:.1f} min | "
+                f"Statut : {chain.status.value}"
+            )
 
         # Statut global du snapshot
         global_status = chain.status
@@ -445,9 +597,14 @@ class LevelsEngine:
             zero_dte_put_wall_ndx=z_put_ndx,
             zero_dte_put_wall_nq=z_put_nq,
             zero_dte_net_gex=z_net_gex,
+            zero_dte_expiry=ref_session_date if not df_0dte.empty else None,
             expected_move=em_info,
             max_pain_ndx=mp_ndx,
             max_pain_nq=mp_nq,
+            max_pain_expiry=target_mp_exp if isinstance(target_mp_exp, date) else None,
+            reference_session_date=ref_session_date,
+            spot_nq_delay_note=spot_delay_note,
+            cboe_age_stats=chain.age_stats,
             oi_flag="OI de la veille",
             anomalies=anomalies,
         )
