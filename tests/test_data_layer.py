@@ -319,7 +319,8 @@ def test_previous_session_basis_fallback():
 
     assert snap.status == DataStatus.OK
     assert snap.basis == 102.0
-    assert snap.label == "base de la séance précédente"
+    assert "base de la séance précédente" in snap.label
+    assert "âge 2.0 h" in snap.label
     assert snap.is_session_basis is False
     assert snap.age_minutes == pytest.approx(120.0, rel=1e-2)
 

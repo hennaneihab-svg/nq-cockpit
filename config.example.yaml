@@ -5,6 +5,7 @@ trading_windows_algiers:      # tes kill zones
   - {name: trade1, start: "15:30", end: "17:00"}
   - {name: trade2, start: "17:00", end: "18:30"}
 snapshots_algiers: ["13:00", "14:45"]
+snapshots_ny: ["08:00", "09:45", "15:45"]
 rules:
   max_trades_per_day: 2
   cancel_trade2_if_trade1_loss: true
@@ -30,6 +31,7 @@ validation:
 sources:
   bls_contact_email: "contact@nqcockpit.local"
   stale_data_threshold_minutes: 60
+  cboe_ndx_url: "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
 market_sessions:
   us_equities:
     timezone: America/New_York
@@ -53,5 +55,6 @@ data:
   symbols_expected_delay_minutes:
     "NQ=F": 15
   delay_margin_minutes: 10
+  parity_basis_tolerance_points: 50.0
 
 

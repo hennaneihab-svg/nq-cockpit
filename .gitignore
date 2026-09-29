@@ -33,6 +33,7 @@ data/*.db
 data/*.sqlite
 data/*.parquet
 data/cache/
+data/levels/
 
 # Reports
 reports/*.json

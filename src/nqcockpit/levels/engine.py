@@ -21,7 +21,13 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from nqcockpit.data.basis import compute_live_basis, compute_previous_session_basis
+from nqcockpit.config import load_config
+from nqcockpit.data.basis import (
+    compute_live_basis,
+    compute_previous_session_basis,
+    synthetic_futures_basis_from_options,
+)
+from nqcockpit.data.calendar import CALENDAR
 from nqcockpit.data.cboe import CboeChainSnapshot
 from nqcockpit.data.db import apply_migrations, get_db_connection, insert_snapshot
 from nqcockpit.data.models import Bar, DataStatus
@@ -123,21 +129,31 @@ def calculate_zero_gamma(
 def calculate_expected_move(
     df: pd.DataFrame,
     spot: float,
+    ref_utc: datetime | None = None,
     today_date: date | None = None,
 ) -> ExpectedMoveInfo | None:
-    """Calcule le move attendu 1 sigma (formule analytique ET straddle ATM du front)."""
+    """Calcule le move attendu 1 sigma (formule analytique ET straddle ATM du front).
+
+    Formule analytique : S * IV_ATM * sqrt(jours / 252) où 'jours' représente
+    les jours de bourse effectifs restants (CALENDAR), avec fraction pour 0DTE.
+    """
     if df.empty:
         return None
 
-    if today_date is None:
-        today_date = datetime.now(timezone.utc).date()
+    if ref_utc is None:
+        ref_utc = datetime.now(timezone.utc)
+    elif ref_utc.tzinfo is None:
+        ref_utc = ref_utc.replace(tzinfo=timezone.utc)
 
     nearest_exp = df["expiry"].min()
     sub = df[df["expiry"] == nearest_exp]
     if sub.empty:
         return None
 
-    days = max(1, (nearest_exp - today_date).days if isinstance(nearest_exp, date) else 1)
+    if isinstance(nearest_exp, date):
+        days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
+    else:
+        days = 1.0
 
     # IV ATM : strike le plus proche du spot
     sub_valid_iv = sub[sub["iv"] > 1e-4]
@@ -243,14 +259,20 @@ class LevelsEngine:
         if nq_bars and ndx_bars:
             latest_nq = nq_bars[-1]
             latest_ndx = ndx_bars[-1]
-            # Calcul en direct ou repli session
-            basis_snap = compute_live_basis(latest_nq, latest_ndx, now_utc=now_utc)
-            if basis_snap.status == DataStatus.BLOCKED:
-                # Repli sur clôture précédente
+            in_regular_session = CALENDAR.is_us_equity_regular_hours(now_utc)
+            if in_regular_session:
+                basis_snap = compute_live_basis(latest_nq, latest_ndx, now_utc=now_utc)
+                if basis_snap.status == DataStatus.BLOCKED:
+                    basis_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
+                    anomalies.append(
+                        "Barres direct désalignées (> 60s) : repli sur clôture précédente"
+                    )
+            else:
                 basis_snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=now_utc)
-                anomalies.append(
-                    "Base calculée sur clôture précédente (barres direct désalignées ou fermées)"
-                )
+                if basis_snap.status == DataStatus.DEGRADED:
+                    anomalies.append(
+                        "Base de clôture précédente dégradée (> 1 séance de bourse ou désalignée)"
+                    )
         else:
             basis_snap = None
             anomalies.append("Aucune barre NQ/NDX disponible pour la base")
@@ -364,7 +386,7 @@ class LevelsEngine:
                 z_put_nq = z_put_ndx + basis_val
 
         # 7. Expected Move
-        em_info = calculate_expected_move(df_gex, spot_ndx)
+        em_info = calculate_expected_move(df_gex, spot_ndx, ref_utc=now_utc)
         if em_info is not None:
             em_info.lower_bound_nq = em_info.lower_bound_ndx + basis_val
             em_info.upper_bound_nq = em_info.upper_bound_ndx + basis_val
@@ -372,6 +394,26 @@ class LevelsEngine:
         # 8. Max Pain
         mp_ndx = calculate_max_pain(df_gex)
         mp_nq = (mp_ndx + basis_val) if mp_ndx is not None else None
+
+        # 9. Base synthétique par parité Call-Put et seuil de tolérance
+        synth_basis = synthetic_futures_basis_from_options(
+            chain.options_df,
+            spot_ndx,
+            today_date=now_utc.astimezone(ET).date(),
+        )
+        if synth_basis is not None:
+            try:
+                cfg = load_config()
+                tol = getattr(cfg.data, "parity_basis_tolerance_points", 50.0)
+            except Exception:
+                tol = 50.0
+            parity_diff = abs(basis_val - synth_basis)
+            if parity_diff > tol:
+                basis_st = DataStatus.DEGRADED
+                anomalies.append(
+                    f"Écart base future-spot vs parité Call-Put ({parity_diff:.1f} pts) "
+                    f"> tolérance ({tol:.1f} pts)"
+                )
 
         # Statut global du snapshot
         global_status = chain.status
@@ -388,7 +430,7 @@ class LevelsEngine:
             basis=basis_val,
             basis_label=basis_lbl,
             basis_status=basis_st,
-            synthetic_basis=None,
+            synthetic_basis=synth_basis,
             net_gex=net_gex,
             regime=regime,
             gamma_flip_ndx=flip_ndx,

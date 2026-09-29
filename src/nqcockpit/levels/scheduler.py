@@ -84,11 +84,14 @@ def compare_snapshots(
 
 
 class LevelsScheduler:
-    """Planifie et exécute les calculs de niveaux selon les heures configurées (heure d'Alger)."""
+    """Planifie et exécute les calculs de niveaux selon les heures de séance US.
+
+    Exprimé en fuseau horaire America/New_York.
+    """
 
     def __init__(self, engine: LevelsEngine | None = None) -> None:
         self.engine = engine or LevelsEngine()
-        self.scheduler = BackgroundScheduler(timezone=ALGIERS_TZ)
+        self.scheduler = BackgroundScheduler(timezone=ZoneInfo("America/New_York"))
         self.last_snapshot: LevelsSnapshot | None = None
 
     def trigger_snapshot(self) -> LevelsSnapshot:
@@ -123,11 +126,11 @@ class LevelsScheduler:
         return snap
 
     def start(self) -> None:
-        """Démarre le planificateur selon la configuration."""
+        """Démarre le planificateur selon la configuration en America/New_York."""
         cfg = load_config()
-        times_algiers = cfg.snapshots_algiers
+        times_ny = getattr(cfg, "snapshots_ny", None) or ["08:00", "09:45", "15:45"]
 
-        for t_str in times_algiers:
+        for t_str in times_ny:
             parts = t_str.strip().split(":")
             if len(parts) == 2:
                 hour = int(parts[0])
@@ -138,9 +141,9 @@ class LevelsScheduler:
                     hour=hour,
                     minute=minute,
                     day_of_week="mon-fri",
-                    id=f"snap_{hour:02d}_{minute:02d}",
+                    id=f"snap_ny_{hour:02d}_{minute:02d}",
                 )
-                log.info("Snapshot planifié à %02d:%02d (heure d'Alger)", hour, minute)
+                log.info("Snapshot planifié à %02d:%02d (America/New_York)", hour, minute)
 
         self.scheduler.start()
 

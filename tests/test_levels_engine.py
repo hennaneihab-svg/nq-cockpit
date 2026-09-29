@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from nqcockpit.data.basis import compute_previous_session_basis
+from nqcockpit.data.calendar import CALENDAR
 from nqcockpit.data.cboe import CboeChainSnapshot
 from nqcockpit.data.models import Bar, DataStatus
 from nqcockpit.levels.engine import (
@@ -182,21 +184,21 @@ def test_levels_engine_full_snapshot(sample_options_df, tmp_path: Path):
         status=DataStatus.OK,
     )
 
-    nq_bar = Bar(timestamp_utc=t0, open=20120.0, high=20125.0, low=20118.0, close=20120.0)
+    nq_bar = Bar(timestamp_utc=t0, open=20020.0, high=20025.0, low=20018.0, close=20020.0)
     ndx_bar = Bar(timestamp_utc=t0, open=20000.0, high=20005.0, low=19998.0, close=20000.0)
 
     snap = engine.compute_snapshot(chain=chain, nq_bars=[nq_bar], ndx_bars=[ndx_bar], now_utc=t0)
 
     assert snap.status == DataStatus.OK
     assert snap.spot_ndx == 20000.0
-    assert snap.spot_nq == 20120.0  # spot + 120 pts de base
-    assert snap.basis == 120.0
+    assert snap.spot_nq == 20020.0  # spot + 20 pts de base
+    assert snap.basis == 20.0
     assert snap.call_wall_ndx == 20500.0
-    assert snap.call_wall_nq == 20620.0  # 20500 + 120
+    assert snap.call_wall_nq == 20520.0  # 20500 + 20
     assert snap.put_wall_ndx == 19500.0
-    assert snap.put_wall_nq == 19620.0  # 19500 + 120
+    assert snap.put_wall_nq == 19520.0  # 19500 + 20
     assert snap.expected_move is not None
-    assert snap.expected_move.lower_bound_nq == snap.expected_move.lower_bound_ndx + 120.0
+    assert snap.expected_move.lower_bound_nq == snap.expected_move.lower_bound_ndx + 20.0
 
     # Vérification du fichier JSON généré
     json_files = list(tmp_path.glob("*.json"))
@@ -276,3 +278,104 @@ def test_compare_snapshots():
 
     pw_move = next(m for m in moves if m.metric == "Put Wall NDX")
     assert pw_move.status == "STABLE"
+
+
+def test_basis_previous_session_ok() -> None:
+    """Base hors séance normale : statut OK avec mention (âge N h)."""
+    # Vendredi 25 sept 2026 16:00 ET = 20:00 UTC
+    t_close = datetime(2026, 9, 25, 20, 0, tzinfo=timezone.utc)
+    # Samedi 26 sept 2026 10:00 ET = 14:00 UTC (âge 18 h)
+    t_ref = datetime(2026, 9, 26, 14, 0, tzinfo=timezone.utc)
+
+    nq_bars = [
+        Bar(timestamp_utc=t_close, open=20120.0, high=20125.0, low=20118.0, close=20120.0)
+    ]
+    ndx_bars = [
+        Bar(timestamp_utc=t_close, open=20000.0, high=20005.0, low=19995.0, close=20000.0)
+    ]
+
+    snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=t_ref)
+    assert snap.status == DataStatus.OK
+    assert snap.basis == 120.0
+    assert "base de la séance précédente" in snap.label
+    assert "âge 18.0 h" in snap.label
+
+
+def test_basis_previous_session_stale_degraded() -> None:
+    """Base datant de plus d'une séance de bourse : statut DÉGRADÉ."""
+    # Jeudi 24 sept 2026 16:00 ET = 20:00 UTC
+    t_thu = datetime(2026, 9, 24, 20, 0, tzinfo=timezone.utc)
+    # Samedi 26 sept 2026 (une séance complète le vendredi a eu lieu entre-temps)
+    t_sat = datetime(2026, 9, 26, 14, 0, tzinfo=timezone.utc)
+
+    nq_bars = [
+        Bar(timestamp_utc=t_thu, open=20120.0, high=20125.0, low=20118.0, close=20120.0)
+    ]
+    ndx_bars = [
+        Bar(timestamp_utc=t_thu, open=20000.0, high=20005.0, low=19995.0, close=20000.0)
+    ]
+
+    snap = compute_previous_session_basis(nq_bars, ndx_bars, ref_utc=t_sat)
+    assert snap.status == DataStatus.DEGRADED
+
+
+def test_basis_parity_divergence_degraded(tmp_path: Path, sample_options_df: pd.DataFrame) -> None:
+    """Écart supérieur à la tolérance entre base future et parité : DÉGRADÉ."""
+    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    # Date en séance régulière : vendredi 25 sept 2026 14:00 ET = 18:00 UTC
+    t_now = datetime(2026, 9, 25, 18, 0, tzinfo=timezone.utc)
+
+    # Base = 20300 - 20000 = +300 pts
+    nq_bars = [
+        Bar(timestamp_utc=t_now, open=20300.0, high=20305.0, low=20295.0, close=20300.0)
+    ]
+    ndx_bars = [
+        Bar(timestamp_utc=t_now, open=20000.0, high=20005.0, low=19995.0, close=20000.0)
+    ]
+
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=20000.0,
+        options_df=sample_options_df,
+        latest_quote_time_utc=t_now,
+        fetched_at_utc=t_now,
+        age_minutes=2.0,
+        status=DataStatus.OK,
+    )
+
+    snap = engine.compute_snapshot(chain, nq_bars, ndx_bars, now_utc=t_now)
+    if snap.synthetic_basis is not None:
+        diff = abs(snap.basis - snap.synthetic_basis)
+        if diff > 50.0:
+            assert snap.basis_status == DataStatus.DEGRADED
+            assert any("Écart base future-spot vs parité" in a for a in snap.anomalies)
+
+
+def test_expected_move_trading_days_friday_to_monday() -> None:
+    """Vendredi soir après 16:00 ET -> expiration lundi = 1 jour de bourse."""
+    # Vendredi 2 oct 2026 17:00 ET = 21:00 UTC
+    ref_utc = datetime(2026, 10, 2, 21, 0, tzinfo=timezone.utc)
+    exp_monday = date(2026, 10, 5)
+
+    days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, exp_monday)
+    assert days == 1.0
+
+
+def test_expected_move_trading_days_holiday() -> None:
+    """Veille de Thanksgiving (mercredi) -> expiration vendredi = 1 jour de bourse."""
+    # Mercredi 25 nov 2026 17:00 ET = 22:00 UTC
+    ref_utc = datetime(2026, 11, 25, 22, 0, tzinfo=timezone.utc)
+    exp_friday = date(2026, 11, 27)
+
+    days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, exp_friday)
+    assert days == 1.0
+
+
+def test_expected_move_0dte_fraction() -> None:
+    """0DTE le vendredi à 12:45 ET (3.25h avant clôture 16:00) = 0.5 jour de bourse."""
+    # Vendredi 2 oct 2026 12:45 ET = 16:45 UTC
+    ref_utc = datetime(2026, 10, 2, 16, 45, tzinfo=timezone.utc)
+    exp_today = date(2026, 10, 2)
+
+    days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, exp_today)
+    assert pytest.approx(days, abs=0.01) == 0.5

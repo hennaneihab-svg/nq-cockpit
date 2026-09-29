@@ -118,9 +118,17 @@ def compute_previous_session_basis(
 
     # Vérification de synchronisation à la clôture (dans la même minute)
     drift = abs((last_nq.timestamp_utc - last_ndx.timestamp_utc).total_seconds())
-    status = DataStatus.OK if drift <= 60.0 else DataStatus.DEGRADED
+    is_stale_session = CALENDAR.is_more_than_one_session_stale(
+        last_ndx.timestamp_utc, ref_utc=ref_utc
+    )
+
+    if drift > 60.0 or is_stale_session:
+        status = DataStatus.DEGRADED
+    else:
+        status = DataStatus.OK
 
     age_min = (ref_utc - last_ndx.timestamp_utc).total_seconds() / 60.0
+    age_h = age_min / 60.0
     basis_val = last_nq.close - last_ndx.close
 
     return BasisSnapshot(
@@ -130,7 +138,7 @@ def compute_previous_session_basis(
         basis=basis_val,
         is_session_basis=False,
         status=status,
-        label="base de la séance précédente",
+        label=f"base de la séance précédente (âge {age_h:.1f} h)",
         age_minutes=age_min,
     )
 
@@ -176,8 +184,8 @@ def synthetic_futures_basis_from_options(
     target = min(exps, key=lambda e: abs((e - target_exp).days if isinstance(e, date) else 999))
     sub = options_df[options_df["expiry"] == target]
 
-    calls = sub[sub["type"] == "C"].set_index("strike")
-    puts = sub[sub["type"] == "P"].set_index("strike")
+    calls = sub[sub["type"] == "C"].drop_duplicates(subset=["strike"]).set_index("strike")
+    puts = sub[sub["type"] == "P"].drop_duplicates(subset=["strike"]).set_index("strike")
 
     common = [k for k in calls.index.intersection(puts.index) if abs(k - spot) / spot < 0.05]
     if len(common) < 5:
@@ -189,10 +197,10 @@ def synthetic_futures_basis_from_options(
     t_years = t_days / 365.25
 
     for k in common:
-        c_bid = calls.loc[k, "bid"]
-        c_ask = calls.loc[k, "ask"]
-        p_bid = puts.loc[k, "bid"]
-        p_ask = puts.loc[k, "ask"]
+        c_bid = float(calls.loc[k, "bid"])
+        c_ask = float(calls.loc[k, "ask"])
+        p_bid = float(puts.loc[k, "bid"])
+        p_ask = float(puts.loc[k, "ask"])
 
         cmid = (c_bid + c_ask) / 2.0
         pmid = (p_bid + p_ask) / 2.0

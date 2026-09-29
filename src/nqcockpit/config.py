@@ -70,6 +70,7 @@ class ValidationConfig:
 class SourcesConfig:
     bls_contact_email: str = "contact@nqcockpit.local"
     stale_data_threshold_minutes: int = 60
+    cboe_ndx_url: str = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class DataConfig:
         default_factory=lambda: {"NQ=F": 15}
     )
     delay_margin_minutes: int = 10
+    parity_basis_tolerance_points: float = 50.0
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ class AppConfig:
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     market_sessions: MarketSessionsConfig = field(default_factory=MarketSessionsConfig)
     data: DataConfig = field(default_factory=DataConfig)
+    snapshots_ny: list[str] = field(default_factory=lambda: ["08:00", "09:45", "15:45"])
 
 
 
@@ -234,6 +237,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         _validate_time_str(str(snap), f"snapshots_algiers[{idx}]")
         snapshots.append(str(snap))
 
+    raw_snapshots_ny = data.get("snapshots_ny", ["08:00", "09:45", "15:45"])
+    snapshots_ny: list[str] = []
+    if isinstance(raw_snapshots_ny, list):
+        for idx, snap in enumerate(raw_snapshots_ny):
+            _validate_time_str(str(snap), f"snapshots_ny[{idx}]")
+            snapshots_ny.append(str(snap))
+
     # 4. Rules
     raw_rules = data.get("rules")
     if not isinstance(raw_rules, dict):
@@ -326,9 +336,16 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     stale_thresh = raw_sources.get("stale_data_threshold_minutes", 60)
     if not isinstance(stale_thresh, int) or stale_thresh <= 0:
         raise ConfigError("sources.stale_data_threshold_minutes must be a positive integer.")
+    cboe_url = str(
+        raw_sources.get(
+            "cboe_ndx_url",
+            "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json",
+        )
+    )
     sources = SourcesConfig(
         bls_contact_email=bls_email,
         stale_data_threshold_minutes=stale_thresh,
+        cboe_ndx_url=cboe_url,
     )
 
     # 10. Market Sessions
@@ -394,6 +411,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     else:
         delays_map = {"NQ=F": 15}
     margin = int(raw_data.get("delay_margin_minutes", 10))
+    parity_tol = float(raw_data.get("parity_basis_tolerance_points", 50.0))
 
     data_cfg = DataConfig(
         db_path=str(raw_data.get("db_path", "data/nqcockpit.db")),
@@ -403,6 +421,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         stale_bar_threshold_minutes=int(raw_data.get("stale_bar_threshold_minutes", 15)),
         symbols_expected_delay_minutes=delays_map,
         delay_margin_minutes=margin,
+        parity_basis_tolerance_points=parity_tol,
     )
 
     return AppConfig(
@@ -417,5 +436,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         sources=sources,
         market_sessions=market_sessions,
         data=data_cfg,
+        snapshots_ny=snapshots_ny,
     )
 

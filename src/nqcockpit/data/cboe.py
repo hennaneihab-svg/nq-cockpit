@@ -147,11 +147,30 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
 
     # Dérivation de l'âge à partir des horodatages de cotations d'options
     latest_quote_dt = extract_latest_quote_timestamp(raw_options)
+    field_used = "cotations d'options"
+
+    if latest_quote_dt is None:
+        # Repli si aucun horodatage n'est extrait des cotations (ex: fixtures)
+        ts_str = data.get("timestamp") or raw.get("timestamp")
+        if ts_str and isinstance(ts_str, str):
+            clean_ts = ts_str.replace("Z", "").strip()
+            try:
+                if "T" in clean_ts:
+                    latest_quote_dt = datetime.fromisoformat(clean_ts)
+                else:
+                    latest_quote_dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+                if latest_quote_dt.tzinfo is None:
+                    latest_quote_dt = latest_quote_dt.replace(tzinfo=timezone.utc)
+                else:
+                    latest_quote_dt = latest_quote_dt.astimezone(timezone.utc)
+                field_used = "timestamp global"
+            except Exception:
+                latest_quote_dt = None
 
     if latest_quote_dt is not None:
         age_min = max(0.0, (fetched_at_utc - latest_quote_dt).total_seconds() / 60.0)
         status = DataStatus.OK if age_min <= 60.0 else DataStatus.DEGRADED
-        notes = f"Âge dérivé des cotations d'options : {age_min:.1f} min"
+        notes = f"Âge dérivé ({field_used}) : {age_min:.1f} min"
     else:
         # Horodatage introuvable dans les cotations -> âge inconnu = DÉGRADÉ
         age_min = None
@@ -184,7 +203,19 @@ def fetch_cboe_options_chain(
         if cached is not None:
             return parse_cboe_payload(cached, datetime.now(timezone.utc))
 
-    url = BASE_URL.format(sym=cboe_symbol)
+    try:
+        from nqcockpit.config import load_config
+
+        cfg = load_config()
+        configured_url = getattr(cfg.sources, "cboe_ndx_url", None)
+    except Exception:
+        configured_url = None
+
+    if configured_url and cboe_symbol == "_NDX":
+        url = configured_url
+    else:
+        url = BASE_URL.format(sym=cboe_symbol)
+
     now_utc = datetime.now(timezone.utc)
     try:
         resp = _SESSION.get(url, timeout=timeout)

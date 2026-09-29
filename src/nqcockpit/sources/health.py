@@ -463,7 +463,16 @@ def check_cboe_ndx(
     stale_threshold_minutes: int = DEFAULT_STALE_THRESHOLD_MINUTES,
 ) -> SourceCheckResult:
     """Checks CBOE delayed quotes options NDX JSON endpoint."""
-    url = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
+    try:
+        cfg = load_config()
+        url = getattr(
+            cfg.sources,
+            "cboe_ndx_url",
+            "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json",
+        )
+    except Exception:
+        url = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
+
     name = "CBOE NDX Options"
     category = "Options"
     ts_ny = get_now_ny_timestamp()
@@ -501,49 +510,14 @@ def check_cboe_ndx(
         )
 
     try:
+        from nqcockpit.data.cboe import parse_cboe_payload
+
         data = resp.json()
-        data_block = data.get("data", {})
-        current_price = data_block.get("current_price")
-        options = data_block.get("options", [])
-
-        # Dérivation prioritaire à partir des horodatages des cotations d'options
-        dt_data: datetime | None = None
-        for opt in options:
-            for field_name in ("last_trade_time", "trade_time", "quote_time"):
-                val = opt.get(field_name)
-                if not val or not isinstance(val, str):
-                    continue
-                try:
-                    clean_val = val.replace("Z", "").strip()
-                    if "T" in clean_val:
-                        dt_candidate = datetime.fromisoformat(clean_val)
-                    else:
-                        dt_candidate = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
-
-                    if dt_candidate.tzinfo is None:
-                        dt_candidate = dt_candidate.replace(tzinfo=timezone.utc)
-                    else:
-                        dt_candidate = dt_candidate.astimezone(timezone.utc)
-
-                    if dt_data is None or dt_candidate > dt_data:
-                        dt_data = dt_candidate
-                except Exception:
-                    continue
-
-        # Secours si aucun horodatage n'est extrait des cotations (ex: fixtures)
-        if dt_data is None:
-            timestamp_str = data.get("timestamp")
-            if timestamp_str and str(timestamp_str).strip():
-                try:
-                    clean_val = str(timestamp_str).replace("Z", "").strip()
-                    if "T" in clean_val:
-                        dt_data = datetime.fromisoformat(clean_val)
-                    else:
-                        dt_data = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
-                    if dt_data.tzinfo is None:
-                        dt_data = dt_data.replace(tzinfo=timezone.utc)
-                except Exception:
-                    dt_data = None
+        now_utc = datetime.now(timezone.utc)
+        chain_snap = parse_cboe_payload(data, fetched_at_utc=now_utc)
+        dt_data = chain_snap.latest_quote_time_utc
+        current_price = chain_snap.spot
+        options_count = len(chain_snap.options_df)
 
         if dt_data is None:
             return SourceCheckResult(
@@ -565,7 +539,7 @@ def check_cboe_ndx(
             stale_threshold_minutes=stale_threshold_minutes,
         )
 
-        msg = f"Spot NDX={current_price}, {len(options)} options | {session_msg}"
+        msg = f"Spot NDX={current_price}, {options_count} options | {session_msg}"
 
         return SourceCheckResult(
             name=name,

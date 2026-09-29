@@ -86,6 +86,9 @@ def create_parser() -> argparse.ArgumentParser:
     data_subparsers.add_parser(
         "status", help="Affiche l'état et les statistiques de la base de données"
     )
+    data_subparsers.add_parser(
+        "fred", help="Récupère les séries FRED DGS2 et DGS10"
+    )
 
     return parser
 
@@ -150,9 +153,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("=" * 70)
         print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts")
         print(f"  Spot NQ              : {snap.spot_nq:,.2f} pts")
+        if snap.synthetic_basis is not None:
+            p_diff = abs(snap.basis - snap.synthetic_basis)
+            p_str = (
+                f" | Base parité : {snap.synthetic_basis:+,.2f} pts (écart : {p_diff:,.2f} pts)"
+            )
+        else:
+            p_str = " | Base parité : N/A"
+
         basis_line = (
             f"  Base future-spot     : {snap.basis:+,.2f} pts ({snap.basis_label}) "
-            f"[{snap.basis_status.value}]"
+            f"[{snap.basis_status.value}]{p_str}"
         )
         print(basis_line)
         gex_line = (
@@ -264,6 +275,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                     print(line)
             conn.close()
+            return 0
+        elif args.data_action == "fred":
+            from nqcockpit.data.fetcher import DataFetcher
+
+            print("[nqcockpit] Récupération des taux FRED (DGS2, DGS10)...")
+            fetcher = DataFetcher()
+            dgs2 = fetcher.fetch_fred_series("DGS2", max_cache_age_seconds=0)
+            dgs10 = fetcher.fetch_fred_series("DGS10", max_cache_age_seconds=0)
+            print(
+                f"  DGS2  : {dgs2.value:.2f}% "
+                f"(date d'observation : {dgs2.observation_date}) [{dgs2.status.value}]"
+            )
+            print(
+                f"  DGS10 : {dgs10.value:.2f}% "
+                f"(date d'observation : {dgs10.observation_date}) [{dgs10.status.value}]"
+            )
             return 0
         else:
             parser.parse_args(["data", "--help"])
