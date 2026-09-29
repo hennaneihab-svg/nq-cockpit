@@ -13,9 +13,9 @@
 
 | Dépôt | Licence | Dernière Activité (`.git/logs/HEAD`) | Verdict | Recommandation d'Intégration |
 | :--- | :--- | :--- | :---: | :--- |
-| **`vendor/gex-dashboard`** | **MIT** (2026 Darthreign) | Clone `8a75505` (2026-09-29 00:02:37 UTC) | **À ADAPTER** | **Cœur mathématique retenu.** Adapter `greeks.py`, `ingest.py`, `metrics.py`, `rates.py` dans `src/nqcockpit/`. Écarter impérativement `scheduler.py` (git push auto), `backup.py` (rclone), `tt_auth.py` / `rtquote.py` (Tastytrade/registre Windows) et `mcp_server.py`. |
-| **`vendor/gammagrid`** | **AGPLv3** (2024-2026 Gammagrid) | Clone `aefe0f4` (2026-09-29 00:02:40 UTC) | **À ÉVITER** | **Contamination juridique virale.** Licence AGPLv3 incompatible avec une intégration propre. Dépendance lourde à Docker, PostgreSQL et Streamlit. Ne copier aucun code dans `src/`. |
-| **`vendor/gex-analytics`** | **MIT** (2024 pikki622) | Clone `72ce62a` (2026-09-29 00:02:43 UTC) | **À ÉCARTER** | **Code trop fragile.** Concaténation naïve des calls/puts par simple `axis=1` sans jointure par strike (crash au moindre strike manquant). Aucun test unitaire, aucun apport technique par rapport à `gex-dashboard`. |
+| **`vendor/gex-dashboard`** | **MIT** (2026 Darthreign) | 2026-09-28 20:02:37 EDT (date du clone local, activité upstream non vérifiée) | **À ADAPTER** | **Cœur mathématique retenu.** Adapter `greeks.py`, `ingest.py`, `metrics.py`, `rates.py` dans `src/nqcockpit/`. Écarter impérativement `scheduler.py` (git push auto), `backup.py` (rclone), `tt_auth.py` / `rtquote.py` (Tastytrade/registre Windows) et `mcp_server.py`. |
+| **`vendor/gammagrid`** | **AGPLv3** (2024-2026 Gammagrid) | 2026-09-28 20:02:40 EDT (date du clone local, activité upstream non vérifiée) | **À ÉVITER** | **Contamination juridique virale.** Licence AGPLv3 incompatible avec une intégration propre. Dépendance lourde à Docker, PostgreSQL et Streamlit. Ne copier aucun code dans `src/`. |
+| **`vendor/gex-analytics`** | **MIT** (2024 pikki622) | 2026-09-28 20:02:43 EDT (date du clone local, activité upstream non vérifiée) | **À ÉCARTER** | **Code trop fragile.** Concaténation naïve des calls/puts par simple `axis=1` sans jointure par strike (crash au moindre strike manquant). Aucun test unitaire, aucun apport technique par rapport à `gex-dashboard`. |
 
 ---
 
@@ -136,8 +136,30 @@ Le fichier [`vendor/gex-dashboard/.claude/skills/premarket-nq/SKILL.md`](file://
 | **Zero Gamma** | Recalcul GEX net sur grille de spots $\pm 8\%$, interpolation linéaire du passage par zéro le plus proche | `gamma_profile` sur grille $\pm 8\%$, détection `np.diff(np.sign)`, interpolation linéaire (`metrics.py:243-264`) | **100 % Conforme** |
 | **Murs de Gamma** | Call Wall = plus fort GEX call $\ge S$ ; Put Wall = plus fort GEX put $\le S$. 0DTE séparé | `key_levels` : `call_wall` (max au-dessus spot), `put_support` (min sous spot) (`metrics.py:404-443`) | **100 % Conforme** |
 | **Stabilisation des Murs** | Murs stables sur la session | `compute_levels` sépare `structural_spot` (clôture veille, fige l'OI) de `live_spot` (positionne le côté) | **Avancée majeure** : évite que les murs ne migrent artificiellement avec le spot live. |
-| **Expected Move** | $1\sigma = S \times IV \times \sqrt{t/252}$ comparé au straddle ATM du front | `expected_move` : Prix du straddle ATM $C_{ATM} + P_{ATM}$ sur nearest expiry (`metrics.py:362-402`) | **Écart documenté** : `gex-dashboard` utilise uniquement le straddle ATM. Nous intégrerons les deux mesures dans `nqcockpit`. |
-| **Conversion NDX $\to$ NQ** | $NQ = NDX + \text{base}$, où $\text{base} = NQ=F - \text{^NDX}$ | `futures_basis` : Déduit de la parité call-put synthétique $F = (C-P)e^{rT} + K$ (`metrics.py:284-327`) | **Écart documenté** : La parité call-put synthétique est théorique. `nqcockpit` privilégiera la base réelle mesurée directement entre les flux live $NQ=F$ et $^NDX$. |
+| **Expected Move** | $1\sigma = S \times IV \times \sqrt{\text{jours}/252}$ comparé au straddle ATM du front | `expected_move` : Prix du straddle ATM $C_{ATM} + P_{ATM}$ sur nearest expiry (`metrics.py:362-402`) | **Écart méthodologique** : `gex-methodology` définit $1\sigma = S \times IV \times \sqrt{\text{jours}/252}$ et compare ce move au straddle ATM du front. `gex-dashboard` utilise exclusivement le prix du straddle ATM sans calculer la composante $1\sigma$ IV. Dans `nqcockpit`, la formule $S \times IV \times \sqrt{\text{jours}/252}$ sera la référence principale, affichée avec le straddle ATM en contrôle comparatif. |
+| **Conversion NDX $\to$ NQ** | $NQ = NDX + \text{base}$, où $\text{base} = NQ=F - \text{^NDX}$ | `futures_basis` : Déduit de la parité call-put synthétique $F = (C-P)e^{rT} + K$ (`metrics.py:284-327`) | **Décisions arrêtées (P02-fix)** : voir détails ci-dessous (barres 1m alignées, base de clôture hors séance, contrôle croisé parité call-put). |
+
+### 3.1 Décisions de conception pour la Conversion NDX vers NQ (Base NQ)
+
+1. **Validation stricte de la base en séance (09:30 - 16:00 ET)** :
+   - La base $NQ=F - \text{^NDX}$ n'est valide **que si** $\text{^NDX}$ est live (séance régulière actions 09:30-16:00 ET) **ET** si les deux valeurs proviennent de **barres 1m rigoureusement alignées par horodatage UTC**.
+   - Écart temporel maximal admissible : paramètre de configuration (défaut : 60 secondes).
+   - **Interdiction absolue** de calculer la base sur de simples « derniers cours » non synchronisés (qui mélangent des barres d'âges différents).
+2. **Hors séance actions (préparation pré-market, soirée, week-end)** :
+   - Base de référence = celle de la dernière séance régulière actions (dernière barre 1m $\le$ 16:00:00 ET de chaque série).
+   - Statut obligatoirement étiqueté : **`« base de la séance précédente »`** accompagné de son âge horodaté.
+3. **Contrôle croisé & alerte de cohérence** :
+   - Calcul parallèle de la **base implicite par parité call-put** (méthode `futures_basis` de `gex-dashboard`, réécrite proprement dans `src/nqcockpit/levels/basis.py`), affichée en regard de la base mesurée.
+   - Si l'écart entre la base réelle et la base implicite dépasse un seuil paramétrable : statut **`DÉGRADÉ`** et émission d'une alerte visible.
+4. **Observation de latence $NQ=F$ sur yfinance** :
+   - Le flux $NQ=F$ sur yfinance semble présenter un décalage d'environ 10 minutes.
+   - Cette latence ne sera pas supposée a priori mais **mesurée et consignée précisément en séance US réelle lors de P03**, avec horodatages à l'appui.
+
+### 3.2 Décisions de conception pour l'Expected Move
+
+- **Formule de référence** : $1\sigma = S \times IV \times \sqrt{\text{jours}/252}$, calculée avec la racine carrée exacte sur la volatilité implicite ATM et le nombre de jours jusqu'à l'échéance.
+- **Contrôle comparatif** : Le prix du straddle ATM du front month ($C_{ATM} + P_{ATM}$, méthode issue de `gex-dashboard`) sera systématiquement calculé et affiché en comparaison directe, pour confronter l'attente statistique théorique du modèle Black-Scholes au coût réel négocié sur le marché des options.
+
 
 ---
 
