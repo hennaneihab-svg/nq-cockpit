@@ -1,5 +1,26 @@
-"""Levels engine module for NQ Cockpit.
+"""Moteur de niveaux gamma, zéro gamma, murs et conversion NQ."""
 
-Calculates option structure (GEX/DEX), gamma regimes, flip, walls, expected move,
-and basis conversion from NDX to NQ futures points.
-"""
+from nqcockpit.levels.engine import (
+    LevelsEngine,
+    calculate_expected_move,
+    calculate_gamma_profile,
+    calculate_max_pain,
+    calculate_zero_gamma,
+    compute_gamma_exposure,
+)
+from nqcockpit.levels.models import ExpectedMoveInfo, GammaWall, LevelsSnapshot
+from nqcockpit.levels.scheduler import LevelsScheduler, compare_snapshots
+
+__all__ = [
+    "LevelsEngine",
+    "compute_gamma_exposure",
+    "calculate_gamma_profile",
+    "calculate_zero_gamma",
+    "calculate_expected_move",
+    "calculate_max_pain",
+    "ExpectedMoveInfo",
+    "GammaWall",
+    "LevelsSnapshot",
+    "LevelsScheduler",
+    "compare_snapshots",
+]

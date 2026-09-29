@@ -112,7 +112,101 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"[nqcockpit] Rapport complet enregistré dans {report_path}")
         return 0
     elif args.subcommand == "snapshot":
-        print("[nqcockpit] Commande 'snapshot' invoquée (snapshot niveaux / GEX).")
+        from zoneinfo import ZoneInfo
+
+        from nqcockpit.data.cboe import fetch_cboe_options_chain
+        from nqcockpit.data.db import get_bars, get_db_connection
+        from nqcockpit.data.fetcher import DataFetcher
+        from nqcockpit.levels.engine import LevelsEngine
+
+        print("[nqcockpit] Commande 'snapshot' invoquée (niveaux gamma)...")
+        chain = fetch_cboe_options_chain()
+
+        conn = get_db_connection()
+        nq_bars = get_bars(conn, "NQ=F", "1m", limit=100)
+        ndx_bars = get_bars(conn, "^NDX", "1m", limit=100)
+        conn.close()
+
+        # Si la base ne contient pas de barres, récupération à la volée
+        if not nq_bars or not ndx_bars:
+            fetcher = DataFetcher()
+            if not nq_bars:
+                nq_bars = fetcher.fetch_yahoo_bars("NQ=F", interval="1m", period="1d").bars
+            if not ndx_bars:
+                ndx_bars = fetcher.fetch_yahoo_bars("^NDX", interval="1m", period="1d").bars
+
+        engine = LevelsEngine()
+        snap = engine.compute_snapshot(chain=chain, nq_bars=nq_bars, ndx_bars=ndx_bars)
+
+        # Affichage tableau console
+        et_tz = ZoneInfo("America/New_York")
+        snap_ny = snap.timestamp_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S EDT")
+        age_val = snap.data_age_minutes
+        age_str = f"{age_val:.1f} min" if age_val is not None else "inconnu"
+
+        print("\n" + "=" * 70)
+        print("  NQ COCKPIT — SNAPSHOT DE NIVEAUX & RÉGIME GAMMA")
+        print(f"  Horodatage : {snap_ny} (âge : {age_str}) | Statut : {snap.status.value}")
+        print("=" * 70)
+        print(f"  Spot NDX             : {snap.spot_ndx:,.2f} pts")
+        print(f"  Spot NQ              : {snap.spot_nq:,.2f} pts")
+        basis_line = (
+            f"  Base future-spot     : {snap.basis:+,.2f} pts ({snap.basis_label}) "
+            f"[{snap.basis_status.value}]"
+        )
+        print(basis_line)
+        gex_line = (
+            f"  Net GEX Total        : {snap.net_gex / 1e6:+,.2f} M$/1% (Modèle, {snap.oi_flag})"
+        )
+        print(gex_line)
+        print(f"  Régime Volatilité    : {snap.regime}")
+        print("-" * 70)
+        flip_ndx = (
+            f"{snap.gamma_flip_ndx:,.2f}" if snap.gamma_flip_ndx else "ABSENT (très stable)"
+        )
+        flip_nq = f"{snap.gamma_flip_nq:,.2f}" if snap.gamma_flip_nq else "ABSENT"
+        print(f"  Gamma Flip (Zéro)    : NDX {flip_ndx} | NQ {flip_nq}")
+
+        cw_ndx = f"{snap.call_wall_ndx:,.2f}" if snap.call_wall_ndx else "N/A"
+        cw_nq = f"{snap.call_wall_nq:,.2f}" if snap.call_wall_nq else "N/A"
+        print(f"  Call Wall (Résist.)  : NDX {cw_ndx} | NQ {cw_nq}")
+
+        pw_ndx = f"{snap.put_wall_ndx:,.2f}" if snap.put_wall_ndx else "N/A"
+        pw_nq = f"{snap.put_wall_nq:,.2f}" if snap.put_wall_nq else "N/A"
+        print(f"  Put Wall (Support)   : NDX {pw_ndx} | NQ {pw_nq}")
+
+        if snap.zero_dte_call_wall_nq or snap.zero_dte_put_wall_nq:
+            z_cw = f"{snap.zero_dte_call_wall_nq:,.2f}" if snap.zero_dte_call_wall_nq else "N/A"
+            z_pw = f"{snap.zero_dte_put_wall_nq:,.2f}" if snap.zero_dte_put_wall_nq else "N/A"
+            z_gex = f"{snap.zero_dte_net_gex / 1e6:+,.2f} M$" if snap.zero_dte_net_gex else "N/A"
+            print(f"  0DTE Call/Put Wall   : NQ {z_cw} / {z_pw} (Net GEX : {z_gex})")
+
+        if snap.expected_move:
+            em = snap.expected_move
+            straddle_str = f"{em.straddle_move:.1f} pts" if em.straddle_move else "N/A"
+            em_line = (
+                f"  Expected Move 1-sigma: +/- {em.formula_move:.1f} pts "
+                f"(Straddle ATM : {straddle_str})"
+            )
+            print(em_line)
+            bounds_line = (
+                f"  Bornes NQ attendues  : [{em.lower_bound_nq:,.2f} .. {em.upper_bound_nq:,.2f}]"
+            )
+            print(bounds_line)
+
+        if snap.max_pain_nq:
+            mp_line = (
+                f"  Max Pain             : NDX {snap.max_pain_ndx:,.2f} "
+                f"| NQ {snap.max_pain_nq:,.2f}"
+            )
+            print(mp_line)
+
+        if snap.anomalies:
+            print("-" * 70)
+            print("  Alertes & Dégradations :")
+            for a in snap.anomalies:
+                print(f"    [!] {a}")
+        print("=" * 70 + "\n")
         return 0
     elif args.subcommand == "brief":
         print("[nqcockpit] Commande 'brief' invoquée (génération briefing).")

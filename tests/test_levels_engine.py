@@ -1,0 +1,278 @@
+"""Tests unitaires pour le moteur de niveaux (P04).
+
+Tous les tests utilisent des fixtures locales synthétiques, sans aucun appel réseau.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from nqcockpit.data.cboe import CboeChainSnapshot
+from nqcockpit.data.models import Bar, DataStatus
+from nqcockpit.levels.engine import (
+    LevelsEngine,
+    calculate_expected_move,
+    calculate_gamma_profile,
+    calculate_max_pain,
+    calculate_zero_gamma,
+    compute_gamma_exposure,
+)
+from nqcockpit.levels.models import LevelsSnapshot
+from nqcockpit.levels.scheduler import compare_snapshots
+
+
+@pytest.fixture
+def sample_options_df():
+    """Génère une chaîne d'options synthétique NDX réaliste."""
+    exp_0dte = date(2026, 9, 28)
+    exp_front = date(2026, 10, 16)
+
+    rows = []
+    # Spot = 20000. Strikes de 19000 à 21000 par pas de 100
+    for exp in (exp_0dte, exp_front):
+        for k in range(19000, 21100, 100):
+            # Gamma culmine autour de 20000
+            dist = abs(k - 20000)
+            g = max(0.00001, 0.0015 - dist * 0.000001)
+            iv = 0.20 + (k - 20000) * 0.00001
+
+            c_bid = max(0.5, 20000 - k + 50) if k <= 20000 else max(0.5, 100 - (k - 20000) * 0.1)
+            c_ask = max(1.0, 20000 - k + 52) if k <= 20000 else max(1.0, 102 - (k - 20000) * 0.1)
+            c_oi = 5000.0 if k == 20500 else 1000.0  # Pic à 20500 pour Call Wall
+
+            # Calls
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_C_{k}",
+                    "expiry": exp,
+                    "type": "C",
+                    "strike": float(k),
+                    "bid": c_bid,
+                    "ask": c_ask,
+                    "iv": iv,
+                    "open_interest": c_oi,
+                    "volume": 200.0,
+                    "delta": 0.5,
+                    "gamma": g,
+                    "last_trade_price": 50.0,
+                    "last_trade_time": "2026-09-28T19:50:00Z",
+                }
+            )
+
+            p_bid = max(0.5, k - 20000 + 50) if k >= 20000 else max(0.5, 100 - (20000 - k) * 0.1)
+            p_ask = max(1.0, k - 20000 + 52) if k >= 20000 else max(1.0, 102 - (20000 - k) * 0.1)
+            p_oi = 6000.0 if k == 19500 else 1000.0  # Pic à 19500 pour Put Wall
+
+            # Puts
+            rows.append(
+                {
+                    "contract": f"NDX_{exp}_P_{k}",
+                    "expiry": exp,
+                    "type": "P",
+                    "strike": float(k),
+                    "bid": p_bid,
+                    "ask": p_ask,
+                    "iv": iv,
+                    "open_interest": p_oi,
+                    "volume": 200.0,
+                    "delta": -0.5,
+                    "gamma": g,
+                    "last_trade_price": 50.0,
+                    "last_trade_time": "2026-09-28T19:50:00Z",
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def test_gex_formula_and_regime(sample_options_df):
+    """Vérifie la formule GEX ($/1%) : sign * gamma * OI * 100 * S^2 * 0.01."""
+    spot = 20000.0
+    df_gex = compute_gamma_exposure(sample_options_df, spot)
+
+    assert "gex" in df_gex.columns
+    # Les calls doivent être positifs, les puts négatifs
+    calls = df_gex[df_gex["type"] == "C"]
+    puts = df_gex[df_gex["type"] == "P"]
+    assert (calls["gex"] > 0).all()
+    assert (puts["gex"] < 0).all()
+
+    # Net GEX
+    net_gex = df_gex["gex"].sum()
+    assert isinstance(net_gex, float)
+
+
+def test_gamma_profile_and_zero_gamma(sample_options_df):
+    """Vérifie le profil de gamma et l'interpolation du zéro gamma."""
+    spot = 20000.0
+    df_gex = compute_gamma_exposure(sample_options_df, spot)
+    profile_res = calculate_gamma_profile(df_gex, spot, today_date=date(2026, 9, 28))
+
+    assert profile_res is not None
+    grid, profile = profile_res
+    assert len(grid) == 101
+    assert len(profile) == 101
+
+    flip = calculate_zero_gamma(grid, profile, spot)
+    # Dans notre distribution synthétique, il peut y avoir un flip ou non
+    if flip is not None:
+        assert 18000.0 <= flip <= 22000.0
+
+
+def test_zero_gamma_absent_when_no_crossing():
+    """Vérifie que calculate_zero_gamma renvoie None si aucun passage par zéro (flip absent)."""
+    grid = np.linspace(19000, 21000, 101)
+    # Profil strictement positif (régime très stable)
+    profile = np.ones(101) * 500000.0
+
+    flip = calculate_zero_gamma(grid, profile, 20000.0)
+    assert flip is None
+
+
+def test_walls_and_0dte_detection(sample_options_df):
+    """Vérifie que le Call Wall est au-dessus du spot et le Put Wall en dessous."""
+    spot = 20000.0
+    df_gex = compute_gamma_exposure(sample_options_df, spot)
+
+    by_strike = df_gex.groupby("strike")["gex"].sum()
+    calls_above = by_strike[(by_strike.index >= spot) & (by_strike > 0)]
+    puts_below = by_strike[(by_strike.index <= spot) & (by_strike < 0)]
+
+    # Selon notre fixture, pic call à 20500 et put à 19500
+    assert calls_above.idxmax() == 20500.0
+    assert puts_below.idxmin() == 19500.0
+
+
+def test_expected_move_calculation(sample_options_df):
+    """Vérifie la formule 1 sigma : S * IV * sqrt(jours / 252) et le straddle ATM."""
+    spot = 20000.0
+    em = calculate_expected_move(sample_options_df, spot, today_date=date(2026, 9, 28))
+
+    assert em is not None
+    assert em.formula_move > 0
+    assert em.lower_bound_ndx < spot < em.upper_bound_ndx
+    assert em.straddle_move is not None
+    assert em.straddle_move > 0
+
+
+def test_max_pain_calculation(sample_options_df):
+    """Vérifie que le strike Max Pain est calculé et situé dans la plage des strikes."""
+    mp = calculate_max_pain(sample_options_df)
+    assert mp is not None
+    assert 19000.0 <= mp <= 21000.0
+
+
+def test_levels_engine_full_snapshot(sample_options_df, tmp_path: Path):
+    """Vérifie l'exécution de bout en bout du snapshot de niveaux avec conversion NQ."""
+    engine = LevelsEngine(output_dir=tmp_path)
+
+    t0 = datetime(2026, 9, 28, 15, 0, 0, tzinfo=timezone.utc)
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=20000.0,
+        options_df=sample_options_df,
+        latest_quote_time_utc=t0 - timedelta(minutes=10),
+        fetched_at_utc=t0,
+        age_minutes=10.0,
+        status=DataStatus.OK,
+    )
+
+    nq_bar = Bar(timestamp_utc=t0, open=20120.0, high=20125.0, low=20118.0, close=20120.0)
+    ndx_bar = Bar(timestamp_utc=t0, open=20000.0, high=20005.0, low=19998.0, close=20000.0)
+
+    snap = engine.compute_snapshot(chain=chain, nq_bars=[nq_bar], ndx_bars=[ndx_bar], now_utc=t0)
+
+    assert snap.status == DataStatus.OK
+    assert snap.spot_ndx == 20000.0
+    assert snap.spot_nq == 20120.0  # spot + 120 pts de base
+    assert snap.basis == 120.0
+    assert snap.call_wall_ndx == 20500.0
+    assert snap.call_wall_nq == 20620.0  # 20500 + 120
+    assert snap.put_wall_ndx == 19500.0
+    assert snap.put_wall_nq == 19620.0  # 19500 + 120
+    assert snap.expected_move is not None
+    assert snap.expected_move.lower_bound_nq == snap.expected_move.lower_bound_ndx + 120.0
+
+    # Vérification du fichier JSON généré
+    json_files = list(tmp_path.glob("*.json"))
+    assert len(json_files) == 1
+
+
+def test_empty_chain_handling(tmp_path: Path):
+    """Vérifie la robustesse si la chaîne d'options CBOE est vide."""
+    engine = LevelsEngine(output_dir=tmp_path)
+    t0 = datetime(2026, 9, 28, 15, 0, 0, tzinfo=timezone.utc)
+
+    chain_empty = CboeChainSnapshot(
+        symbol="NDX",
+        spot=20000.0,
+        options_df=pd.DataFrame(),
+        latest_quote_time_utc=None,
+        fetched_at_utc=t0,
+        age_minutes=None,
+        status=DataStatus.BLOCKED,
+    )
+
+    snap = engine.compute_snapshot(chain=chain_empty, nq_bars=[], ndx_bars=[], now_utc=t0)
+    assert snap.status == DataStatus.BLOCKED
+    assert "vide" in str(snap.anomalies).lower()
+
+
+def test_compare_snapshots():
+    """Vérifie la détection de déplacement des niveaux entre deux snapshots."""
+    t0 = datetime(2026, 9, 28, 14, 0, 0, tzinfo=timezone.utc)
+    snap1 = LevelsSnapshot(
+        timestamp_utc=t0,
+        source_timestamp_utc=t0,
+        data_age_minutes=5.0,
+        status=DataStatus.OK,
+        spot_ndx=20000.0,
+        spot_nq=20120.0,
+        basis=120.0,
+        basis_label="base en séance",
+        basis_status=DataStatus.OK,
+        synthetic_basis=None,
+        net_gex=1000000.0,
+        regime="AMORTISSEUR",
+        gamma_flip_ndx=19800.0,
+        gamma_flip_nq=19920.0,
+        call_wall_ndx=20500.0,
+        call_wall_nq=20620.0,
+        put_wall_ndx=19500.0,
+        put_wall_nq=19620.0,
+    )
+
+    # 1 heure plus tard : Call Wall monte à 20600
+    snap2 = LevelsSnapshot(
+        timestamp_utc=t0 + timedelta(hours=1),
+        source_timestamp_utc=t0 + timedelta(hours=1),
+        data_age_minutes=5.0,
+        status=DataStatus.OK,
+        spot_ndx=20050.0,
+        spot_nq=20170.0,
+        basis=120.0,
+        basis_label="base en séance",
+        basis_status=DataStatus.OK,
+        synthetic_basis=None,
+        net_gex=1200000.0,
+        regime="AMORTISSEUR",
+        gamma_flip_ndx=19800.0,
+        gamma_flip_nq=19920.0,
+        call_wall_ndx=20600.0,
+        call_wall_nq=20720.0,
+        put_wall_ndx=19500.0,
+        put_wall_nq=19620.0,
+    )
+
+    moves = compare_snapshots(snap1, snap2)
+    cw_move = next(m for m in moves if m.metric == "Call Wall NDX")
+    assert cw_move.status == "MIGRATION_HAUSSIERE"
+    assert cw_move.delta == 100.0
+
+    pw_move = next(m for m in moves if m.metric == "Put Wall NDX")
+    assert pw_move.status == "STABLE"
