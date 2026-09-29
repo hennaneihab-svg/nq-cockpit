@@ -31,6 +31,8 @@ vendor/
 # Data & database files
 data/*.db
 data/*.sqlite
+data/*.parquet
+data/cache/
 
 # Reports
 reports/*.json

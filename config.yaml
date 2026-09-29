@@ -44,5 +44,11 @@ market_sessions:
     daily_halt_start: "17:00"
     daily_halt_end: "18:00"
     symbols: ["NQ=F"]
+data:
+  db_path: "data/nqcockpit.db"
+  cache_dir: "data/cache"
+  intraday_intervals: ["1m", "5m"]
+  basis_max_drift_seconds: 60
+  stale_bar_threshold_minutes: 15
 
 

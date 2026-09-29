@@ -100,6 +100,15 @@ class MarketSessionsConfig:
 
 
 @dataclass(frozen=True)
+class DataConfig:
+    db_path: str = "data/nqcockpit.db"
+    cache_dir: str = "data/cache"
+    intraday_intervals: list[str] = field(default_factory=lambda: ["1m", "5m"])
+    basis_max_drift_seconds: float = 60.0
+    stale_bar_threshold_minutes: int = 15
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -111,6 +120,7 @@ class AppConfig:
     validation: ValidationConfig
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     market_sessions: MarketSessionsConfig = field(default_factory=MarketSessionsConfig)
+    data: DataConfig = field(default_factory=DataConfig)
 
 
 
@@ -370,6 +380,18 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         cme_futures=cme_cfg,
     )
 
+    # 11. Data
+    raw_data = data.get("data", {})
+    if not isinstance(raw_data, dict):
+        raw_data = {}
+    data_cfg = DataConfig(
+        db_path=str(raw_data.get("db_path", "data/nqcockpit.db")),
+        cache_dir=str(raw_data.get("cache_dir", "data/cache")),
+        intraday_intervals=list(raw_data.get("intraday_intervals", ["1m", "5m"])),
+        basis_max_drift_seconds=float(raw_data.get("basis_max_drift_seconds", 60.0)),
+        stale_bar_threshold_minutes=int(raw_data.get("stale_bar_threshold_minutes", 15)),
+    )
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -381,5 +403,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         validation=val,
         sources=sources,
         market_sessions=market_sessions,
+        data=data_cfg,
     )
 
