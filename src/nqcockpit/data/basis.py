@@ -96,6 +96,10 @@ def compute_live_basis(
         nq_timestamp_utc=nq_bar.timestamp_utc,
         ndx_timestamp_utc=ndx_bar.timestamp_utc,
         method=method_str,
+        delta_t_minutes=drift / 60.0,
+        tolerance_minutes=max_drift_seconds / 60.0,
+        is_aligned=True,
+        formula="base = NQ_close - NDX_spot",
     )
 
 
@@ -187,6 +191,14 @@ def compute_previous_session_basis(
         nq_timestamp_utc=last_nq.timestamp_utc,
         ndx_timestamp_utc=last_ndx.timestamp_utc,
         method="séance précédente",
+        delta_t_minutes=drift / 60.0,
+        tolerance_minutes=1.0,
+        is_aligned=(drift <= 60.0 and not is_stale_session),
+        formula="base = NQ_close - NDX_spot",
+        delay_compensation_note=(
+            "Source Yahoo Finance retardée ~15 min : barre NQ sélectionnée "
+            "correspondant à l'heure réelle de cotation NDX (heure de fermeture 16:00 ET)"
+        ),
     )
 
 

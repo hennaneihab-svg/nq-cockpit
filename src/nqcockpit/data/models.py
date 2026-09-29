@@ -102,6 +102,11 @@ class BasisSnapshot:
     nq_timestamp_utc: datetime | None = None
     ndx_timestamp_utc: datetime | None = None
     method: str = "live"
+    delta_t_minutes: float = 0.0
+    tolerance_minutes: float = 1.0
+    is_aligned: bool = True
+    formula: str = "base = NQ_close - NDX_spot"
+    delay_compensation_note: str | None = None
 
 
 @dataclass

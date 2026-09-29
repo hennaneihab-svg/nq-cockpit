@@ -32,7 +32,12 @@ from nqcockpit.data.cboe import CboeChainSnapshot
 from nqcockpit.data.db import apply_migrations, get_db_connection, insert_snapshot
 from nqcockpit.data.models import Bar, BasisSnapshot, DataStatus
 from nqcockpit.levels import greeks
-from nqcockpit.levels.models import ExpectedMoveInfo, GammaWall, LevelsSnapshot
+from nqcockpit.levels.models import (
+    Diagnostic1cInfo,
+    ExpectedMoveInfo,
+    GammaWall,
+    LevelsSnapshot,
+)
 
 log = logging.getLogger(__name__)
 
@@ -289,6 +294,228 @@ def calculate_max_pain(
     return float(strikes[min_idx])
 
 
+
+TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+_ALGIERS_FMT = "%Y-%m-%d %H:%M:%S (Alger)"
+_ET_FMT = "%Y-%m-%d %H:%M:%S ET"
+
+
+def _fmt_et(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(ET).strftime(_ET_FMT)
+
+
+def _fmt_algiers(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+
+
+def build_diagnostic_1c(
+    nq_bars: list[Bar],
+    ndx_bars: list[Bar],
+    ref_utc: datetime,
+    session_date: date,
+    tolerance_minutes: float = 1.0,
+) -> Diagnostic1cInfo:
+    """Construit le Diagnostic 1c pour la séance de référence précédente (j-1).
+
+    Parcourt étape par étape la recherche de la paire NQ/NDX à 16:00 ET
+    de session_date et retourne un rapport structuré avec cause explicite.
+
+    Cause codes :
+        NQ_BAR_ABSENTE     — Aucune barre NQ au voisinage de la cible
+        NDX_QUOTE_ABSENTE  — Aucune barre NDX au voisinage de la cible
+        HORS_TOLERANCE     — Paire trouvée mais écart > tolérance
+        SESSION_INCOMPLETE — Barres du jour présentes mais pas jusqu'à 16:00 ET
+        PAIRE_TROUVEE      — Paire valide trouvée et utilisée
+        AUTRE              — Cas non couvert
+    """
+    # Cible : 16:00:00 ET de session_date (clôture de la séance actions)
+    target_et = datetime(
+        session_date.year, session_date.month, session_date.day,
+        16, 0, 0, tzinfo=ET,
+    )
+    target_utc = target_et.astimezone(timezone.utc)
+
+    target_et_str = target_et.strftime(_ET_FMT)
+    target_alg_str = target_et.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+
+    # Barres NQ pour ce jour précis
+    nq_day = [
+        b for b in nq_bars
+        if b.timestamp_utc.astimezone(ET).date() == session_date
+    ]
+    nq_count = len(nq_day)
+    nq_first = _fmt_et(nq_day[0].timestamp_utc) if nq_day else None
+    nq_last = _fmt_et(nq_day[-1].timestamp_utc) if nq_day else None
+
+    # Candidat NQ : barre <= 16:00 ET la plus proche par le haut
+    nq_before = [
+        b for b in nq_day if b.timestamp_utc <= target_utc
+    ]
+    nq_candidate = nq_before[-1] if nq_before else None
+
+    # Candidat NDX : idem
+    ndx_day = [
+        b for b in ndx_bars
+        if b.timestamp_utc.astimezone(ET).date() == session_date
+    ]
+    ndx_before = [
+        b for b in ndx_day if b.timestamp_utc <= target_utc
+    ]
+    ndx_candidate = ndx_before[-1] if ndx_before else None
+
+    # Delta-t
+    delta_t: float | None = None
+    if nq_candidate is not None and ndx_candidate is not None:
+        delta_t = abs(
+            (nq_candidate.timestamp_utc - ndx_candidate.timestamp_utc).total_seconds()
+        ) / 60.0
+
+    # Cause et action
+    cause_code: str
+    cause_detail: str
+    action_taken: str
+
+    if nq_count == 0:
+        cause_code = "NQ_BAR_ABSENTE"
+        cause_detail = f"Aucune barre NQ=F enregistrée pour le {session_date.isoformat()} en base"
+        action_taken = "Repli sur base de parité call-put ou base indisponible"
+    elif ndx_candidate is None:
+        cause_code = "NDX_QUOTE_ABSENTE"
+        cause_detail = (
+            f"Aucune barre ^NDX enregistrée pour le {session_date.isoformat()} "
+            f"avant 16:00 ET (barres NQ: {nq_count})"
+        )
+        action_taken = "Repli sur base de parité call-put"
+    elif nq_candidate is None:
+        # NQ day exists but no bar <= 16:00
+        cause_code = "SESSION_INCOMPLETE"
+        cause_detail = (
+            f"Barres NQ présentes ce jour ({nq_count}) mais aucune <= 16:00 ET. "
+            f"Première barre : {nq_first}"
+        )
+        action_taken = "Repli sur base de parité call-put"
+    elif delta_t is not None and delta_t > tolerance_minutes:
+        cause_code = "HORS_TOLERANCE"
+        cause_detail = (
+            f"Paire trouvée mais Δt = {delta_t:.2f} min > tolérance "
+            f"{tolerance_minutes:.1f} min. "
+            f"NQ: {_fmt_et(nq_candidate.timestamp_utc)}, "
+            f"NDX: {_fmt_et(ndx_candidate.timestamp_utc)}"
+        )
+        action_taken = "Base calculée quand même avec mention 'non alignée' ; contrôle parité"
+    else:
+        cause_code = "PAIRE_TROUVEE"
+        cause_detail = (
+            f"Paire valide — NQ: {_fmt_et(nq_candidate.timestamp_utc)}, "
+            f"NDX: {_fmt_et(ndx_candidate.timestamp_utc)}, "
+            f"Δt={delta_t:.2f} min" if delta_t is not None else
+            "Paire valide mais Δt incalculable"
+        )
+        action_taken = "Base de la séance précédente retenue"
+
+    return Diagnostic1cInfo(
+        session_date=session_date,
+        target_time_et=target_et_str,
+        target_time_algiers=target_alg_str,
+        target_time_utc=target_utc,
+        nq_candidate_found=nq_candidate is not None,
+        nq_candidate_time_et=_fmt_et(nq_candidate.timestamp_utc) if nq_candidate else None,
+        nq_candidate_time_algiers=(
+            _fmt_algiers(nq_candidate.timestamp_utc) if nq_candidate else None
+        ),
+        nq_candidate_close=nq_candidate.close if nq_candidate else None,
+        nq_bars_count_day=nq_count,
+        nq_first_bar_time=nq_first,
+        nq_last_bar_time=nq_last,
+        ndx_candidate_found=ndx_candidate is not None,
+        ndx_candidate_time_et=_fmt_et(ndx_candidate.timestamp_utc) if ndx_candidate else None,
+        ndx_candidate_time_algiers=(
+            _fmt_algiers(ndx_candidate.timestamp_utc) if ndx_candidate else None
+        ),
+        ndx_candidate_spot=ndx_candidate.close if ndx_candidate else None,
+        delta_t_minutes=delta_t,
+        tolerance_minutes=tolerance_minutes,
+        cause_code=cause_code,
+        cause_detail=cause_detail,
+        action_taken=action_taken,
+    )
+
+
+def enrich_expected_move_nq(
+    em: ExpectedMoveInfo,
+    basis: float,
+    spot_nq: float,
+    spot_ndx: float,
+    cboe_age_minutes: float | None,
+) -> ExpectedMoveInfo:
+    """Complète ExpectedMoveInfo avec les champs NQ et le contrôle de cohérence.
+
+    - straddle_move_nq : prix straddle ATM NDX converti en points NQ via base
+    - iv_move_nq : formule IV en points NQ
+    - discrepancy_pct : |straddle - IV| / max(straddle, IV)
+    - is_coherent : discrepancy < 25 %
+    """
+
+    # Bornes NQ via formule IV (déjà calculées : formula_move est en points NDX)
+    iv_move_nq = em.formula_move  # NDX pts ≈ NQ pts (échelle similaire, base additive)
+    iv_lower_nq = spot_nq - iv_move_nq
+    iv_upper_nq = spot_nq + iv_move_nq
+
+    # Straddle NDX converti en NQ
+    straddle_move_nq: float | None = None
+    straddle_lower_nq: float | None = None
+    straddle_upper_nq: float | None = None
+    if em.straddle_move is not None:
+        # Le straddle est en points NDX (bid/ask des options NDX)
+        straddle_move_nq = em.straddle_move
+        straddle_lower_nq = spot_nq - straddle_move_nq
+        straddle_upper_nq = spot_nq + straddle_move_nq
+
+    # Jour de la semaine de l'échéance
+    expiry_dow: str | None = None
+    if em.expiry is not None:
+        expiry_dow = em.expiry.strftime("%A %d/%m/%Y")
+
+    # Contrôle cohérence
+    discrepancy_pct: float | None = None
+    is_coherent = True
+    status = DataStatus.OK
+    status_explanation: str | None = None
+
+    if straddle_move_nq is not None and iv_move_nq > 0:
+        denom = max(abs(straddle_move_nq), abs(iv_move_nq))
+        discrepancy_pct = abs(straddle_move_nq - iv_move_nq) / denom * 100.0
+        if discrepancy_pct > 25.0:
+            is_coherent = False
+            status = DataStatus.DEGRADED
+            status_explanation = (
+                f"Écart méthodes straddle vs IV = {discrepancy_pct:.1f}% > 25% "
+                f"(straddle: {straddle_move_nq:.1f} pts NQ, IV: {iv_move_nq:.1f} pts NQ) "
+                "— données à interpréter avec prudence, sans ajustement forcé"
+            )
+
+    em.straddle_move_nq = straddle_move_nq
+    em.straddle_lower_nq = straddle_lower_nq
+    em.straddle_upper_nq = straddle_upper_nq
+    em.iv_move_nq = iv_move_nq
+    em.iv_lower_nq = iv_lower_nq
+    em.iv_upper_nq = iv_upper_nq
+    em.expiry_day_of_week = expiry_dow
+    em.data_age_minutes = cboe_age_minutes
+    em.discrepancy_pct = discrepancy_pct
+    em.is_coherent = is_coherent
+    em.status = status
+    em.status_explanation = status_explanation
+    # Mettre à jour les bornes NQ de la formule IV (déjà posées par compute_snapshot)
+    em.lower_bound_nq = spot_nq - iv_move_nq
+    em.upper_bound_nq = spot_nq + iv_move_nq
+    return em
+
+
 class LevelsEngine:
     """Moteur de calcul de niveaux gamma, expected move et conversion vers NQ."""
 
@@ -527,11 +754,18 @@ class LevelsEngine:
                 f" pour la date de référence {ref_session_date.isoformat()}"
             )
 
-        # 8. Expected Move sur l'échéance la plus proche non expirée
+        # 8. Expected Move — enrichir avec les champs NQ côte à côte
         em_info = calculate_expected_move(df_gex, spot_ndx, ref_utc=now_utc)
         if em_info is not None:
             em_info.lower_bound_nq = em_info.lower_bound_ndx + basis_val
             em_info.upper_bound_nq = em_info.upper_bound_ndx + basis_val
+            em_info = enrich_expected_move_nq(
+                em_info,
+                basis=basis_val,
+                spot_nq=spot_nq,
+                spot_ndx=spot_ndx,
+                cboe_age_minutes=chain.age_minutes,
+            )
             exp_str = em_info.expiry.isoformat() if em_info.expiry else "N/A"
             straddle_s = f"{em_info.straddle_move:.1f} pts" if em_info.straddle_move else "N/A"
             anomalies.append(
@@ -566,6 +800,29 @@ class LevelsEngine:
                 f"méd {c_med:.1f} min, max {c_max:.1f} min | "
                 f"Statut : {chain.status.value}"
             )
+
+        # 11. Diagnostic 1c : séance de référence précédente (j-1)
+        diag_session = CALENDAR.get_last_equity_session_close(now_utc)
+        diag_session_date = diag_session.astimezone(ET).date()
+        diag_1c = build_diagnostic_1c(
+            nq_bars=nq_bars,
+            ndx_bars=ndx_bars,
+            ref_utc=now_utc,
+            session_date=diag_session_date,
+            tolerance_minutes=1.0,
+        )
+
+        # Champs horodatage de la base pour le snapshot
+        basis_nq_ts = candidate_basis.nq_timestamp_utc if candidate_basis else None
+        basis_ndx_ts = candidate_basis.ndx_timestamp_utc if candidate_basis else None
+        basis_delta_t = candidate_basis.delta_t_minutes if candidate_basis else None
+        basis_is_aligned = candidate_basis.is_aligned if candidate_basis else False
+        basis_method_str = (
+            "paire alignée séance courante"
+            if (candidate_basis and candidate_basis.is_session_basis)
+            else "paire séance précédente"
+        )
+        basis_delay_note = candidate_basis.delay_compensation_note if candidate_basis else None
 
         # Statut global du snapshot
         global_status = chain.status
@@ -607,6 +864,21 @@ class LevelsEngine:
             cboe_age_stats=chain.age_stats,
             oi_flag="OI de la veille",
             anomalies=anomalies,
+            diagnostic_1c=diag_1c,
+            basis_nq_time_utc=basis_nq_ts,
+            basis_nq_close=(
+                candidate_basis.nq_price if candidate_basis else None
+            ),
+            basis_ndx_time_utc=basis_ndx_ts,
+            basis_ndx_spot=(
+                candidate_basis.ndx_price if candidate_basis else None
+            ),
+            basis_delta_t_minutes=basis_delta_t,
+            basis_tolerance_minutes=1.0,
+            basis_is_aligned=basis_is_aligned,
+            basis_method=basis_method_str,
+            basis_formula="base = NQ_close - NDX_spot",
+            basis_delay_compensation_note=basis_delay_note,
         )
 
         # Enregistrement du fichier JSON horodaté

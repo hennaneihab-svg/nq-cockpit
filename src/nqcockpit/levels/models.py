@@ -22,6 +22,36 @@ class GammaWall:
 
 
 @dataclass
+class Diagnostic1cInfo:
+    """Détail du Diagnostic 1c pour la séance de référence précédente."""
+
+    session_date: date
+    target_time_et: str
+    target_time_algiers: str
+    target_time_utc: datetime
+    # NQ candidate
+    nq_candidate_found: bool
+    nq_candidate_time_et: str | None
+    nq_candidate_time_algiers: str | None
+    nq_candidate_close: float | None
+    nq_bars_count_day: int
+    nq_first_bar_time: str | None
+    nq_last_bar_time: str | None
+    # NDX candidate
+    ndx_candidate_found: bool
+    ndx_candidate_time_et: str | None
+    ndx_candidate_time_algiers: str | None
+    ndx_candidate_spot: float | None
+    # Timing
+    delta_t_minutes: float | None
+    tolerance_minutes: float
+    # Cause & Action
+    cause_code: str
+    cause_detail: str
+    action_taken: str
+
+
+@dataclass
 class ExpectedMoveInfo:
     """Informations complètes sur le move attendu (Expected Move)."""
 
@@ -34,6 +64,18 @@ class ExpectedMoveInfo:
     lower_bound_nq: float
     upper_bound_nq: float
     expiry: date | None = None
+    straddle_move_nq: float | None = None
+    straddle_lower_nq: float | None = None
+    straddle_upper_nq: float | None = None
+    iv_move_nq: float | None = None
+    iv_lower_nq: float | None = None
+    iv_upper_nq: float | None = None
+    expiry_day_of_week: str | None = None
+    data_age_minutes: float | None = None
+    discrepancy_pct: float | None = None
+    is_coherent: bool = True
+    status: DataStatus = DataStatus.OK
+    status_explanation: str | None = None
 
 
 @dataclass
@@ -74,6 +116,17 @@ class LevelsSnapshot:
     cboe_age_stats: dict[str, Any] = field(default_factory=dict)
     oi_flag: str = "OI de la veille"
     anomalies: list[str] = field(default_factory=list)
+    diagnostic_1c: Diagnostic1cInfo | None = None
+    basis_nq_time_utc: datetime | None = None
+    basis_nq_close: float | None = None
+    basis_ndx_time_utc: datetime | None = None
+    basis_ndx_spot: float | None = None
+    basis_delta_t_minutes: float | None = None
+    basis_tolerance_minutes: float = 1.0
+    basis_is_aligned: bool = True
+    basis_method: str = "paire séance précédente"
+    basis_formula: str = "base = NQ_close - NDX_spot"
+    basis_delay_compensation_note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Sérialisation en dictionnaire pour export JSON et persistance."""
