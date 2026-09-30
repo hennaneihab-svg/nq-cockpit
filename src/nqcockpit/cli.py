@@ -230,6 +230,37 @@ def create_parser() -> argparse.ArgumentParser:
         help="Chemin de fichier pour l'export CSV des niveaux clés",
     )
 
+    # 12. journal (P09)
+    parser_journal = subparsers.add_parser(
+        "journal",
+        help="Journal de bord, discipline et métriques de performance (P09)",
+    )
+    j_sub = parser_journal.add_subparsers(
+        title="actions journal",
+        dest="journal_action",
+        help="Action spécifique",
+    )
+    j_sub.add_parser("stats", help="Affiche les statistiques de performance globales")
+    j_daily = j_sub.add_parser("daily", help="Statistiques et violations d'une séance")
+    j_daily.add_argument(
+        "--date", type=str, default=None,
+        help="Date YYYY-MM-DD (défaut : aujourd'hui NY)"
+    )
+    j_coaching = j_sub.add_parser("coaching", help="Génère un rapport de coaching")
+    j_coaching.add_argument(
+        "--period", type=str, default="hebdo",
+        choices=["hebdo", "mensuel"], help="Période"
+    )
+    j_coaching.add_argument(
+        "--label", type=str, default="",
+        help="Label de la période (ex. S39-2026)"
+    )
+    j_ui = j_sub.add_parser("ui", help="Lance l'interface Streamlit du journal")
+    j_ui.add_argument(
+        "--port", type=int, default=8502,
+        help="Port Streamlit (défaut : 8502)"
+    )
+
     return parser
 
 
@@ -1027,8 +1058,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _handle_amplitude(args)
     elif args.subcommand == "profile":
         return _handle_profile(args)
-    elif args.subcommand == "ui":
-        return _handle_ui(args)
+    elif args.subcommand == "journal":
+        return _handle_journal(args)
 
     return 0
 
@@ -1756,6 +1787,133 @@ def _handle_profile(args: Any) -> int:
     print(sep)
 
     return 0
+
+
+def _handle_journal(args: Any) -> int:
+    """Sous-commande journal (P09) — stats, daily, coaching, ui."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from nqcockpit.config import load_config
+    from nqcockpit.journal.engine import (
+        compute_daily_stats,
+        compute_performance_stats,
+        generate_coaching_report,
+    )
+    from nqcockpit.journal.store import init_journal_db, load_trades
+
+    config = load_config()
+    tz_ny = ZoneInfo(config.timezones.market)
+    conn = init_journal_db(config.data.db_path)
+    action = getattr(args, "journal_action", None)
+
+    if action == "ui":
+        import subprocess  # noqa: S603
+        import sys
+        from pathlib import Path
+        port = getattr(args, "port", 8502)
+        page_path = Path(__file__).parent / "ui" / "journal_page.py"
+        print(f"[nqcockpit] Journal Streamlit sur http://localhost:{port}")
+        try:
+            subprocess.run(  # noqa: S603
+                [sys.executable, "-m", "streamlit", "run", str(page_path),
+                 "--server.port", str(port),
+                 "--server.headless", "true",
+                 "--theme.base", "dark"],
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\n[nqcockpit] Journal arrêté.")
+        return 0
+
+    if action == "daily":
+        from datetime import date
+        target = getattr(args, "date", None) or str(datetime.now(tz_ny).date())
+        trades = load_trades(conn, session_date=target)
+        stats = compute_daily_stats(target, trades, config)
+        sep = "=" * 65
+        print(f"\n{sep}")
+        print(f"  JOURNAL DU JOUR — {target}")
+        print(sep)
+        print(f"  Trades : {stats.n_trades}  |  Wins {stats.n_wins} / Pertes {stats.n_losses}")
+        print(f"  R total : {stats.r_total:+.3f}R  |  Conformité : {stats.compliance_rate:.0%}")
+        if stats.limit_hit:
+            print(f"  *** LIMITE JOURNALIÈRE ATTEINTE ({stats.r_total:+.3f}R) ***")
+        if stats.violations:
+            print(f"\n  Violations ({len(stats.violations)}) :")
+            for v in stats.violations:
+                print(f"    [{v.violation.value}] {v.detail}")
+        if stats.tilt_alerts:
+            print(f"\n  Alertes tilt ({len(stats.tilt_alerts)}) :")
+            for a in stats.tilt_alerts:
+                print(f"    {a.reason}")
+        print(sep + "\n")
+        return 0
+
+    if action == "stats" or action is None:
+        all_trades = load_trades(conn)
+        stats = compute_performance_stats(
+            all_trades, min_trades=config.validation.min_sessions
+        )
+        now_str = (
+            stats.computed_at.strftime("%Y-%m-%d %H:%M UTC")
+            if stats.computed_at else "—"
+        )
+        sep = "=" * 65
+        print(f"\n{sep}")
+        print(f"  PERFORMANCE GLOBALE — {stats.n_trades} trades — calculé {now_str}")
+        print(sep)
+        if not stats.sample_sufficient:
+            print(
+                f"  ⚠ Échantillon insuffisant : {stats.n_trades}/{stats.min_trades_required} trades"
+            )
+            print("    Espérance, drawdown, profit factor : non calculés.")
+        print(f"  Win rate : {stats.win_rate:.1%}" if stats.win_rate is not None else "  Win rate : —")
+        if stats.win_rate_ci_low is not None:
+            print(f"    IC 95% Wilson : [{stats.win_rate_ci_low:.1%}, {stats.win_rate_ci_high:.1%}]")
+        if stats.sample_sufficient:
+            print(f"  Espérance  : {stats.expectancy_r:+.4f}R")
+            if stats.expectancy_ci_low is not None:
+                print(
+                    f"    IC 95%  : [{stats.expectancy_ci_low:+.4f}, {stats.expectancy_ci_high:+.4f}]"
+                )
+            print(f"  Profit factor : {stats.profit_factor:.2f}" if stats.profit_factor else "  Profit factor : N/A")
+            print(f"  Max drawdown (R) : -{stats.max_drawdown_r:.3f}R")
+            print(f"  Max série pertes : {stats.max_loss_streak}")
+        print(f"  Conformité : {stats.compliance_rate:.0%}" if stats.compliance_rate else "  Conformité : —")
+        if stats.expectancy_r_compliant is not None:
+            print(f"  Espérance conformes     : {stats.expectancy_r_compliant:+.4f}R")
+        if stats.expectancy_r_noncompliant is not None:
+            print(f"  Espérance non-conformes : {stats.expectancy_r_noncompliant:+.4f}R")
+        print(sep + "\n")
+        return 0
+
+    if action == "coaching":
+        all_trades = load_trades(conn)
+        period = getattr(args, "period", "hebdo")
+        label = getattr(args, "label", "") or "manuel"
+        report = generate_coaching_report(all_trades, period=period,
+                                          period_label=label, config=config)
+        sep = "=" * 65
+        print(f"\n{sep}")
+        print(f"  COACHING {period.upper()} — {label}")
+        print(f"  Généré : {report.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
+        print(sep)
+        if report.insufficient_data:
+            print(f"  ⚠ Données insuffisantes : {report.stats.n_trades if report.stats else 0}/{config.validation.min_sessions} trades")
+        print("\n  TOP 3 FUITES :")
+        for i, leak in enumerate(report.top_leaks, 1):
+            print(f"    {i}. {leak}")
+        print(f"\n  RÈGLE À RENFORCER : {report.rule_to_reinforce}")
+        print(f"\n  FORCE À CONSERVER : {report.strength_to_keep}")
+        print("\n  OBJECTIFS :")
+        for goal in report.measurable_goals:
+            print(f"    - {goal}")
+        print(sep + "\n")
+        return 0
+
+    print(f"[nqcockpit journal] Action inconnue : {action!r}. Essayez : stats, daily, coaching, ui.")
+    return 1
 
 
 def _handle_ui(args: Any) -> int:
