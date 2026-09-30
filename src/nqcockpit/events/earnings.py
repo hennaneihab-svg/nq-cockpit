@@ -61,6 +61,9 @@ def _load_cache(
             source_age_seconds=age_s,
             status=DataStatus(raw.get("status", "OK")),
             error_msg=raw.get("error_msg"),
+            raw_date_str=raw.get("raw_date_str", ""),
+            time_provided=raw.get("time_provided", False),
+            timing=raw.get("timing", "après clôture, heure non fournie"),
         )
     except (json.JSONDecodeError, KeyError, ValueError, OSError):
         return None
@@ -84,6 +87,9 @@ def _save_cache(cache_path: pathlib.Path, ev: EarningsEvent) -> None:
             ),
             "status": ev.status.value,
             "error_msg": ev.error_msg,
+            "raw_date_str": ev.raw_date_str,
+            "time_provided": ev.time_provided,
+            "timing": ev.timing,
         }
         cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except OSError as exc:
@@ -110,47 +116,63 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         cal = tkr.calendar  # dict ou DataFrame
         scheduled_dt: datetime | None = None
         confirmed = False
+        raw_date_str = ""
+        time_provided = False
+        timing = "après clôture, heure non fournie"
 
         if cal is not None and not (hasattr(cal, "empty") and cal.empty):
-            # yfinance >= 0.2 : calendar est un dict avec 'Earnings Date'
+            raw_ed = None
             if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if ed is not None:
-                    # Peut être une liste ou une valeur unique
-                    if isinstance(ed, list) and ed:
-                        ed = ed[0]
-                    if hasattr(ed, "to_pydatetime"):
-                        scheduled_dt = ed.to_pydatetime()
-                    elif isinstance(ed, datetime):
-                        scheduled_dt = ed
-                    elif isinstance(ed, date):
-                        scheduled_dt = datetime.combine(ed, time(16, 30), tzinfo=ET_TZ)
-                    if scheduled_dt is not None:
-                        if scheduled_dt.tzinfo is None:
-                            scheduled_dt = scheduled_dt.replace(tzinfo=ET_TZ)
-                        scheduled_dt = scheduled_dt.astimezone(UTC)
-                        confirmed = True
+                raw_ed = cal.get("Earnings Date")
             elif hasattr(cal, "loc"):
-                # DataFrame legacy
                 try:
-                    row = cal.loc["Earnings Date"]
-                    if hasattr(row, "iloc"):
-                        val = row.iloc[0]
-                    else:
-                        val = row
-                    if hasattr(val, "to_pydatetime"):
-                        scheduled_dt = val.to_pydatetime()
-                    elif isinstance(val, datetime):
-                        scheduled_dt = val
-                    elif isinstance(val, date):
-                        scheduled_dt = datetime.combine(val, time(16, 30), tzinfo=ET_TZ)
-                    if scheduled_dt is not None:
-                        if scheduled_dt.tzinfo is None:
-                            scheduled_dt = scheduled_dt.replace(tzinfo=ET_TZ)
-                        scheduled_dt = scheduled_dt.astimezone(UTC)
-                        confirmed = True
+                    raw_ed = cal.loc["Earnings Date"]
                 except (KeyError, IndexError):
-                    pass
+                    raw_ed = None
+
+            if raw_ed is not None:
+                items = []
+                if isinstance(raw_ed, (list, tuple)):
+                    items = list(raw_ed)
+                elif hasattr(raw_ed, "iloc"):
+                    items = list(raw_ed)
+                else:
+                    items = [raw_ed]
+
+                # Règle de qualification :
+                # - 1 date unique -> confirmée par l'entreprise
+                # - >1 date (fourchette) -> estimée
+                if len(items) > 1:
+                    confirmed = False
+                    raw_date_str = " à ".join(str(d) for d in items)
+                elif len(items) == 1:
+                    confirmed = True
+                    raw_date_str = str(items[0])
+
+                if items:
+                    val0 = items[0]
+                    if hasattr(val0, "to_pydatetime"):
+                        val0 = val0.to_pydatetime()
+
+                    if isinstance(val0, datetime):
+                        if val0.hour == 0 and val0.minute == 0:
+                            time_provided = False
+                            scheduled_dt = datetime.combine(
+                                val0.date(), time(20, 0), tzinfo=timezone.utc
+                            )
+                            timing = "après clôture, heure non fournie"
+                        else:
+                            time_provided = True
+                            if val0.tzinfo is None:
+                                val0 = val0.replace(tzinfo=ET_TZ)
+                            scheduled_dt = val0.astimezone(UTC)
+                            timing = f"{val0.astimezone(ET_TZ).strftime('%H:%M')} ET"
+                    elif isinstance(val0, date):
+                        time_provided = False
+                        scheduled_dt = datetime.combine(
+                            val0, time(20, 0), tzinfo=timezone.utc
+                        )
+                        timing = "après clôture, heure non fournie"
 
         eps_est: float | None = None
         rev_est: float | None = None
@@ -192,6 +214,9 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
             source_age_seconds=0.0,
             status=status,
             error_msg=err,
+            raw_date_str=raw_date_str,
+            time_provided=time_provided,
+            timing=timing,
         )
 
     except Exception as exc:  # noqa: BLE001

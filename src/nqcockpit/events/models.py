@@ -125,6 +125,15 @@ class EarningsEvent:
     error_msg: str | None = None
     """Message d'erreur si statut != OK."""
 
+    raw_date_str: str = ""
+    """Date ou fourchette brute renvoyée par yfinance."""
+
+    time_provided: bool = False
+    """True si une heure de publication exacte a été fournie."""
+
+    timing: str = "après clôture, heure non fournie"
+    """Timing de publication : 'après clôture, heure non fournie', 'avant ouverture'…"""
+
 
 @dataclass
 class SourceHealth:

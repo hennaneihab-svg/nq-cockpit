@@ -297,6 +297,9 @@ def _export_json(report: EventRiskReport, config: AppConfig) -> None:
                     "eps_estimate": e.eps_estimate,
                     "status": e.status.value,
                     "error_msg": e.error_msg,
+                    "raw_date_str": e.raw_date_str,
+                    "time_provided": e.time_provided,
+                    "timing": e.timing,
                 }
                 for e in report.earnings_14d
             ],
@@ -354,13 +357,27 @@ def render_console(report: EventRiskReport) -> str:
             if e.scheduled_utc:
                 alg_e = e.scheduled_utc.astimezone(TZ_ALGIERS)
                 et_e = e.scheduled_utc.astimezone(TZ_ET)
-                dt_str = f"{alg_e.strftime('%d %b %H:%M')} Alger ({et_e.strftime('%H:%M')} ET)"
+                if e.time_provided:
+                    dt_str = (
+                        f"{alg_e.strftime('%d %b %H:%M')} Alger "
+                        f"({et_e.strftime('%H:%M')} ET)"
+                    )
+                elif e.timing:
+                    dt_str = f"{alg_e.strftime('%d %b')} Alger ({e.timing})"
+                else:
+                    dt_str = f"{alg_e.strftime('%d %b')} Alger (heure non fournie [DÉGRADÉ])"
             else:
                 dt_str = "date inconnue"
             st = e.status.value
-            eps_str = f" | EPS fcst={e.eps_estimate:.2f}" if e.eps_estimate is not None else ""
+            eps_str = (
+                f" | EPS fcst={e.eps_estimate:.3f}"
+                if e.eps_estimate is not None
+                else ""
+            )
             conf_str = "confirmée" if e.confirmed else "estimée"
-            raw_date = e.scheduled_utc.strftime("%Y-%m-%d") if e.scheduled_utc else "N/A"
+            raw_date = e.raw_date_str or (
+                e.scheduled_utc.strftime("%Y-%m-%d") if e.scheduled_utc else "N/A"
+            )
             lines.append(
                 f"    {e.ticker}: {dt_str}{eps_str} [{conf_str}, brut: {raw_date}] [{st}]"
             )

@@ -615,5 +615,53 @@ def test_uncovered_days_marked_degraded_and_missing_indicators_signaled() -> Non
     assert dr_0610["risk_level"] == "DÉGRADÉ / INCONNU"
 
 
+def test_megacaps_confirmed_vs_estimated_and_time_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cas Point 5 : Règle confirmée vs estimée, suppression 16:30 ET, précision EPS."""
+    from nqcockpit.events.earnings import _fetch_yfinance_earnings
+
+    mock_yf = MagicMock()
+
+    # 1. Date unique -> confirmée, date seule -> pas d'heure 16:30 codée en dur
+    ticker_single = MagicMock()
+    ticker_single.calendar = {
+        "Earnings Date": [date(2026, 10, 29)],
+        "Earnings Average": 1.98124,
+    }
+
+    # 2. Fourchette -> estimée
+    ticker_range = MagicMock()
+    ticker_range.calendar = {
+        "Earnings Date": [date(2026, 10, 28), date(2026, 11, 2)],
+        "Earnings Average": 1.97667,
+    }
+
+    def mock_get_ticker(symbol: str) -> MagicMock:
+        if symbol == "AAPL":
+            return ticker_single
+        return ticker_range
+
+    mock_yf.Ticker.side_effect = mock_get_ticker
+    monkeypatch.setitem(sys.modules, "yfinance", mock_yf)
+
+    ev_aapl = _fetch_yfinance_earnings("AAPL")
+    assert ev_aapl.confirmed is True
+    assert ev_aapl.time_provided is False
+    assert ev_aapl.timing == "après clôture, heure non fournie"
+    assert ev_aapl.raw_date_str == "2026-10-29"
+    assert ev_aapl.eps_estimate == 1.98124
+
+    ev_amzn = _fetch_yfinance_earnings("AMZN")
+    assert ev_amzn.confirmed is False
+    assert " à " in ev_amzn.raw_date_str
+    assert ev_amzn.eps_estimate == 1.97667
+
+    # Les deux EPS sont distincts dans les données brutes
+    assert ev_aapl.eps_estimate != ev_amzn.eps_estimate
+    assert abs(ev_aapl.eps_estimate - ev_amzn.eps_estimate) > 0.004
+
+
+
 
 
