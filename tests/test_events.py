@@ -439,3 +439,58 @@ def test_forexfactory_ism_mapping() -> None:
     assert _normalize_name("ISM Services PMI") == "ISM"
     assert _normalize_name("ADP Non-Farm Employment Change") == "ADP"
 
+
+def test_cpi_ppi_source_priority_and_holiday_exclusion() -> None:
+    """Cas Point 1 : CPI (12 oct férié vs 14 oct statique) et PPI (8 vs 9 oct).
+
+    1. L'inférence FRED exclut le 12 octobre 2026 (Columbus Day) -> avance au 13 octobre.
+    2. La source statique (14 oct CPI, 8 oct PPI) l'emporte sur l'estimation FRED.
+    3. Les divergences de dates affichent les dates de chaque source.
+    """
+    # 1. Vérification jour férié 12 oct exclu par FRED
+    past_dates_cpi = ["2026-09-11", "2026-08-11"]  # delta 31 jours -> 12 oct (lundi férié)
+    inferred_cpi = _infer_next_date(past_dates_cpi)
+    assert inferred_cpi is not None
+    assert inferred_cpi != "2026-10-12", "Le 12 oct (Columbus Day) doit être exclu !"
+    assert inferred_cpi == "2026-10-13", "Doit avancer au mardi 13 oct ouvré."
+
+    # 2. CPI : statique (14 oct) vs FRED (13 oct) -> statique gagne
+    ev_cpi_stat = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 14, 12, 30, tzinfo=UTC),
+        source="static",
+    )
+    ev_cpi_fred = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 13, 12, 30, tzinfo=UTC),
+        source="fred",
+    )
+    merged_cpi, divs_cpi = merge_and_classify(
+        [ev_cpi_stat, ev_cpi_fred], DEFAULT_TIER1, DEFAULT_TIER2
+    )
+    assert len(merged_cpi) == 1
+    assert merged_cpi[0].scheduled_utc.strftime("%Y-%m-%d") == "2026-10-14"
+    assert "2026-10-14" in divs_cpi[0] and "2026-10-13" in divs_cpi[0]
+
+    # 3. PPI : statique (8 oct) vs FRED (9 oct) -> statique gagne
+    ev_ppi_stat = CalendarEvent(
+        name="PPI",
+        tier=2,
+        scheduled_utc=datetime(2026, 10, 8, 12, 30, tzinfo=UTC),
+        source="static",
+    )
+    ev_ppi_fred = CalendarEvent(
+        name="PPI",
+        tier=2,
+        scheduled_utc=datetime(2026, 10, 9, 12, 30, tzinfo=UTC),
+        source="fred",
+    )
+    merged_ppi, divs_ppi = merge_and_classify(
+        [ev_ppi_stat, ev_ppi_fred], DEFAULT_TIER1, DEFAULT_TIER2
+    )
+    assert len(merged_ppi) == 1
+    assert merged_ppi[0].scheduled_utc.strftime("%Y-%m-%d") == "2026-10-08"
+    assert "2026-10-08" in divs_ppi[0] and "2026-10-09" in divs_ppi[0]
+

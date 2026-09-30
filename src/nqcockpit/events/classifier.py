@@ -55,9 +55,9 @@ def merge_and_classify(
         "fed_rss": 1,
         "bls": 2,
         "bea": 3,
-        "fred": 4,
-        "forexfactory": 5,
-        "static": 6,
+        "forexfactory": 4,
+        "static": 5,
+        "fred": 6,  # Règle estimée : ne doit jamais primer sur une source datée
     }
 
     # Index : (name_lower, day) → CalendarEvent (meilleure source)

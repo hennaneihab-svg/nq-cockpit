@@ -16,7 +16,7 @@ import os
 import pathlib
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from nqcockpit.events.models import CalendarEvent, DataStatus
@@ -92,11 +92,61 @@ def _fetch_release_dates(
         return []
 
 
+def _is_us_federal_holiday(d: date) -> bool:
+    """Vérifie si une date correspond à un jour férié fédéral américain."""
+    month = d.month
+    day = d.day
+    weekday = d.weekday()  # 0=Monday, 6=Sunday
+
+    # 1. New Year's Day (Jan 1, ou Jan 2 si Jan 1 est dimanche)
+    if month == 1 and (day == 1 or (day == 2 and weekday == 0)):
+        return True
+    # 2. Martin Luther King Jr. Day (3e lundi de janvier)
+    if month == 1 and weekday == 0 and 15 <= day <= 21:
+        return True
+    # 3. Washington's Birthday / Presidents' Day (3e lundi de février)
+    if month == 2 and weekday == 0 and 15 <= day <= 21:
+        return True
+    # 4. Memorial Day (dernier lundi de mai)
+    if month == 5 and weekday == 0 and day >= 25:
+        return True
+    # 5. Juneteenth (19 juin, ou 20 si dimanche, ou 18 si samedi)
+    if month == 6 and (
+        day == 19 or (day == 20 and weekday == 0) or (day == 18 and weekday == 4)
+    ):
+        return True
+    # 6. Independence Day (4 juillet)
+    if month == 7 and (
+        day == 4 or (day == 5 and weekday == 0) or (day == 3 and weekday == 4)
+    ):
+        return True
+    # 7. Labor Day (1er lundi de septembre)
+    if month == 9 and weekday == 0 and 1 <= day <= 7:
+        return True
+    # 8. Columbus Day / Indigenous Peoples' Day (2e lundi d'octobre)
+    if month == 10 and weekday == 0 and 8 <= day <= 14:
+        return True
+    # 9. Veterans Day (11 novembre)
+    if month == 11 and (
+        day == 11 or (day == 12 and weekday == 0) or (day == 10 and weekday == 4)
+    ):
+        return True
+    # 10. Thanksgiving Day (4e jeudi de novembre)
+    if month == 11 and weekday == 3 and 22 <= day <= 28:
+        return True
+    # 11. Christmas Day (25 décembre)
+    if month == 12 and (
+        day == 25 or (day == 26 and weekday == 0) or (day == 24 and weekday == 4)
+    ):
+        return True
+    return False
+
+
 def _infer_next_date(past_dates: list[str]) -> str | None:
     """Infère la prochaine date à partir des dates passées (pattern mensuel).
 
     Calcule le delta médian entre les 3 dernières dates et l'ajoute à la plus
-    récente. Retourne None si moins de 2 dates disponibles.
+    récente. Exclut automatiquement les week-ends et jours fériés fédéraux US.
     """
     if len(past_dates) < 2:
         return None
@@ -112,10 +162,10 @@ def _infer_next_date(past_dates: list[str]) -> str | None:
     deltas = [(parsed[i] - parsed[i + 1]).days for i in range(len(parsed) - 1)]
     median_delta = sorted(deltas)[len(deltas) // 2]
     next_date = parsed[0] + timedelta(days=median_delta)
-    # Les publications économiques gouvernementales ne sont jamais publiées le week-end
-    if next_date.weekday() == 5:  # Samedi -> Lundi
-        next_date += timedelta(days=2)
-    elif next_date.weekday() == 6:  # Dimanche -> Lundi
+
+    # Les publications gouvernementales ne sont jamais publiées le week-end
+    # ni les jours fériés fédéraux
+    while next_date.weekday() >= 5 or _is_us_federal_holiday(next_date):
         next_date += timedelta(days=1)
     return next_date.isoformat()
 
