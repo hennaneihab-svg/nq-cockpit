@@ -96,7 +96,11 @@ events:
   wait_after_minutes: 3
 ```
 
-### 7. Contrôles qualité
+### 7. Contrôles qualité & Commit
 * `pytest -v` : **147 passed** (13.02s)
 * `ruff check` : **0 error**
-* `git status` : propre après commit.
+* `Commit` : `36c43db` (`P06: Event Playbook & Intelligence Fed avec validation anti-hallucination et statuts explicites`)
+* `git status` : `working tree clean`
+
+### 8. Confirmation protocoles « chaud » vs « froid »
+Les protocoles de gestion du risque sont identiques par conception (réduction de taille si volatilité > expected move dans les deux sens de surprise, symétrie stricte sans biais directionnel), tandis que la différenciation réside dans ce qui est surveillé (Call Wall et borne haute vs Put Support et borne basse).
