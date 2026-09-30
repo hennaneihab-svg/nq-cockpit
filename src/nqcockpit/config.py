@@ -491,8 +491,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     margin = int(raw_data.get("delay_margin_minutes", 10))
     parity_tol = float(raw_data.get("parity_basis_tolerance_points", 50.0))
 
+    db_path_env = os.getenv("NQ_DATA_DB_PATH")
+    db_path_resolved = (
+        db_path_env if db_path_env else str(raw_data.get("db_path", "data/nqcockpit.db"))
+    )
+
     data_cfg = DataConfig(
-        db_path=str(raw_data.get("db_path", "data/nqcockpit.db")),
+        db_path=db_path_resolved,
         cache_dir=str(raw_data.get("cache_dir", "data/cache")),
         intraday_intervals=list(raw_data.get("intraday_intervals", ["1m", "5m"])),
         basis_max_drift_seconds=float(raw_data.get("basis_max_drift_seconds", 60.0)),

@@ -28,9 +28,11 @@ from nqcockpit.journal.models import (
 )
 from nqcockpit.journal.store import (
     delete_trade,
+    get_trade,
     init_journal_db,
     load_trades,
     save_trade,
+    update_trade_screenshot,
 )
 
 __all__ = [
@@ -41,6 +43,7 @@ __all__ = [
     "GammaRegime", "VolRegime",
     # store
     "init_journal_db", "save_trade", "load_trades", "delete_trade",
+    "get_trade", "update_trade_screenshot",
     # engine
     "finalize_trade", "log_trade", "detect_violations", "detect_tilt_alerts",
     "compute_daily_stats", "compute_performance_stats",

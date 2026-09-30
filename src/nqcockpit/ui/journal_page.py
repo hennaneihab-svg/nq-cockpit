@@ -231,6 +231,32 @@ elif page == "Journal du jour":
 
         st.dataframe(rows, use_container_width=True)
 
+        # Captures d'écran associées
+        screenshot_trades = [
+            t for t in trades if t.screenshot_path and t.screenshot_path.strip()
+        ]
+        if screenshot_trades:
+            st.subheader("🖼️ Captures d'écran associées")
+            for t in screenshot_trades:
+                p_img = Path(t.screenshot_path)
+                st.write(
+                    f"**Trade `{t.trade_id[:8]}`** "
+                    f"({t.direction.value} @ {t.entry_price:.2f}) :"
+                )
+                if p_img.is_file():
+                    st.image(
+                        str(p_img),
+                        caption=(
+                            f"Capture Trade {t.trade_id[:8]} — "
+                            f"{t.setup_tag or 'Setup'}"
+                        ),
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Image introuvable : `{t.screenshot_path}` "
+                        "(fichier déplacé, renommé ou supprimé sur le disque)."
+                    )
+
         # Violations
         if stats.violations:
             st.subheader(f"⚠️ Violations ({len(stats.violations)})")

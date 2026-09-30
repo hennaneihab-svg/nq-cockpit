@@ -180,6 +180,35 @@ def delete_trade(conn: sqlite3.Connection, trade_id: str) -> int:
     return cur.rowcount
 
 
+def get_trade(conn: sqlite3.Connection, trade_id: str) -> Optional[TradeEntry]:
+    """Récupère un trade par son identifiant unique."""
+    row = conn.execute(
+        "SELECT * FROM trades WHERE trade_id=?", (trade_id,)
+    ).fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in conn.execute("SELECT * FROM trades LIMIT 0").description or []]
+    if not cols:
+        cols = _column_names()
+    d = dict(zip(cols, row))
+    return _row_to_trade(d)
+
+
+def update_trade_screenshot(
+    conn: sqlite3.Connection, trade_id: str, screenshot_path: str
+) -> bool:
+    """Met à jour le chemin de capture d'écran d'un trade.
+
+    Retourne True si un trade a été mis à jour, False sinon.
+    """
+    cur = conn.execute(
+        "UPDATE trades SET screenshot_path=? WHERE trade_id=?",
+        (screenshot_path, trade_id),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
 # ---------------------------------------------------------------------------
 # Helpers internes
 # ---------------------------------------------------------------------------

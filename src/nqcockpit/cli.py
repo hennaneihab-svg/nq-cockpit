@@ -266,6 +266,12 @@ def create_parser() -> argparse.ArgumentParser:
     j_import.add_argument(
         "csv_path", type=str, help="Chemin du fichier CSV à importer"
     )
+    j_attach = j_sub.add_parser(
+        "attach-screenshot",
+        help="Attache une capture d'écran locale à un trade existant",
+    )
+    j_attach.add_argument("trade_id", type=str, help="ID unique du trade")
+    j_attach.add_argument("image_path", type=str, help="Chemin du fichier image")
 
     # 13. discipline (P09 réel)
     parser_disc = subparsers.add_parser(
@@ -2040,9 +2046,35 @@ def _handle_journal(args: Any) -> int:
         print(sep + "\n")
         return 0 if summary.is_success else 1
 
+    if action == "attach-screenshot":
+        from pathlib import Path
+
+        from nqcockpit.journal.store import get_trade, update_trade_screenshot
+
+        trade_id = getattr(args, "trade_id", "")
+        img_path = getattr(args, "image_path", "")
+
+        p = Path(img_path)
+        if not p.is_file():
+            print(f"[ERREUR] Le fichier image est introuvable : {img_path}")
+            return 1
+
+        trade = get_trade(conn, trade_id)
+        if not trade:
+            print(f"[ERREUR] Aucun trade trouvé avec l'identifiant : {trade_id}")
+            return 1
+
+        resolved_path = str(p.resolve())
+        updated = update_trade_screenshot(conn, trade_id, resolved_path)
+        if updated:
+            print(f"[SUCCÈS] Capture attachée au trade {trade_id} : {resolved_path}")
+            return 0
+        print(f"[ERREUR] Échec de mise à jour du trade {trade_id}")
+        return 1
+
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
-        "Essayez : stats, daily, coaching, ui, import-csv."
+        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot."
     )
     return 1
 

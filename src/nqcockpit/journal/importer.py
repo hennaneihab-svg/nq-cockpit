@@ -59,6 +59,7 @@ OPTIONAL_COLUMNS: list[str] = [
     "event_risk_label",
     "gamma_regime",
     "vol_regime",
+    "screenshot_path",
 ]
 
 
@@ -321,6 +322,14 @@ def import_trades_from_csv(
         except ValueError:
             risk_pct = 0.0
 
+        # Normalisation de screenshot_path : toujours résolu en absolu avant stockage
+        # (cohérent avec attach-screenshot dans cli.py). Si un chemin relatif est
+        # fourni dans le CSV, il est résolu par rapport au répertoire de travail (CWD).
+        raw_screenshot = get_opt("screenshot_path", "").strip()
+        resolved_screenshot = (
+            str(Path(raw_screenshot).resolve()) if raw_screenshot else ""
+        )
+
         trade = TradeEntry(
             trade_id=str(uuid.uuid4()),
             recorded_at=datetime.now(timezone.utc),
@@ -350,6 +359,7 @@ def import_trades_from_csv(
             vol_regime=VolRegime(get_opt("vol_regime", "inconnu"))
             if get_opt("vol_regime", "inconnu") in [v.value for v in VolRegime]
             else VolRegime.UNKNOWN,
+            screenshot_path=resolved_screenshot,
         )
 
         # Calcul automatique du R et de l'outcome via le moteur
