@@ -116,6 +116,58 @@ def create_parser() -> argparse.ArgumentParser:
         help="Horizon en jours (défaut : config.events.horizon_days)",
     )
 
+    # 8. playbook
+    parser_playbook = subparsers.add_parser(
+        "playbook",
+        help="Fiches d'anticipation événements, diff FOMC, fiche minutes (P06)",
+    )
+    pb_subparsers = parser_playbook.add_subparsers(
+        title="actions playbook",
+        dest="playbook_action",
+        help="Action spécifique",
+    )
+
+    # playbook card
+    pb_card = pb_subparsers.add_parser(
+        "card",
+        help="Génère la fiche d'anticipation pour le prochain événement Tier 1",
+    )
+    pb_card.add_argument(
+        "--event",
+        type=str,
+        default=None,
+        help="Nom de l'événement (ex: 'NFP', 'FOMC Minutes'). Défaut : prochain Tier 1.",
+    )
+    pb_card.add_argument(
+        "--json",
+        action="store_true",
+        help="Sortie en JSON (défaut : texte console)",
+    )
+
+    # playbook fed-diff
+    pb_diff = pb_subparsers.add_parser(
+        "fed-diff",
+        help="Diff mot à mot entre les deux derniers communiqués FOMC + lecture de ton",
+    )
+    pb_diff.add_argument(
+        "--prev-url",
+        type=str,
+        default="",
+        help="URL du communiqué précédent (défaut : auto-détecté)",
+    )
+    pb_diff.add_argument(
+        "--curr-url",
+        type=str,
+        default="",
+        help="URL du communiqué courant (défaut : auto-détecté)",
+    )
+
+    # playbook minutes-watch
+    pb_subparsers.add_parser(
+        "minutes-watch",
+        help="Fiche 'à surveiller' avant la publication des minutes FOMC",
+    )
+
     return parser
 
 
@@ -905,8 +957,288 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = fetch_event_radar(config=cfg, horizon_days=args.horizon)
         print("\n" + render_console(report) + "\n")
         return 0
+    elif args.subcommand == "playbook":
+        return _handle_playbook(args)
 
     return 0
+
+
+def _render_card_console(card: object) -> str:
+    """Affichage console d'une EventPlaybookCard."""
+
+    from nqcockpit.playbook.card import card_to_dict
+
+    d = card_to_dict(card)  # type: ignore[arg-type]
+    lines: list[str] = []
+    sep = "=" * 70
+
+    lines.append(sep)
+    lines.append(f"  FICHE PLAYBOOK — {d['event_name']} (Tier {d['tier']})")
+    lines.append(sep)
+    lines.append(f"  Génération         : {d['generation_trigger']}")
+    lines.append(f"  Généré le          : {d['generated_at_utc']}")
+    lines.append(f"  Publication        : {d['scheduled_et']} | {d['scheduled_algiers']}")
+    lines.append(f"  Compte à rebours   : {d['countdown']}")
+    lines.append(f"  Origine de la date : {d['date_origin']}")
+    lines.append(f"  Provenance heure   : {d['time_provenance']}")
+    lines.append(f"  Statut             : {d['status']}")
+    if d.get("status_detail"):
+        lines.append(f"  Détail             : {d['status_detail']}")
+
+    lines.append("-" * 70)
+    lines.append("  CONSENSUS & PRÉCÉDENT")
+    consensus_src = d["consensus_source"] or "N/A"
+    cons_str = d["consensus"] if d["consensus"] is not None else f"None [{d['consensus_status']}]"
+    lines.append(f"  Consensus : {cons_str} (source: {consensus_src})")
+    prev_str = d["previous"] if d["previous"] is not None else f"None [{d['previous_status']}]"
+    lines.append(f"  Précédent : {prev_str}")
+
+    lines.append("-" * 70)
+    lines.append("  POSITIONNEMENT")
+    pos = d.get("positioning", {})
+    lines.append(f"  Statut             : {pos.get('status', 'N/A')}")
+    if pos.get("status_detail"):
+        lines.append(f"  Détail             : {pos.get('status_detail')}")
+    lines.append(f"  Spot NQ            : {pos.get('spot_nq', 'N/A')}")
+    lines.append(f"  Expected move      : {pos.get('expected_move_pts', 'N/A')} pts")
+    lines.append(f"  Régime gamma       : {pos.get('regime_gamma', 'N/A')}")
+    lines.append(f"  Call wall (dist)   : +{pos.get('dist_call_wall_pts', 'N/A')} pts")
+    lines.append(f"  Put support (dist) : -{pos.get('dist_put_wall_pts', 'N/A')} pts")
+    lines.append(f"  VXN                : {pos.get('vxn_spot', 'N/A')}")
+    lines.append(f"  VIX                : {pos.get('vix_spot', 'N/A')}")
+    lines.append(f"  Âge données        : {pos.get('data_age_minutes', 'N/A')} min")
+
+    lines.append("-" * 70)
+    lines.append("  HISTORIQUE DE RÉACTION NQ")
+    for h in ["+1m", "+5m", "+15m", "+60m"]:
+        rs = d.get("reaction_stats", {}).get(h, {})
+        if rs.get("is_sufficient"):
+            lines.append(
+                f"  {h:5s} n={rs['n']:3d} | "
+                f"médiane={rs['median_pts']:+.1f} pts | "
+                f"Q25={rs['q25_pts']:+.1f} | Q75={rs['q75_pts']:+.1f} | "
+                f"retournements={rs.get('reversal_pct', 'N/A')}%"
+            )
+        else:
+            note = rs.get("note", "échantillon insuffisant")
+            lines.append(f"  {h:5s} — {note} (n={rs.get('n', 0)})")
+
+    lines.append("-" * 70)
+    lines.append("  SCÉNARIOS CONDITIONNELS (ce qu'on observe — aucun biais directionnel)")
+    for sc in d.get("scenarios", []):
+        seuil = f" (seuil: {sc['surprise_threshold']})" if sc.get("surprise_threshold") else ""
+        lines.append(f"\n  [{sc['label'].upper()}{seuil}]")
+        lines.append(f"  {sc['description']}")
+        for lvl in sc.get("levels_to_watch", []):
+            lines.append(f"    • {lvl}")
+        lines.append(f"  Protocole : {sc.get('protocol', '')}")
+
+    lines.append("-" * 70)
+    lines.append("  PROTOCOLE D'ACTION (config)")
+    lines.append(f"  Stand aside avant  : {d['stand_aside_before_minutes']} min")
+    lines.append(f"  Attendre après     : {d['wait_after_minutes']} min")
+    lines.append(f"  Buffer post-event  : {d['post_event_buffer_minutes']} min")
+    lines.append(sep)
+    return "\n".join(lines)
+
+
+def _handle_playbook(args: object) -> int:
+    """Gestionnaire des sous-commandes 'playbook'."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    from nqcockpit.config import load_config
+    from nqcockpit.data.db import apply_migrations, get_bars, get_db_connection
+    from nqcockpit.events.radar import fetch_event_radar
+
+    cfg = load_config(getattr(args, "config", None))
+    playbook_action = getattr(args, "playbook_action", None)
+
+    if playbook_action == "card":
+        from nqcockpit.playbook.card import card_to_dict, generate_card
+
+        now_utc = datetime.now(timezone.utc)
+        event_filter = getattr(args, "event", None)
+        as_json = getattr(args, "json", False)
+
+        # Récupérer le radar d'événements
+        report = fetch_event_radar(config=cfg, horizon_days=cfg.events.horizon_days)
+        events = report.events_14d
+
+        # Filtrer sur le nom demandé ou prendre le prochain Tier 1
+        target = None
+        tier1_names_lower = [t.lower() for t in cfg.events.tier1]
+        for ev in sorted(events, key=lambda e: e.scheduled_utc):
+            if ev.scheduled_utc <= now_utc:
+                continue
+            if event_filter:
+                if event_filter.lower() in ev.name.lower():
+                    target = ev
+                    break
+            else:
+                if ev.name.lower() in tier1_names_lower:
+                    target = ev
+                    break
+
+        if target is None:
+            print("[playbook] Aucun événement Tier 1 trouvé dans l'horizon.", file=sys.stderr)
+            return 1
+
+        # Connexion DB
+        conn = get_db_connection(cfg.data.db_path)
+        apply_migrations(conn)
+        bars_nq = get_bars(conn, "NQ=F", "1m", limit=500)
+
+        source_health_map = {
+            sh.source: (sh.error_msg or sh.status.value)
+            for sh in report.source_health
+        }
+
+        card = generate_card(
+            event=target,
+            levels_snapshot=None,  # pas de snapshot live disponible en CLI stateless
+            bars_nq_1m=bars_nq,
+            db_conn=conn,
+            min_event_samples=cfg.validation.min_event_samples,
+            stand_aside_before_minutes=cfg.events.stand_aside_before_minutes,
+            wait_after_minutes=cfg.events.wait_after_minutes,
+            post_event_buffer_minutes=cfg.events.post_event_buffer_minutes,
+            source_health_map=source_health_map,
+            now_utc=now_utc,
+        )
+        conn.close()
+
+        if as_json:
+            print(_json.dumps(card_to_dict(card), ensure_ascii=False, indent=2))
+        else:
+            print(_render_card_console(card))
+        return 0
+
+    elif playbook_action == "fed-diff":
+        from zoneinfo import ZoneInfo
+
+        from nqcockpit.playbook.fed_intelligence import diff_statements
+
+        ET_TZ = ZoneInfo("America/New_York")
+        ALG_TZ = ZoneInfo("Africa/Algiers")
+
+        # URLs des deux derniers communiqués FOMC (federalreserve.gov)
+        # Source statique 2026 — vérifiée manuellement
+        FOMC_STATEMENTS_2026 = [
+            (
+                "2026-07-29",
+                "https://www.federalreserve.gov/newsevents/pressreleases/"
+                "monetary20260729a.htm",
+            ),
+            (
+                "2026-09-16",
+                "https://www.federalreserve.gov/newsevents/pressreleases/"
+                "monetary20260916a.htm",
+            ),
+        ]
+
+        prev_url = getattr(args, "prev_url", "") or FOMC_STATEMENTS_2026[-2][1]
+        curr_url = getattr(args, "curr_url", "") or FOMC_STATEMENTS_2026[-1][1]
+
+        print(f"[playbook fed-diff] Précédent : {prev_url}")
+        print(f"[playbook fed-diff] Courant   : {curr_url}")
+        print("[playbook fed-diff] Téléchargement et diff en cours...")
+
+        fomc_diff = diff_statements(prev_url=prev_url, curr_url=curr_url)
+        now_utc = datetime.now(timezone.utc)
+        now_et = now_utc.astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M ET")
+        now_alg = now_utc.astimezone(ALG_TZ).strftime("%Y-%m-%d %H:%M Alger")
+
+        print("\n" + "=" * 70)
+        print("  DIFF FOMC — LECTURE DE TON")
+        print(f"  Horodatage : {now_et} | {now_alg}")
+        print(f"  Statut     : {fomc_diff.status}")
+        if fomc_diff.status_detail:
+            print(f"  Détail     : {fomc_diff.status_detail}")
+        print(f"  Ton        : {fomc_diff.tone_label or 'indéterminé'}")
+        print(f"  NOTE       : {fomc_diff.tone_note}")
+        print("-" * 70)
+        print(f"  Phrases ajoutées ({len(fomc_diff.added_sentences)}) :")
+        for s in fomc_diff.added_sentences:
+            print(f"    [+] {s}")
+        print(f"  Phrases retirées ({len(fomc_diff.removed_sentences)}) :")
+        for s in fomc_diff.removed_sentences:
+            print(f"    [-] {s}")
+        if fomc_diff.tone_extracts:
+            print("-" * 70)
+            print("  Extraits clés :")
+            for e in fomc_diff.tone_extracts:
+                print(f"    {e}")
+        print("=" * 70)
+        return 0
+
+    elif playbook_action == "minutes-watch":
+        from zoneinfo import ZoneInfo
+
+        from nqcockpit.events.radar import fetch_event_radar
+        from nqcockpit.playbook.fed_intelligence import generate_minutes_watch
+
+        ET_TZ = ZoneInfo("America/New_York")
+        ALG_TZ = ZoneInfo("Africa/Algiers")
+
+        now_utc = datetime.now(timezone.utc)
+        report = fetch_event_radar(config=cfg, horizon_days=cfg.events.horizon_days)
+
+        minutes_event = None
+        for ev in sorted(report.events_14d, key=lambda e: e.scheduled_utc):
+            if ev.name == "FOMC Minutes" and ev.scheduled_utc > now_utc:
+                minutes_event = ev
+                break
+
+        if minutes_event is None:
+            print("[playbook minutes-watch] Aucunes minutes FOMC dans l'horizon.", file=sys.stderr)
+            return 1
+
+        prev_url = (
+            "https://www.federalreserve.gov/newsevents/pressreleases/"
+            "monetary20260916a.htm"
+        )
+        watch = generate_minutes_watch(
+            fomc_minutes_event=minutes_event,
+            prev_statement_url=prev_url,
+        )
+
+        sched_et = minutes_event.scheduled_utc.astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M ET")
+        sched_alg = minutes_event.scheduled_utc.astimezone(ALG_TZ).strftime("%Y-%m-%d %H:%M Alger")
+        now_et = now_utc.astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M ET")
+        now_alg = now_utc.astimezone(ALG_TZ).strftime("%Y-%m-%d %H:%M Alger")
+
+        print("\n" + "=" * 70)
+        print("  FICHE 'À SURVEILLER' — MINUTES FOMC")
+        print(f"  Horodatage     : {now_et} | {now_alg}")
+        print(f"  Publication    : {sched_et} | {sched_alg}")
+        print(f"  Statut         : {watch.status}")
+        if watch.status_detail:
+            print(f"  Détail         : {watch.status_detail}")
+        print("-" * 70)
+        dgs2_disp = f"{watch.dgs2_rate:.2f}%" if watch.dgs2_rate is not None else "N/A"
+        print(
+            f"  DGS2 (proxy taux) : {dgs2_disp} "
+            f"(date: {watch.dgs2_date or 'N/A'}) [{watch.dgs2_status}]"
+        )
+        print("-" * 70)
+        print("  Thèmes du dernier communiqué :")
+        if watch.themes:
+            for t in watch.themes:
+                print(f"    • {t[:150]}")
+        else:
+            print("    Aucun thème extrait (source DÉGRADÉE ou URL manquante)")
+        print("-" * 70)
+        print("  NOTE : aide de lecture, pas un signal")
+        print("=" * 70)
+        return 0
+
+    else:
+        parser = create_parser()
+        parser.parse_args(["playbook", "--help"])
+        return 0
+
+
 
 
 if __name__ == "__main__":

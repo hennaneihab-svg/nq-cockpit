@@ -54,11 +54,16 @@ def mem_db():
 
 def test_migrations_and_schema_version(mem_db):
     """Vérifie que la table schema_version et les tables applicatives sont créées."""
-    cur = mem_db.execute("SELECT version, name FROM schema_version")
+    from nqcockpit.data.db import MIGRATIONS
+
+    cur = mem_db.execute("SELECT version, name FROM schema_version ORDER BY version")
     rows = cur.fetchall()
-    assert len(rows) == 1
+    assert len(rows) == len(MIGRATIONS)
     assert rows[0]["version"] == 1
     assert rows[0]["name"] == "initial_schema"
+    if len(rows) > 1:
+        assert rows[1]["version"] == 2
+        assert rows[1]["name"] == "p06_event_reactions_columns"
 
     # Vérification de l'idempotence des migrations
     count = apply_migrations(mem_db)

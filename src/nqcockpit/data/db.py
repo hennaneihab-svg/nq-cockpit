@@ -160,6 +160,18 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             """,
         ],
     ),
+    (
+        2,
+        "p06_event_reactions_columns",
+        [
+            # Ajout des colonnes pour le suivi post-événement P06
+            # ALTER TABLE ne supporte pas IF NOT EXISTS sous SQLite < 3.37 :
+            # on ignore les erreurs si la colonne existe déjà.
+            "ALTER TABLE event_reactions ADD COLUMN post_1m_price REAL;",
+            "ALTER TABLE event_reactions ADD COLUMN surprise REAL;",
+            "ALTER TABLE event_reactions ADD COLUMN range_vs_expected_move REAL;",
+        ],
+    ),
 ]
 
 
@@ -204,7 +216,15 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
         log.info("Application de la migration %d (%s)...", version, name)
         with conn:
             for stmt in statements:
-                conn.execute(stmt)
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError as exc:
+                    # ALTER TABLE ADD COLUMN échoue si la colonne existe déjà
+                    # (SQLite < 3.37 n'a pas IF NOT EXISTS pour ADD COLUMN)
+                    if "duplicate column name" in str(exc).lower():
+                        log.debug("Colonne déjà présente (ignoré): %s", exc)
+                    else:
+                        raise
             now_iso = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
