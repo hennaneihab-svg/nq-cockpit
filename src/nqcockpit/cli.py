@@ -4,7 +4,21 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Sequence
+from typing import Any, Sequence
+
+
+def _get_threshold_provenance(param_path: str, fallback_val: Any) -> tuple[Any, str]:
+    """Résout la valeur et la provenance d'un seuil (config vs repli)."""
+    try:
+        from nqcockpit.config import load_config
+
+        cfg = load_config()
+        obj: Any = cfg
+        for part in param_path.split("."):
+            obj = getattr(obj, part)
+        return obj, f"config: {param_path}"
+    except Exception:
+        return fallback_val, f"fallback: {fallback_val}"
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -244,6 +258,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         if snap.cboe_age_stats:
             excl_zero = snap.cboe_age_stats.get("excluded_zero_quotes", 0)
             n_active = snap.cboe_age_stats.get("count", 0)
+            c_med = snap.cboe_age_stats.get("median_delay_minutes")
+            c_min = snap.cboe_age_stats.get("min_delay_minutes")
+            c_max = snap.cboe_age_stats.get("max_delay_minutes")
+
+            ch_med = snap.cboe_age_stats.get("chain_median_delay_minutes")
+            ch_min = snap.cboe_age_stats.get("chain_min_delay_minutes")
+            ch_max = snap.cboe_age_stats.get("chain_max_delay_minutes")
+            ch_cnt = snap.cboe_age_stats.get("chain_count", 0)
+
+            cboe_med_tol = snap.cboe_age_stats.get("tolerance_median_minutes")
+            cboe_med_src = snap.cboe_age_stats.get("tolerance_source")
+            if cboe_med_tol is None or cboe_med_src is None:
+                cboe_med_tol, cboe_med_src = _get_threshold_provenance(
+                    "levels.cboe_max_median_delay_minutes", 30.0
+                )
+
+            if ch_med is not None and ch_min is not None and ch_max is not None:
+                print(
+                    f"  Retard chaîne CBOE   : min {ch_min:.1f} min | "
+                    f"médiane {ch_med:.1f} min | max {ch_max:.1f} min "
+                    f"(N={ch_cnt} contrats)"
+                )
+            if c_med is not None and c_min is not None and c_max is not None:
+                med_flag = " [OK]" if c_med <= cboe_med_tol else " [DÉGRADÉ]"
+                print(
+                    f"  Retard options ±3%   : min {c_min:.1f} min | "
+                    f"médiane {c_med:.1f} min | max {c_max:.1f} min "
+                    f"(N={n_active} cotés)"
+                )
+                print(
+                    f"  Tolérance médiane    : {cboe_med_tol:.1f} min "
+                    f"[source: {cboe_med_src}]{med_flag}"
+                )
             print(f"  Options actives (±3%): {n_active} contrats (bid>0, ask>0)")
             print(f"  Options exclues      : {excl_zero} contrats sans cotation (bid=0 ou ask=0)")
         print(f"  Statut source CBOE   : {snap.status.value}")
@@ -266,9 +313,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             if snap.spot_nq_age_minutes is not None
             else "inconnu"
         )
+        spot_max_age_val, spot_max_age_src = _get_threshold_provenance(
+            "levels.spot_max_age_minutes", 20.0
+        )
         print(
             f"  Spot NQ (observé)    : {snap.spot_nq:,.2f} pts "
             f"(âge réel : {nq_age_s}){nq_stale_flag}"
+        )
+        print(
+            f"    Tolérance âge spot : {spot_max_age_val:.1f} min [source: {spot_max_age_src}]"
         )
         if snap.spot_nq_time_utc:
             nq_bar_et = snap.spot_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
@@ -311,9 +364,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if snap.basis_delta_t_minutes is not None:
                 align_s = "OK" if snap.basis_is_aligned else "NON ALIGNÉE"
+                target_tol_val, target_tol_src = _get_threshold_provenance(
+                    "levels.target_tolerance_minutes", 15.0
+                )
                 print(
                     f"       Delta-t NQ/NDX       : {snap.basis_delta_t_minutes:.2f} min "
                     f"(tol. {snap.basis_tolerance_minutes:.1f} min) [{align_s}]"
+                )
+                print(
+                    f"       Tolérance cible 16h  : "
+                    f"{target_tol_val:.1f} min [source: {target_tol_src}]"
                 )
             if snap.basis_delay_compensation_note:
                 print(f"       Origine données      : {snap.basis_delay_compensation_note}")
@@ -534,10 +594,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print("  Méthode Straddle     : N/A (bid/ask ATM manquants)")
             if em.discrepancy_pct is not None:
-                coh_flag = "OK" if em.is_coherent else "DÉGRADÉ (>25%)"
+                disc_tol_val, disc_tol_src = _get_threshold_provenance(
+                    "levels.straddle_max_discrepancy_pct", 25.0
+                )
+                coh_flag = "OK" if em.is_coherent else f"DÉGRADÉ (>{disc_tol_val:.0f}%)"
                 print(
                     f"  Écart IV vs Straddle : {em.discrepancy_pct:.1f}% [{coh_flag}] "
-                    "(comparaison à unités égales 0,8σ)"
+                    f"(tolérance {disc_tol_val:.1f}% [source: {disc_tol_src}], "
+                    "comparaison à unités égales 0,8σ)"
                 )
             if em.status_explanation:
                 print(f"  [!] {em.status_explanation}")
@@ -566,6 +630,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"      Expirations C/P                 : Call={sd.call_leg.expiry}, "
                     f"Put={sd.put_leg.expiry} [{exp_match_s}]"
                 )
+                spr_tol_val, spr_tol_src = _get_threshold_provenance(
+                    "levels.straddle_max_spread_pct", 0.20
+                )
                 c_spr_warn = " [LARGE - DÉGRADÉ]" if sd.call_leg.is_spread_wide else " [OK]"
                 print(
                     f"      Jambe Call ({sd.call_leg.root:4s})             : "
@@ -575,13 +642,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 print(
                     f"        Largeur relative Call         : "
-                    f"{sd.call_leg.spread_rel_pct:.1f}%{c_spr_warn}"
+                    f"{sd.call_leg.spread_rel_pct:.1f}% "
+                    f"(tol. {spr_tol_val * 100:.1f}% [source: {spr_tol_src}]){c_spr_warn}"
                 )
                 print(
                     f"        Horodatage cotation Call      : "
                     f"{sd.call_leg.quote_time_et or 'N/A'} | "
                     f"{sd.call_leg.quote_time_algiers or 'N/A'}"
                 )
+                has_c_time = (
+                    sd.call_leg.age_minutes is not None
+                    or sd.call_leg.delta_t_vs_spot_nq_minutes is not None
+                )
+                if has_c_time:
+                    c_age = sd.call_leg.age_minutes
+                    c_age_s = f"{c_age:.1f} min" if c_age is not None else "N/A"
+                    c_dt_val = sd.call_leg.delta_t_vs_spot_nq_minutes
+                    c_dt_s = f"{c_dt_val:+.2f} min" if c_dt_val is not None else "N/A"
+                    print(
+                        f"        Âge patte Call / vs spot NQ   : "
+                        f"âge={c_age_s} | delta-t vs spot NQ={c_dt_s}"
+                    )
                 p_spr_warn = " [LARGE - DÉGRADÉ]" if sd.put_leg.is_spread_wide else " [OK]"
                 print(
                     f"      Jambe Put ({sd.put_leg.root:4s})              : "
@@ -591,13 +672,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 print(
                     f"        Largeur relative Put          : "
-                    f"{sd.put_leg.spread_rel_pct:.1f}%{p_spr_warn}"
+                    f"{sd.put_leg.spread_rel_pct:.1f}% "
+                    f"(tol. {spr_tol_val * 100:.1f}% [source: {spr_tol_src}]){p_spr_warn}"
                 )
                 print(
                     f"        Horodatage cotation Put       : "
                     f"{sd.put_leg.quote_time_et or 'N/A'} | "
                     f"{sd.put_leg.quote_time_algiers or 'N/A'}"
                 )
+                has_p_time = (
+                    sd.put_leg.age_minutes is not None
+                    or sd.put_leg.delta_t_vs_spot_nq_minutes is not None
+                )
+                if has_p_time:
+                    p_age = sd.put_leg.age_minutes
+                    p_age_s = f"{p_age:.1f} min" if p_age is not None else "N/A"
+                    p_dt_val = sd.put_leg.delta_t_vs_spot_nq_minutes
+                    p_dt_s = f"{p_dt_val:+.2f} min" if p_dt_val is not None else "N/A"
+                    print(
+                        f"        Âge patte Put / vs spot NQ    : "
+                        f"âge={p_age_s} | delta-t vs spot NQ={p_dt_s}"
+                    )
                 print(
                     f"      Temps restant à expiration (T)  : "
                     f"{sd.time_to_expiry_hours:.2f} h "

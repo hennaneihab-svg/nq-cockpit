@@ -64,8 +64,11 @@ class LevelsConfig:
     wall_proximity_points: float = 40.0
     stale_data_minutes: int = 30
     spot_max_age_minutes: float = 20.0
+    cboe_max_median_delay_minutes: float = 30.0
     wall_window_pct: float = 0.03
     straddle_max_spread_pct: float = 0.20
+    target_tolerance_minutes: float = 15.0
+    straddle_max_discrepancy_pct: float = 25.0
 
 
 @dataclass(frozen=True)
@@ -321,22 +324,34 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     spot_max_age = raw_levels.get("spot_max_age_minutes", 20.0)
     wall_win_pct = raw_levels.get("wall_window_pct", 0.03)
     straddle_spread = raw_levels.get("straddle_max_spread_pct", 0.20)
+    cboe_median_delay = raw_levels.get("cboe_max_median_delay_minutes", 30.0)
+    target_tol = raw_levels.get("target_tolerance_minutes", 15.0)
+    straddle_disc = raw_levels.get("straddle_max_discrepancy_pct", 25.0)
     if not isinstance(wall_prox, (int, float)) or wall_prox <= 0:
         raise ConfigError("levels.wall_proximity_points must be a positive number.")
     if not isinstance(stale_min, int) or stale_min <= 0:
         raise ConfigError("levels.stale_data_minutes must be a positive integer.")
     if not isinstance(spot_max_age, (int, float)) or spot_max_age <= 0:
         raise ConfigError("levels.spot_max_age_minutes must be a positive number.")
+    if not isinstance(cboe_median_delay, (int, float)) or cboe_median_delay <= 0:
+        raise ConfigError("levels.cboe_max_median_delay_minutes must be a positive number.")
     if not isinstance(wall_win_pct, (int, float)) or wall_win_pct <= 0:
         raise ConfigError("levels.wall_window_pct must be a positive number.")
     if not isinstance(straddle_spread, (int, float)) or straddle_spread <= 0:
         raise ConfigError("levels.straddle_max_spread_pct must be a positive number.")
+    if not isinstance(target_tol, (int, float)) or target_tol <= 0:
+        raise ConfigError("levels.target_tolerance_minutes must be a positive number.")
+    if not isinstance(straddle_disc, (int, float)) or straddle_disc <= 0:
+        raise ConfigError("levels.straddle_max_discrepancy_pct must be a positive number.")
     levels = LevelsConfig(
         wall_proximity_points=float(wall_prox),
         stale_data_minutes=stale_min,
         spot_max_age_minutes=float(spot_max_age),
+        cboe_max_median_delay_minutes=float(cboe_median_delay),
         wall_window_pct=float(wall_win_pct),
         straddle_max_spread_pct=float(straddle_spread),
+        target_tolerance_minutes=float(target_tol),
+        straddle_max_discrepancy_pct=float(straddle_disc),
     )
 
     # 8. Validation

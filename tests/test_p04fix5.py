@@ -138,7 +138,10 @@ def test_cboe_zero_quote_exclusion_and_stats():
 
 
 def test_cboe_chain_internal_timestamp_determines_status():
-    """Vérifie que le statut CBOE reflète l'horodatage interne de la chaîne."""
+    """Vérifie que le statut CBOE reflète l'horodatage interne de la chaîne.
+    P04-fix6c : si le retard médian des cotations actives dépasse la tolérance
+    pendant la séance régulière, le statut est DÉGRADÉ même si la chaîne est fraîche.
+    """
     fetched_at = datetime(2026, 9, 29, 14, 0, tzinfo=timezone.utc)  # En séance US (10:00 ET)
 
     raw_payload = {
@@ -160,12 +163,35 @@ def test_cboe_chain_internal_timestamp_determines_status():
     snap = parse_cboe_payload(raw_payload, fetched_at)
 
     # L'âge de la chaîne est basé sur raw['timestamp'] (2 min)
-    # et non sur le trade de l'option (hier)
     assert snap.age_minutes == 2.0
-    assert snap.status == DataStatus.OK
     assert snap.chain_internal_timestamp_utc == datetime(
         2026, 9, 29, 13, 58, tzinfo=timezone.utc
     )
+    # P04-fix6c : pendant la séance, cotations avec trade d'hier (>30 min) → DÉGRADÉ
+    assert snap.status == DataStatus.DEGRADED
+    assert snap.age_stats.get("is_median_delay_exceeded") is True
+
+    # Sous-cas : option avec cotation fraîche → OK même pendant la séance
+    raw_payload_fresh = {
+        "timestamp": "2026-09-29 13:58:00",
+        "data": {
+            "current_price": 28000.0,
+            "options": [
+                {
+                    "option": "NDX260930C28000000",
+                    "strike": 28000.0,
+                    "bid": 10.0,
+                    "ask": 12.0,
+                    "last_trade_time": "2026-09-29 13:55:00",  # Trade frais (5 min)
+                }
+            ],
+        },
+    }
+    snap_fresh = parse_cboe_payload(raw_payload_fresh, fetched_at)
+    assert snap_fresh.age_minutes == 2.0
+    assert snap_fresh.status == DataStatus.OK
+    assert snap_fresh.age_stats.get("is_median_delay_exceeded") is False
+
 
 
 def test_cboe_fetch_force_reload():

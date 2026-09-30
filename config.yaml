@@ -44,8 +44,11 @@ levels:
   wall_proximity_points: 40   # seuil "coincé entre deux murs"
   stale_data_minutes: 30
   spot_max_age_minutes: 20.0  # seuil d'âge max pour le spot NQ pendant les heures de cotation CME
+  cboe_max_median_delay_minutes: 30.0 # seuil max de retard médian sur les options CBOE
   wall_window_pct: 0.03       # fenêtre de recherche des murs utiles autour du spot (±3 %)
   straddle_max_spread_pct: 0.20 # largeur relative (ask-bid)/mid max tolérée sur Call/Put ATM
+  target_tolerance_minutes: 15.0 # tolérance max d'écart à 16:00 ET pour la séance précédente (minutes)
+  straddle_max_discrepancy_pct: 25.0 # divergence max tolérée entre méthode IV et méthode Straddle (%)
 validation:
   min_sessions: 60
   min_event_samples: 12

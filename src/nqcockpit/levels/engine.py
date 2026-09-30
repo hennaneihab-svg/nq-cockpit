@@ -360,8 +360,8 @@ def calculate_expected_move(
         p_bid = float(p_row["bid"])
         p_ask = float(p_row["ask"])
 
-        c_last = float(c_row["last_trade_price"])
-        p_last = float(p_row["last_trade_price"])
+        c_last = float(c_row.get("last_trade_price", 0.0) or 0.0)
+        p_last = float(p_row.get("last_trade_price", 0.0) or 0.0)
         c_mid = (c_bid + c_ask) / 2.0 if (c_bid + c_ask) > 0 else c_last
         p_mid = (p_bid + p_ask) / 2.0 if (p_bid + p_ask) > 0 else p_last
 
@@ -392,6 +392,18 @@ def calculate_expected_move(
 
         c_time_et, c_time_alg = _format_quote_time(c_row.get("last_trade_time"))
         p_time_et, p_time_alg = _format_quote_time(p_row.get("last_trade_time"))
+        c_time_utc = _parse_quote_datetime_utc(c_row.get("last_trade_time"))
+        p_time_utc = _parse_quote_datetime_utc(p_row.get("last_trade_time"))
+        c_age = (
+            max(0.0, (ref_utc - c_time_utc).total_seconds() / 60.0)
+            if (ref_utc and c_time_utc)
+            else None
+        )
+        p_age = (
+            max(0.0, (ref_utc - p_time_utc).total_seconds() / 60.0)
+            if (ref_utc and p_time_utc)
+            else None
+        )
 
         c_leg = StraddleLegInfo(
             option_type="C",
@@ -407,6 +419,8 @@ def calculate_expected_move(
             quote_time_et=c_time_et,
             quote_time_algiers=c_time_alg,
             is_spread_wide=(c_spread_rel > max_spread_pct),
+            quote_time_utc=c_time_utc,
+            age_minutes=c_age,
         )
 
         p_leg = StraddleLegInfo(
@@ -423,6 +437,8 @@ def calculate_expected_move(
             quote_time_et=p_time_et,
             quote_time_algiers=p_time_alg,
             is_spread_wide=(p_spread_rel > max_spread_pct),
+            quote_time_utc=p_time_utc,
+            age_minutes=p_age,
         )
 
         roots_match = c_root == p_root
@@ -466,12 +482,12 @@ def calculate_expected_move(
                 if not c_k.empty:
                     cb = float(c_k.iloc[0]["bid"])
                     ca = float(c_k.iloc[0]["ask"])
-                    cl = float(c_k.iloc[0]["last_trade_price"])
+                    cl = float(c_k.iloc[0].get("last_trade_price", 0.0) or 0.0)
                     c_k_mid = (cb + ca) / 2.0 if (cb + ca) > 0 else cl
                 if not p_k.empty:
                     pb = float(p_k.iloc[0]["bid"])
                     pa = float(p_k.iloc[0]["ask"])
-                    pl = float(p_k.iloc[0]["last_trade_price"])
+                    pl = float(p_k.iloc[0].get("last_trade_price", 0.0) or 0.0)
                     p_k_mid = (pb + pa) / 2.0 if (pb + pa) > 0 else pl
                 neighbors.append(
                     StraddleStrikeNeighbor(
@@ -758,6 +774,8 @@ def enrich_expected_move_nq(
     spot_nq: float,
     spot_ndx: float,
     cboe_age_minutes: float | None,
+    spot_nq_time_utc: datetime | None = None,
+    now_utc: datetime | None = None,
 ) -> ExpectedMoveInfo:
     """Complète ExpectedMoveInfo avec les champs NQ et le contrôle de cohérence.
 
@@ -765,7 +783,30 @@ def enrich_expected_move_nq(
     - iv_move_nq : formule IV en points NQ
     - discrepancy_pct : |straddle - IV| / max(straddle, IV)
     - is_coherent : discrepancy < 25 %
+    - delta_t_vs_spot_nq : écart temporel des pattes par rapport au spot NQ
     """
+    if em.straddle_diagnostic is not None:
+        c_leg = em.straddle_diagnostic.call_leg
+        p_leg = em.straddle_diagnostic.put_leg
+        if spot_nq_time_utc is not None:
+            if c_leg.quote_time_utc is not None:
+                # Signe : négatif = option cotée AVANT le spot NQ (retard)
+                dt_c = (c_leg.quote_time_utc - spot_nq_time_utc).total_seconds() / 60.0
+                c_leg.delta_t_vs_spot_nq_minutes = dt_c
+                em.straddle_diagnostic.delta_t_call_vs_spot_nq_minutes = dt_c
+            if p_leg.quote_time_utc is not None:
+                dt_p = (p_leg.quote_time_utc - spot_nq_time_utc).total_seconds() / 60.0
+                p_leg.delta_t_vs_spot_nq_minutes = dt_p
+                em.straddle_diagnostic.delta_t_put_vs_spot_nq_minutes = dt_p
+        if now_utc is not None:
+            if c_leg.quote_time_utc is not None and c_leg.age_minutes is None:
+                c_leg.age_minutes = max(
+                    0.0, (now_utc - c_leg.quote_time_utc).total_seconds() / 60.0
+                )
+            if p_leg.quote_time_utc is not None and p_leg.age_minutes is None:
+                p_leg.age_minutes = max(
+                    0.0, (now_utc - p_leg.quote_time_utc).total_seconds() / 60.0
+                )
 
     # Bornes NQ via formule IV (déjà calculées : formula_move est en points NDX)
     iv_move_nq = em.formula_move  # NDX pts ≈ NQ pts (échelle similaire, base additive)
@@ -1325,6 +1366,8 @@ class LevelsEngine:
                 spot_nq=spot_nq,
                 spot_ndx=spot_ndx,
                 cboe_age_minutes=chain.age_minutes,
+                spot_nq_time_utc=spot_nq_time_utc,
+                now_utc=now_utc,
             )
             exp_str = em_info.expiry.isoformat() if em_info.expiry else "N/A"
             straddle_s = (

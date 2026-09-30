@@ -622,3 +622,160 @@ def test_p04fix6b_live_basis_anchored_on_spot_nq(tmp_path):
     assert snap.live_basis_nq_time_utc == t_spot_nq
     assert snap.live_basis_ndx_time_utc == t_ndx_match
 
+
+def test_p04fix6c_quotation_lag_and_straddle_timing_vs_spot(tmp_path):
+    """P04-fix6c : Retard réel CBOE (min/médiane/max), dépassement tolérance médiane (DÉGRADÉ),
+    âge des pattes du straddle et delta-t vs spot NQ, et traçabilité des seuils."""
+    from nqcockpit.cli import _get_threshold_provenance
+    from nqcockpit.data.cboe import extract_cboe_chain_age_stats, parse_cboe_payload
+
+    # 1. Vérification de la traçabilité des seuils (config vs fallback)
+    val_cfg, src_cfg = _get_threshold_provenance("levels.cboe_max_median_delay_minutes", 30.0)
+    assert val_cfg == 30.0
+    assert src_cfg == "config: levels.cboe_max_median_delay_minutes"
+
+    val_fb, src_fb = _get_threshold_provenance("levels.non_existent_threshold", 99.0)
+    assert val_fb == 99.0
+    assert src_fb == "fallback: 99.0"
+
+    # 2. Construction d'une chaîne CBOE fictive avec retards connus
+    now_utc = datetime(2026, 9, 30, 15, 0, tzinfo=timezone.utc)
+    t_10m = now_utc - timedelta(minutes=10)
+    t_20m = now_utc - timedelta(minutes=20)
+    t_40m = now_utc - timedelta(minutes=40)
+    t_50m = now_utc - timedelta(minutes=50)
+
+    rows = [
+        # Options dans la bande ±3% (spot = 20000)
+        {"option": "NDX260930C20000000", "bid": 60.0, "ask": 62.0,
+         "last_trade_time": t_10m.isoformat()},
+        {"option": "NDX260930P20000000", "bid": 58.0, "ask": 60.0,
+         "last_trade_time": t_20m.isoformat()},
+        {"option": "NDX260930C20100000", "bid": 30.0, "ask": 32.0,
+         "last_trade_time": t_40m.isoformat()},
+        # Option hors bande (ex: strike 18000)
+        {"option": "NDX260930P18000000", "bid": 5.0, "ask": 6.0,
+         "last_trade_time": t_50m.isoformat()},
+    ]
+    df = pd.DataFrame(rows)
+    df["strike"] = [20000.0, 20000.0, 20100.0, 18000.0]
+    df["type"] = ["C", "P", "C", "P"]
+    df["expiry"] = [date(2026, 9, 30)] * 4
+    df["last_trade_time"] = pd.to_datetime(df["last_trade_time"])
+
+    # 3. Calcul min, médiane, max — la fonction prend raw_options list[dict], spot, now_utc
+    raw_rows = [
+        {"option": "NDX260930C20000000", "bid": 60.0, "ask": 62.0,
+         "last_trade_time": t_10m.isoformat()},
+        {"option": "NDX260930P20000000", "bid": 58.0, "ask": 60.0,
+         "last_trade_time": t_20m.isoformat()},
+        {"option": "NDX260930C20100000", "bid": 30.0, "ask": 32.0,
+         "last_trade_time": t_40m.isoformat()},
+        {"option": "NDX260930P18000000", "bid": 5.0, "ask": 6.0,
+         "last_trade_time": t_50m.isoformat()},
+    ]
+    stats_tuple = extract_cboe_chain_age_stats(raw_rows, spot=20000.0, now_utc=now_utc)
+    # Retour : (min_age, latest_dt, stats_dict)
+    _, _, stats = stats_tuple
+    assert stats["min_age_minutes"] == pytest.approx(10.0)   # option à t-10m dans la bande
+    assert stats["median_age_minutes"] == pytest.approx(20.0)  # médiane [10, 20, 40]
+    assert stats["max_age_minutes"] == pytest.approx(40.0)
+    assert stats["chain_min_delay_minutes"] == pytest.approx(10.0)
+    assert stats["chain_max_delay_minutes"] == pytest.approx(50.0)
+
+    # 4. Statut DÉGRADÉ si la médiane dépasse la tolérance (pendant séance US)
+    # now_utc = 15:00 UTC = 11:00 ET → séance régulière → le check s'applique
+    t_45m = now_utc - timedelta(minutes=45)
+    payload_degraded = {
+        "timestamp": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        "data": {
+            "current_price": 20000.0,
+            "options": [
+                {
+                    "option": "NDX260930C20000000",
+                    "bid": 60.0,
+                    "ask": 62.0,
+                    "last_trade_time": t_45m.isoformat(),
+                    "open_interest": 10,
+                },
+                {
+                    "option": "NDX260930P20000000",
+                    "bid": 58.0,
+                    "ask": 60.0,
+                    "last_trade_time": t_45m.isoformat(),
+                    "open_interest": 10,
+                },
+            ],
+        },
+    }
+    chain_deg = parse_cboe_payload(payload_degraded, fetched_at_utc=now_utc)
+    assert chain_deg.status == DataStatus.DEGRADED
+    assert "Retard médian de cotation" in chain_deg.notes
+    assert chain_deg.age_stats.get("tolerance_median_minutes") == 30.0
+
+    # 5. Timing des pattes du straddle et delta-t vs spot NQ
+    from nqcockpit.levels.engine import calculate_expected_move, enrich_expected_move_nq
+
+    # Simuler df_gex pour calculate_expected_move
+    df_exp = pd.DataFrame(
+        [
+            {
+                "option": "NDX260930C20000000",
+                "strike": 20000.0,
+                "type": "C",
+                "expiry": date(2026, 9, 30),
+                "bid": 60.0,
+                "ask": 62.0,
+                "iv": 0.20,
+                "volume": 100,
+                "open_interest": 500,
+                "last_trade_time": t_10m,
+            },
+            {
+                "option": "NDX260930P20000000",
+                "strike": 20000.0,
+                "type": "P",
+                "expiry": date(2026, 9, 30),
+                "bid": 58.0,
+                "ask": 60.0,
+                "iv": 0.20,
+                "volume": 100,
+                "open_interest": 500,
+                "last_trade_time": t_20m,
+            },
+        ]
+    )
+    em = calculate_expected_move(
+        df_exp, spot=20000.0, ref_utc=now_utc, cboe_quote_time_utc=t_10m
+    )
+    assert em is not None
+    assert em.straddle_diagnostic is not None
+
+    # Pattes Call et Put ont leurs horodatages et âges
+    c_leg = em.straddle_diagnostic.call_leg
+    p_leg = em.straddle_diagnostic.put_leg
+    assert c_leg.quote_time_utc == t_10m
+    assert c_leg.age_minutes == pytest.approx(10.0)
+    assert p_leg.quote_time_utc == t_20m
+    assert p_leg.age_minutes == pytest.approx(20.0)
+
+    # Enrichissement avec le spot NQ horodaté à t-5m
+    t_spot_nq = now_utc - timedelta(minutes=5)
+    em_enriched = enrich_expected_move_nq(
+        em,
+        basis=300.0,
+        spot_nq=20300.0,
+        spot_ndx=20000.0,
+        cboe_age_minutes=10.0,
+        spot_nq_time_utc=t_spot_nq,
+        now_utc=now_utc,
+    )
+    assert em_enriched.straddle_diagnostic is not None
+    sd = em_enriched.straddle_diagnostic
+    # Call coté à t-10m, spot NQ à t-5m -> delta_t = (t-10m) - (t-5m) = -5.0 min
+    assert sd.call_leg.delta_t_vs_spot_nq_minutes == pytest.approx(-5.0)
+    # Put coté à t-20m, spot NQ à t-5m -> delta_t = (t-20m) - (t-5m) = -15.0 min
+    assert sd.put_leg.delta_t_vs_spot_nq_minutes == pytest.approx(-15.0)
+    assert sd.delta_t_call_vs_spot_nq_minutes == pytest.approx(-5.0)
+    assert sd.delta_t_put_vs_spot_nq_minutes == pytest.approx(-15.0)
+

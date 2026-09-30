@@ -72,6 +72,9 @@ class StraddleLegInfo:
     quote_time_et: str | None
     quote_time_algiers: str | None
     is_spread_wide: bool = False
+    quote_time_utc: datetime | None = None
+    age_minutes: float | None = None
+    delta_t_vs_spot_nq_minutes: float | None = None
 
 
 @dataclass
@@ -107,6 +110,8 @@ class StraddleDiagnostic:
     neighbors: list[StraddleStrikeNeighbor] = field(default_factory=list)
     is_degraded: bool = False
     degraded_reason: str = ""
+    delta_t_call_vs_spot_nq_minutes: float | None = None
+    delta_t_put_vs_spot_nq_minutes: float | None = None
 
 
 @dataclass
@@ -379,6 +384,12 @@ class LevelsSnapshot:
                             "quote_time_algiers": (
                                 self.expected_move.straddle_diagnostic.call_leg.quote_time_algiers
                             ),
+                            "age_minutes": (
+                                self.expected_move.straddle_diagnostic.call_leg.age_minutes
+                            ),
+                            "delta_t_vs_spot_nq_minutes": (
+                                self.expected_move.straddle_diagnostic.call_leg.delta_t_vs_spot_nq_minutes
+                            ),
                         },
                         "put_leg": {
                             "root": self.expected_move.straddle_diagnostic.put_leg.root,
@@ -395,6 +406,12 @@ class LevelsSnapshot:
                             ),
                             "quote_time_algiers": (
                                 self.expected_move.straddle_diagnostic.put_leg.quote_time_algiers
+                            ),
+                            "age_minutes": (
+                                self.expected_move.straddle_diagnostic.put_leg.age_minutes
+                            ),
+                            "delta_t_vs_spot_nq_minutes": (
+                                self.expected_move.straddle_diagnostic.put_leg.delta_t_vs_spot_nq_minutes
                             ),
                         },
                         "neighbors": [

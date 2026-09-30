@@ -137,9 +137,45 @@ def extract_cboe_chain_age_stats(
     Les contrats sans cotation (bid=0 ou ask=0) sont exclus car sans trade récent.
     """
     trades_in_band: list[tuple[datetime, float]] = []
+    all_delays: list[float] = []
     excluded_zero_quotes = 0
 
     for opt in raw_options:
+        opt_dt: datetime | None = None
+        for field_name in ("last_trade_time", "trade_time", "quote_time"):
+            val = opt.get(field_name)
+            if not val or not isinstance(val, str):
+                continue
+            clean_val = val.strip()
+            try:
+                if clean_val.endswith("Z"):
+                    clean_ts = clean_val[:-1]
+                    if "T" in clean_ts:
+                        opt_dt = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
+                    else:
+                        opt_dt = datetime.strptime(
+                            clean_ts, "%Y-%m-%d %H:%M:%S"
+                        ).replace(tzinfo=timezone.utc)
+                elif "T" in clean_val:
+                    dt_raw = datetime.fromisoformat(clean_val)
+                    if dt_raw.tzinfo is None:
+                        opt_dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        opt_dt = dt_raw.astimezone(timezone.utc)
+                else:
+                    dt_raw = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
+                    if dt_raw.tzinfo is None:
+                        opt_dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+                    else:
+                        opt_dt = dt_raw.astimezone(timezone.utc)
+                break
+            except Exception:
+                continue
+
+        if opt_dt is not None:
+            age_m = max(0.0, (now_utc - opt_dt).total_seconds() / 60.0)
+            all_delays.append(age_m)
+
         strike = opt.get("strike")
         if strike is None:
             parsed = parse_occ(opt.get("option", ""))
@@ -168,41 +204,25 @@ def extract_cboe_chain_age_stats(
             excluded_zero_quotes += 1
             continue
 
-        for field_name in ("last_trade_time", "trade_time", "quote_time"):
-            val = opt.get(field_name)
-            if not val or not isinstance(val, str):
-                continue
-            clean_val = val.strip()
-            try:
-                if clean_val.endswith("Z"):
-                    clean_ts = clean_val[:-1]
-                    if "T" in clean_ts:
-                        dt = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
-                    else:
-                        dt = datetime.strptime(
-                            clean_ts, "%Y-%m-%d %H:%M:%S"
-                        ).replace(tzinfo=timezone.utc)
-                elif "T" in clean_val:
-                    dt_raw = datetime.fromisoformat(clean_val)
-                    if dt_raw.tzinfo is None:
-                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
-                    else:
-                        dt = dt_raw.astimezone(timezone.utc)
-                else:
-                    dt_raw = datetime.strptime(clean_val, "%Y-%m-%d %H:%M:%S")
-                    if dt_raw.tzinfo is None:
-                        dt = dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
-                    else:
-                        dt = dt_raw.astimezone(timezone.utc)
+        if opt_dt is not None:
+            trades_in_band.append((opt_dt, age_m))
 
-                age_m = max(0.0, (now_utc - dt).total_seconds() / 60.0)
-                trades_in_band.append((dt, age_m))
-                break
-            except Exception:
-                continue
+    chain_min = min(all_delays) if all_delays else None
+    chain_med = float(np.median(all_delays)) if all_delays else None
+    chain_max = max(all_delays) if all_delays else None
 
     if not trades_in_band:
-        return None, None, {"count": 0, "excluded_zero_quotes": excluded_zero_quotes}
+        return None, None, {
+            "count": 0,
+            "excluded_zero_quotes": excluded_zero_quotes,
+            "min_age_minutes": chain_min,
+            "median_age_minutes": chain_med,
+            "max_age_minutes": chain_max,
+            "chain_options_count": len(all_delays),
+            "chain_min_delay_minutes": chain_min,
+            "chain_median_delay_minutes": chain_med,
+            "chain_max_delay_minutes": chain_max,
+        }
 
     ages = [t[1] for t in trades_in_band]
     latest_dt = max(t[0] for t in trades_in_band)
@@ -217,7 +237,11 @@ def extract_cboe_chain_age_stats(
         "min_age_minutes": min_age,
         "median_age_minutes": med_age,
         "max_age_minutes": max_age,
-        "aggregate": "max(last_trade_time) sur strikes ±3% spot (cotations actives)",
+        "chain_options_count": len(all_delays),
+        "chain_min_delay_minutes": chain_min,
+        "chain_median_delay_minutes": chain_med,
+        "chain_max_delay_minutes": chain_max,
+        "aggregate": "statistiques retard cotations réelles (min, médiane, max)",
     }
     return min_age, latest_dt, stats
 
@@ -342,6 +366,38 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
         ref_age = None
         status = DataStatus.DEGRADED
         notes = "Âge inconnu (aucun horodatage de cotation exploitable)"
+
+    # Contrôle de la tolérance sur le retard médian des cotations
+    try:
+        from nqcockpit.config import load_config
+        cfg = load_config()
+        if hasattr(cfg.levels, "cboe_max_median_delay_minutes"):
+            tol_med_delay = float(cfg.levels.cboe_max_median_delay_minutes)
+            tol_med_src = "config: levels.cboe_max_median_delay_minutes"
+        elif hasattr(cfg.levels, "stale_data_minutes"):
+            tol_med_delay = float(cfg.levels.stale_data_minutes)
+            tol_med_src = "config: levels.stale_data_minutes"
+        else:
+            tol_med_delay = 30.0
+            tol_med_src = "fallback: 30.0 min (code)"
+    except Exception:
+        tol_med_delay = 30.0
+        tol_med_src = "fallback: 30.0 min (code)"
+
+    age_stats["tolerance_median_minutes"] = tol_med_delay
+    age_stats["tolerance_source"] = tol_med_src
+    age_stats["is_median_delay_exceeded"] = False
+
+    med_delay = age_stats.get("median_age_minutes")
+    # Retard médian : DÉGRADÉ seulement pendant la séance régulière.
+    # (hors séance les cotations peuvent être vieilles sans signaler DÉGRADÉ)
+    if in_regular and med_delay is not None and med_delay > tol_med_delay:
+        status = DataStatus.DEGRADED
+        age_stats["is_median_delay_exceeded"] = True
+        notes += (
+            f" | Retard médian de cotation ({med_delay:.1f} min) > "
+            f"tolérance {tol_med_delay:.1f} min ({tol_med_src}) [DÉGRADÉ]"
+        )
 
     return CboeChainSnapshot(
         symbol="NDX",
