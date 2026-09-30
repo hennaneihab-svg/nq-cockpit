@@ -191,3 +191,28 @@ class EventRiskReport:
 
     daily_risks: list[dict] = field(default_factory=list)
     """Évaluation du risque pour chaque jour de l'horizon."""
+
+    horizon_days: int = 14
+    """Horizon temporel du rapport en jours."""
+
+    @property
+    def coverage_summary(self) -> str:
+        """Résumé de la couverture (ex: 'couverture 8/14 jours')."""
+        total = len(self.daily_risks) if self.daily_risks else self.horizon_days
+        if not self.daily_risks:
+            return f"couverture {total}/{total} jours"
+        covered = sum(
+            1 for dr in self.daily_risks
+            if "DÉGRADÉ" not in dr.get("risk_level", "")
+            and "INCONNU" not in dr.get("risk_level", "")
+        )
+        return f"couverture {covered}/{total} jours"
+
+    @property
+    def risk_header(self) -> str:
+        """En-tête de risque global affichant la couverture.
+
+        Jamais 'GREEN' seul si des jours sont DÉGRADÉ/INCONNU.
+        """
+        cov = self.coverage_summary
+        return f"{self.risk_level} — {cov}"

@@ -764,6 +764,64 @@ def test_ism_services_source_and_fallback_degraded() -> None:
     assert "ismworld.org" in ism_srv.primary_source_url
 
 
+def test_global_risk_header_coverage_and_aligned_horizons() -> None:
+    """Cas P05-c : En-tête avec couverture et alignement horizon tableau / calendrier.
+
+    - Le risque global affiche la couverture (ex. 'GREEN — couverture 8/14 jours').
+    - Jamais 'GREEN' seul si des jours sont DÉGRADÉ/INCONNU.
+    - Le tableau de risque et le calendrier couvrent le même horizon configuré.
+    """
+    from nqcockpit.events.models import SourceHealth
+    from nqcockpit.events.radar import render_console
+    from nqcockpit.events.risk import compute_event_risk
+
+    ref_utc = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
+    source_health = [
+        SourceHealth(
+            source="forexfactory",
+            status=DataStatus.DEGRADED,
+            events_count=5,
+            error_msg="nextweek 404",
+            fetched_utc=ref_utc,
+        )
+    ]
+
+    report = compute_event_risk(
+        events=[],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+        source_health=source_health,
+        horizon_days=14,
+    )
+
+    # 1. Vérification que le header affiche la couverture et n'est pas GREEN seul
+    assert "couverture" in report.risk_header
+    assert report.risk_header != "GREEN"
+    assert "GREEN — couverture" in report.risk_header
+    console_out = render_console(report)
+    assert "Risque : GREEN — couverture" in console_out
+
+    # 2. Vérification de l'alignement des horizons (7 jours)
+    report_7d = compute_event_risk(
+        events=[],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+        horizon_days=7,
+    )
+    assert len(report_7d.daily_risks) == 7
+    assert report_7d.horizon_days == 7
+    console_7d = render_console(report_7d)
+    assert "horizon de 7 jours" in console_7d
+    assert "CALENDRIER (7 prochains jours" in console_7d
+
+
+
 
 
 

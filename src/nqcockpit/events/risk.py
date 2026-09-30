@@ -78,6 +78,7 @@ def compute_event_risk(
     stand_aside_before_min: int,
     ref_utc: datetime | None = None,
     source_health: list[SourceHealth] | None = None,
+    horizon_days: int = 14,
 ) -> EventRiskReport:
     """Calcule le niveau de risque événementiel pour la journée de trading.
 
@@ -88,6 +89,8 @@ def compute_event_risk(
         post_buffer_min: Tampon post-événement Tier 1 (minutes).
         stand_aside_before_min: Minutes d'évitement avant un Tier 1.
         ref_utc: Horodatage de référence (now si None).
+        source_health: Statuts de santé des sources.
+        horizon_days: Horizon d'analyse en jours (calendrier et risque alignés).
 
     Returns:
         EventRiskReport avec risk_level, reason, countdown, calendrier Alger.
@@ -196,14 +199,14 @@ def compute_event_risk(
             f"({_fmt_algiers(nxt.scheduled_utc)})"
         )
 
-    # Calendrier Alger des 14 prochains jours (incluant aujourd'hui)
-    horizon_14d = ref_utc + timedelta(days=14)
+    # Calendrier Alger et risque sur l'horizon spécifié (ex: horizon_days jours)
+    horizon_limit = ref_utc + timedelta(days=horizon_days)
     ref_alg_date = ref_utc.astimezone(TZ_ALGIERS).date()
     cal_display: list[str] = []
     tier_sym = {1: "[T1]", 2: "[T2]"}
     for ev in sorted(events, key=lambda e: e.scheduled_utc):
         ev_alg_date = ev.scheduled_utc.astimezone(TZ_ALGIERS).date()
-        if ev_alg_date < ref_alg_date or ev.scheduled_utc > horizon_14d:
+        if ev_alg_date < ref_alg_date or ev.scheduled_utc > horizon_limit:
             continue
         alg = ev.scheduled_utc.astimezone(TZ_ALGIERS)
         et = ev.scheduled_utc.astimezone(TZ_ET)
@@ -246,9 +249,9 @@ def compute_event_risk(
     )
     cur_sunday = ref_alg_date + timedelta(days=(6 - ref_alg_date.weekday()))
 
-    # Évaluation du risque pour chaque jour de l'horizon (14 jours)
+    # Évaluation du risque pour chaque jour de l'horizon
     daily_risks: list[dict] = []
-    for day_offset in range(14):
+    for day_offset in range(horizon_days):
         target_day_ref = ref_utc + timedelta(days=day_offset)
         target_alg_date = target_day_ref.astimezone(TZ_ALGIERS).date()
         day_label = target_day_ref.astimezone(TZ_ALGIERS).strftime("%a %d %b")
@@ -396,4 +399,5 @@ def compute_event_risk(
         next_event_countdown=next_countdown,
         calendar_display_algiers=cal_display,
         daily_risks=daily_risks,
+        horizon_days=horizon_days,
     )

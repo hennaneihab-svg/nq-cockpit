@@ -267,6 +267,7 @@ def fetch_event_radar(
         stand_aside_before_min=ev_cfg.stand_aside_before_minutes,
         ref_utc=ref_utc,
         source_health=source_health,
+        horizon_days=horizon_days,
     )
     report.divergences = divergences
     report.source_health = source_health
@@ -348,7 +349,7 @@ def render_console(report: EventRiskReport) -> str:
         "  NQ COCKPIT · RADAR D'ÉVÉNEMENTS",
         f"  Horodatage : {et_now.strftime('%Y-%m-%d %H:%M')} ET | "
         f"{alg_now.strftime('%Y-%m-%d %H:%M')} Alger | "
-        f"Risque : {report.risk_level}",
+        f"Risque : {report.risk_header}",
         "=" * 70,
         f"  Raison : {report.reason}",
     ]
@@ -357,7 +358,10 @@ def render_console(report: EventRiskReport) -> str:
 
     if report.daily_risks:
         lines.append("-" * 70)
-        lines.append("  RISQUE PAR JOUR (fenêtres de trading sur l'horizon) :")
+        lines.append(
+            f"  RISQUE PAR JOUR (fenêtres de trading sur l'horizon de "
+            f"{report.horizon_days} jours) :"
+        )
         for dr in report.daily_risks:
             today_tag = " (Aujourd'hui)" if dr.get("is_today") else ""
             lbl = f"{dr['day_label']}{today_tag}"
@@ -370,12 +374,12 @@ def render_console(report: EventRiskReport) -> str:
             lines.append(f"    {d}")
 
     lines.append("-" * 70)
-    lines.append("  CALENDRIER (14 prochains jours, heure Alger) :")
+    lines.append(f"  CALENDRIER ({report.horizon_days} prochains jours, heure Alger) :")
     if report.calendar_display_algiers:
         for line in report.calendar_display_algiers:
             lines.append(f"    {line}")
     else:
-        lines.append("    Aucun événement dans l'horizon de 14 jours.")
+        lines.append(f"    Aucun événement dans l'horizon de {report.horizon_days} jours.")
 
     if report.earnings_14d:
         lines.append("-" * 70)
