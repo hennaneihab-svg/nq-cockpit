@@ -52,6 +52,33 @@ levels:
 validation:
   min_sessions: 60
   min_event_samples: 12
+macro:
+  percentile_lookback_days: 252
+  delta_lookback_days: 5
+  sources:
+    us10y_fred: "DGS10"
+    us2y_fred: "DGS2"
+    dxy_symbol: "DX-Y.NYB"
+    dxy_fallback_fred: "DTWEXBGS"
+    vix_symbol: "^VIX"
+    vxn_symbol: "^VXN"
+    nq_symbol: "NQ=F"
+    cot_url: "https://www.cftc.gov/dea/newcot/FinFutFutures.txt"
+    cot_contract_name: "NASDAQ-100 CONSOLIDATED - CHICAGO MERCANTILE EXCHANGE"
+forecast:
+  min_calibration_sessions: 60
+  target_coverage_1sigma: 0.6827
+  confidence_level: 0.95
+  day_types:
+    range:
+      max_range_to_expected_move: 0.85
+      description: "Journée comprimée (range réel <= 0.85 * expected move)"
+    trend:
+      min_abs_change_to_range: 0.60
+      description: "Journée directionnelle (|clôture - ouverture| >= 0.60 * range)"
+    volatile:
+      min_range_to_expected_move: 1.15
+      description: "Journée expansive (range réel >= 1.15 * expected move)"
 sources:
   bls_contact_email: "contact@nqcockpit.local"
   stale_data_threshold_minutes: 60

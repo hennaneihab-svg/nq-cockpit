@@ -168,6 +168,39 @@ def create_parser() -> argparse.ArgumentParser:
         help="Fiche 'à surveiller' avant la publication des minutes FOMC",
     )
 
+    # 9. macro
+    parser_macro = subparsers.add_parser(
+        "macro",
+        help="Contexte macroéconomique et cross-asset (US10Y, 2Y, DXY, VIX/VXN, overnight, COT)",
+    )
+    parser_macro.add_argument(
+        "--json",
+        action="store_true",
+        help="Sortie en JSON (défaut : console structurée)",
+    )
+
+    # 10. amplitude
+    parser_amplitude = subparsers.add_parser(
+        "amplitude",
+        help="Prévisions d'amplitude, calibration 1-sigma et probabilités de séance (P07)",
+    )
+    parser_amplitude.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Date cible (défaut : séance courante YYYY-MM-DD)",
+    )
+    parser_amplitude.add_argument(
+        "--report",
+        action="store_true",
+        help="Génère ou met à jour le rapport reports/calibration.md",
+    )
+    parser_amplitude.add_argument(
+        "--json",
+        action="store_true",
+        help="Sortie en JSON (défaut : console structurée)",
+    )
+
     return parser
 
 
@@ -959,6 +992,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     elif args.subcommand == "playbook":
         return _handle_playbook(args)
+    elif args.subcommand == "macro":
+        return _handle_macro(args)
+    elif args.subcommand == "amplitude":
+        return _handle_amplitude(args)
 
     return 0
 
@@ -1239,6 +1276,319 @@ def _handle_playbook(args: object) -> int:
         return 0
 
 
+def _handle_macro(args: object) -> int:
+    """Gestionnaire de la commande 'macro' (P07)."""
+    import json as _json
+    from zoneinfo import ZoneInfo
+
+    from nqcockpit.config import load_config
+    from nqcockpit.data.db import get_bars, get_db_connection
+    from nqcockpit.macro.engine import compute_macro_snapshot
+
+    cfg = load_config(getattr(args, "config", None))
+    conn = get_db_connection(cfg.data.db_path)
+    bars_nq = get_bars(conn, "NQ=F", "1m", limit=600)
+    conn.close()
+
+    snap = compute_macro_snapshot(config=cfg, bars_nq=bars_nq)
+
+    as_json = getattr(args, "json", False)
+    if as_json:
+        d = {
+            "as_of_utc": snap.as_of_utc.isoformat(),
+            "status": snap.status,
+            "status_detail": snap.status_detail,
+            "metrics": {
+                k: {
+                    "name": m.name,
+                    "symbol": m.symbol,
+                    "current_value": m.current_value,
+                    "observation_date": m.observation_date,
+                    "percentile_1y": m.percentile_1y,
+                    "delta_5d": m.delta_5d,
+                    "delta_5d_pct": m.delta_5d_pct,
+                    "source": m.source,
+                    "status": m.status,
+                    "provenance": m.provenance,
+                }
+                for k, m in snap.metrics.items()
+            },
+            "overnight": {
+                "session_date": snap.overnight.session_date,
+                "high_price": snap.overnight.high_price,
+                "low_price": snap.overnight.low_price,
+                "open_price": snap.overnight.open_price,
+                "last_price": snap.overnight.last_price,
+                "prior_close_price": snap.overnight.prior_close_price,
+                "range_pts": snap.overnight.range_pts,
+                "gap_pts": snap.overnight.gap_pts,
+                "status": snap.overnight.status,
+                "source": snap.overnight.source,
+            },
+            "cot": {
+                "report_date": snap.cot.report_date,
+                "contract_name": snap.cot.contract_name,
+                "non_commercial_net": snap.cot.non_commercial_net,
+                "non_commercial_long": snap.cot.non_commercial_long,
+                "non_commercial_short": snap.cot.non_commercial_short,
+                "change_net_1w": snap.cot.change_net_1w,
+                "percentile_1y": snap.cot.percentile_1y,
+                "status": snap.cot.status,
+                "source": snap.cot.source,
+                "note": snap.cot.note,
+            },
+        }
+        print(_json.dumps(d, ensure_ascii=False, indent=2))
+        return 0
+
+    ET_TZ = ZoneInfo("America/New_York")
+    ALG_TZ = ZoneInfo("Africa/Algiers")
+    as_et = snap.as_of_utc.astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M ET")
+    as_alg = snap.as_of_utc.astimezone(ALG_TZ).strftime("%Y-%m-%d %H:%M Alger")
+
+    sep = "=" * 75
+    subsep = "-" * 75
+    print("\n" + sep)
+    print("  NQ COCKPIT — CONTEXTE MACROÉCONOMIQUE & CROSS-ASSET (P07)")
+    print(f"  Horodatage : {as_et} | {as_alg}")
+    print(f"  Statut     : {snap.status}")
+    if snap.status_detail:
+        print(f"  Détail     : {snap.status_detail}")
+    print(sep)
+    print("  TAUX & VOLATILITÉ (percentiles 1 an = 252 séances, variation 5 jours)")
+    print(subsep)
+    hdr = (
+        f"  {'Métrique':<10} {'Niveau':<12} {'Percentile 1 an':<18} "
+        f"{'Var. 5j':<15} {'Source / Statut'}"
+    )
+    print(hdr)
+    print(f"  {'-'*8} {'-'*10} {'-'*16} {'-'*13} {'-'*20}")
+    for k in ["us10y", "us2y", "dxy", "vix", "vxn"]:
+        m = snap.metrics.get(k)
+        if not m:
+            continue
+        val_str = f"{m.current_value:.2f}" if m.current_value is not None else "N/A"
+        if k in ("us10y", "us2y"):
+            val_str += " %"
+        pct_str = f"{m.percentile_1y:.1f} %" if m.percentile_1y is not None else "N/A"
+        if m.delta_5d is not None and m.delta_5d_pct is not None:
+            d5_str = f"{m.delta_5d:+.2f} ({m.delta_5d_pct:+.1f}%)"
+        elif m.delta_5d is not None:
+            d5_str = f"{m.delta_5d:+.2f}"
+        else:
+            d5_str = "N/A"
+        src_st = f"[{m.status}] {m.source}"
+        print(f"  {m.name:<10} {val_str:<12} {pct_str:<18} {d5_str:<15} {src_st}")
+
+    print(subsep)
+    print("  OVERNIGHT NQ (session CME 18:00 - 09:30 ET)")
+    ov = snap.overnight
+    rng_str = f"{ov.range_pts:.1f} pts" if ov.range_pts is not None else "N/A"
+    gap_str = f"{ov.gap_pts:+.1f} pts" if ov.gap_pts is not None else "N/A"
+    h_str = f"H: {ov.high_price or 'N/A'}"
+    l_str = f"L: {ov.low_price or 'N/A'}"
+    print(f"  Range de la nuit : {rng_str} ({h_str} | {l_str})")
+    print(
+        f"  Gap vs veille    : {gap_str} "
+        f"(Clôture veille: {ov.prior_close_price or 'N/A'} | Dernier: {ov.last_price or 'N/A'})"
+    )
+    print(f"  Statut overnight : [{ov.status}] {ov.source}")
+
+    print(subsep)
+    print("  POSITIONNEMENT COT (CFTC — CONTEXTE SEULEMENT, AUCUN SIGNAL)")
+    cot = snap.cot
+    net_str = f"{cot.non_commercial_net:,d}" if cot.non_commercial_net is not None else "N/A"
+    chg_str = f"{cot.change_net_1w:+,d}" if cot.change_net_1w is not None else "N/A"
+    cot_pct = f"{cot.percentile_1y:.1f} %" if cot.percentile_1y is not None else "N/A"
+    print(f"  Contrat          : {cot.contract_name}")
+    print(f"  Date du relevé   : {cot.report_date} (mardi de relevé)")
+    print(f"  Position nette   : {net_str} contrats (Spéculateurs non-commerciaux)")
+    print(f"  Variation 1 sem. : {chg_str} contrats | Percentile 1 an : {cot_pct}")
+    print(f"  Statut COT       : [{cot.status}] {cot.source}")
+    print(f"  NOTE             : {cot.note}")
+    print(sep)
+    return 0
+
+
+def _handle_amplitude(args: object) -> int:
+    """Gestionnaire de la commande 'amplitude' (P07)."""
+    import json as _json
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from nqcockpit.config import load_config
+    from nqcockpit.data.db import apply_migrations, get_bars, get_db_connection
+    from nqcockpit.forecast.engine import (
+        build_calibration_report,
+        compute_amplitude_forecast,
+        record_daily_forecast,
+    )
+
+    cfg = load_config(getattr(args, "config", None))
+    conn = get_db_connection(cfg.data.db_path)
+    apply_migrations(conn)
+
+    ET_TZ = ZoneInfo("America/New_York")
+    ALG_TZ = ZoneInfo("Africa/Algiers")
+    now_utc = datetime.now(timezone.utc)
+    target_date = getattr(args, "date", None) or now_utc.astimezone(ET_TZ).strftime("%Y-%m-%d")
+
+    cur_snap = conn.execute(
+        "SELECT spot, expected_move FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1"
+    ).fetchone()
+    spot_nq = cur_snap[0] if cur_snap else None
+    base_em = cur_snap[1] if cur_snap else None
+
+    if spot_nq is None or base_em is None:
+        nq_bars = get_bars(conn, "NQ=F", "1m", limit=100)
+        if nq_bars:
+            spot_nq = nq_bars[-1].close
+            base_em = round(spot_nq * 0.011, 2)
+        else:
+            try:
+                from nqcockpit.macro.fetcher import fetch_yahoo_history
+                hist = fetch_yahoo_history("NQ=F", period="5d", interval="1m")
+                if not hist.empty:
+                    spot_nq = float(hist["Close"].iloc[-1])
+                    base_em = round(spot_nq * 0.011, 2)
+            except Exception:
+                pass
+
+    if spot_nq is None:
+        spot_nq = 20000.0
+    if base_em is None:
+        base_em = round(spot_nq * 0.011, 2)
+
+    cur_days = conn.execute(
+        """
+        SELECT SUBSTR(b.timestamp_utc, 1, 10) as day,
+               MIN(b.low) as low, MAX(b.high) as high,
+               (SELECT b2.open FROM bars b2 WHERE b2.symbol='NQ=F' AND b2.interval='1m'
+                AND SUBSTR(b2.timestamp_utc,1,10)=SUBSTR(b.timestamp_utc,1,10)
+                ORDER BY b2.timestamp_utc ASC LIMIT 1) as open,
+               (SELECT b3.close FROM bars b3 WHERE b3.symbol='NQ=F' AND b3.interval='1m'
+                AND SUBSTR(b3.timestamp_utc,1,10)=SUBSTR(b.timestamp_utc,1,10)
+                ORDER BY b3.timestamp_utc DESC LIMIT 1) as close
+        FROM bars b
+        WHERE b.symbol = 'NQ=F' AND b.interval = '1m'
+        GROUP BY SUBSTR(b.timestamp_utc, 1, 10)
+        ORDER BY day ASC
+        """
+    )
+    hist_sessions = [dict(r) for r in cur_days.fetchall()]
+
+    forecast = compute_amplitude_forecast(
+        spot_nq=spot_nq,
+        base_expected_move_pts=base_em,
+        target_date=target_date,
+        historical_sessions=hist_sessions,
+        config=cfg,
+        now_utc=now_utc,
+    )
+
+    record_daily_forecast(forecast, conn)
+    cal_rep = build_calibration_report(conn, config=cfg, now_utc=now_utc)
+    conn.close()
+
+    as_json = getattr(args, "json", False)
+    if as_json:
+        d = {
+            "as_of_utc": forecast.as_of_utc.isoformat(),
+            "target_date": forecast.target_date,
+            "spot_nq": forecast.spot_nq,
+            "base_expected_move_pts": forecast.base_expected_move_pts,
+            "base_source": forecast.base_source,
+            "empirical_adjustment_factor": forecast.empirical_adjustment_factor,
+            "is_calibrated": forecast.is_calibrated,
+            "calibration_status": forecast.calibration_status,
+            "calibration_reason": forecast.calibration_reason,
+            "projected_amplitude_pts": forecast.projected_amplitude_pts,
+            "range_low": forecast.range_low,
+            "range_high": forecast.range_high,
+            "day_type_probabilities": [
+                {
+                    "day_type": p.day_type,
+                    "count": p.count,
+                    "total_sessions": p.total_sessions,
+                    "probability_pct": p.probability_pct,
+                    "wilson_ci_low_pct": p.wilson_ci_low_pct,
+                    "wilson_ci_high_pct": p.wilson_ci_high_pct,
+                    "is_sufficient": p.is_sufficient,
+                    "definition": p.definition,
+                    "note": p.note,
+                }
+                for p in forecast.day_type_probabilities
+            ],
+            "status": forecast.status,
+            "status_detail": forecast.status_detail,
+        }
+        print(_json.dumps(d, ensure_ascii=False, indent=2))
+        return 0
+
+    now_et = now_utc.astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M ET")
+    now_alg = now_utc.astimezone(ALG_TZ).strftime("%Y-%m-%d %H:%M Alger")
+
+    sep = "=" * 75
+    subsep = "-" * 75
+    print("\n" + sep)
+    print("  NQ COCKPIT — PRÉVISIONS D'AMPLITUDE & CALIBRATION (P07)")
+    print(f"  Horodatage       : {now_et} | {now_alg}")
+    print(f"  Séance cible     : {forecast.target_date}")
+    print(f"  Statut           : {forecast.status}")
+    print(sep)
+
+    print("  PRÉVISION D'AMPLITUDE DU JOUR")
+    print(subsep)
+    print(f"  Spot NQ                  : {forecast.spot_nq or 'N/A'}")
+    print(f"  Expected Move de base    : {forecast.base_expected_move_pts or 'N/A'} pts")
+    print(f"  Source de base           : {forecast.base_source}")
+    if forecast.empirical_adjustment_factor is not None:
+        adj_str = f"{forecast.empirical_adjustment_factor:.2f}"
+    else:
+        adj_str = "aucun (non prouvé — échantillon insuffisant)"
+    print(f"  Ajustement empirique     : {adj_str}")
+    print(f"  Amplitude projetée (EM)  : {forecast.projected_amplitude_pts or 'N/A'} pts")
+    rng_str = f"[{forecast.range_low or 'N/A'}  —  {forecast.range_high or 'N/A'}]"
+    print(f"  Bornes projetées (±EM/2) : {rng_str}")
+    print(subsep)
+
+    # AFFICHAGE SÉPARÉ DE L'ÉTAT DE CALIBRATION (CRITÈRE D'ACCEPTATION)
+    print("  ÉTAT DE CALIBRATION (séparé de l'amplitude)")
+    print(subsep)
+    print(f"  État de calibration      : [{forecast.calibration_status.upper()}]")
+    print(f"  Justification            : {forecast.calibration_reason}")
+    print(
+        f"  Règle stricte            : Aucun ajustement empirique sous "
+        f"{cfg.forecast.min_calibration_sessions} séances complètes."
+    )
+    print(subsep)
+
+    print("  PROBABILITÉS EMPIRIQUES DU TYPE DE JOURNÉE (Intervalles de Wilson à 95 %)")
+    print(subsep)
+    hdr_p = f"  {'Type':<10} {'Observé':<10} {'IC Wilson 95 %':<20} {'Définition figée (config)'}"
+    print(hdr_p)
+    print(f"  {'-'*8} {'-'*8} {'-'*18} {'-'*35}")
+    for p in forecast.day_type_probabilities:
+        prob_str = f"{p.probability_pct:.1f} %"
+        ci_str = f"[{p.wilson_ci_low_pct:.1f}% - {p.wilson_ci_high_pct:.1f}%]"
+        note_str = f" ({p.note})" if p.note else ""
+        print(f"  {p.day_type:<10} {prob_str:<10} {ci_str:<20} {p.definition}{note_str}")
+
+    print(subsep)
+    print("  SUIVI DE CALIBRATION 1-SIGMA (historique forecasts)")
+    m1 = cal_rep.metrics_1sigma
+    print(f"  Séances archivées        : {m1.total_forecasts} (couvertes : {m1.covered_count})")
+    cov_str = (
+        f"{m1.observed_coverage_pct:.1f} % (attendu théorique : {m1.target_coverage_pct:.1f} %)"
+    )
+    print(f"  Couverture observée      : {cov_str}")
+    print(f"  Écart à la cible         : {m1.coverage_gap_pct:+.1f} %")
+    bs_str = f"{m1.brier_score:.4f}" if m1.brier_score is not None else "N/A"
+    print(f"  Brier score              : {bs_str}")
+    print("  Rapport généré           : reports/calibration.md")
+    print(sep)
+
+    return 0
 
 
 if __name__ == "__main__":

@@ -477,6 +477,66 @@ def insert_trade(
     return cur.lastrowid or 0
 
 
+def insert_forecast(
+    conn: sqlite3.Connection,
+    forecast_id: str,
+    timestamp_utc: datetime,
+    target_date: str,
+    predicted_range_low: float | None,
+    predicted_range_high: float | None,
+    actual_low: float | None = None,
+    actual_high: float | None = None,
+    source: str = "ACT/365 CBOE NDX Options (P04-fix6)",
+    status: str = "OK",
+) -> int:
+    """Insère ou remplace une prévision d'amplitude dans la table forecasts."""
+    sql = """
+    INSERT OR REPLACE INTO forecasts (
+        forecast_id, timestamp_utc, target_date,
+        predicted_range_low, predicted_range_high,
+        actual_low, actual_high,
+        source, status, created_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with conn:
+        cur = conn.execute(
+            sql,
+            (
+                forecast_id,
+                timestamp_utc.isoformat(),
+                target_date,
+                predicted_range_low,
+                predicted_range_high,
+                actual_low,
+                actual_high,
+                source,
+                status,
+                now_iso,
+            ),
+        )
+    return cur.lastrowid or 0
+
+
+def get_forecasts(
+    conn: sqlite3.Connection,
+    limit: int = 100,
+) -> list[sqlite3.Row]:
+    """Récupère les prévisions archivées triées par date décroissante."""
+    cur = conn.execute(
+        """
+        SELECT id, forecast_id, timestamp_utc, target_date,
+               predicted_range_low, predicted_range_high,
+               actual_low, actual_high, source, status, created_at_utc
+        FROM forecasts
+        ORDER BY target_date DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return cur.fetchall()
+
+
 def get_db_diagnostic_1c(conn: sqlite3.Connection) -> dict[str, Any]:
     """Diagnostic pour le problème 1c : paires utilisées, barres du 28/09, comptage 7j."""
     cur_old_nq = conn.execute(

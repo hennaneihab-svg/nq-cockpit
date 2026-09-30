@@ -127,6 +127,28 @@ class DataConfig:
 
 
 @dataclass(frozen=True)
+class MacroConfig:
+    percentile_lookback_days: int = 252
+    delta_lookback_days: int = 5
+    sources: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DayTypesConfig:
+    range_max_em_ratio: float = 0.85
+    trend_min_change_ratio: float = 0.60
+    volatile_min_em_ratio: float = 1.15
+
+
+@dataclass(frozen=True)
+class ForecastConfig:
+    min_calibration_sessions: int = 60
+    target_coverage_1sigma: float = 0.6827
+    confidence_level: float = 0.95
+    day_types: DayTypesConfig = field(default_factory=DayTypesConfig)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -140,6 +162,8 @@ class AppConfig:
     market_sessions: MarketSessionsConfig = field(default_factory=MarketSessionsConfig)
     data: DataConfig = field(default_factory=DataConfig)
     snapshots_ny: list[str] = field(default_factory=lambda: ["08:00", "09:45", "15:45"])
+    macro: MacroConfig = field(default_factory=MacroConfig)
+    forecast: ForecastConfig = field(default_factory=ForecastConfig)
 
 
 
@@ -465,6 +489,39 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         parity_basis_tolerance_points=parity_tol,
     )
 
+    # 12. Macro
+    raw_macro = data.get("macro", {})
+    if not isinstance(raw_macro, dict):
+        raw_macro = {}
+    macro_cfg = MacroConfig(
+        percentile_lookback_days=int(raw_macro.get("percentile_lookback_days", 252)),
+        delta_lookback_days=int(raw_macro.get("delta_lookback_days", 5)),
+        sources=dict(raw_macro.get("sources", {})),
+    )
+
+    # 13. Forecast
+    raw_forecast = data.get("forecast", {})
+    if not isinstance(raw_forecast, dict):
+        raw_forecast = {}
+    raw_day_types = raw_forecast.get("day_types", {})
+    if not isinstance(raw_day_types, dict):
+        raw_day_types = {}
+    raw_range = raw_day_types.get("range", {})
+    raw_trend = raw_day_types.get("trend", {})
+    raw_vol = raw_day_types.get("volatile", {})
+
+    day_types_cfg = DayTypesConfig(
+        range_max_em_ratio=float(raw_range.get("max_range_to_expected_move", 0.85)),
+        trend_min_change_ratio=float(raw_trend.get("min_abs_change_to_range", 0.60)),
+        volatile_min_em_ratio=float(raw_vol.get("min_range_to_expected_move", 1.15)),
+    )
+    forecast_cfg = ForecastConfig(
+        min_calibration_sessions=int(raw_forecast.get("min_calibration_sessions", 60)),
+        target_coverage_1sigma=float(raw_forecast.get("target_coverage_1sigma", 0.6827)),
+        confidence_level=float(raw_forecast.get("confidence_level", 0.95)),
+        day_types=day_types_cfg,
+    )
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -478,5 +535,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         market_sessions=market_sessions,
         data=data_cfg,
         snapshots_ny=snapshots_ny,
+        macro=macro_cfg,
+        forecast=forecast_cfg,
     )
 
