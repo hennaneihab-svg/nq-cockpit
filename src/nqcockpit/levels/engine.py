@@ -204,46 +204,134 @@ def get_reference_session_date(ref_utc: datetime) -> date:
     return ref_d + timedelta(days=1)
 
 
+def _parse_quote_datetime_utc(val: Any) -> datetime | None:
+    """Parse un horodatage de cotation (texte ou datetime) en datetime UTC."""
+    if val is None or not isinstance(val, (str, datetime)):
+        return None
+    if isinstance(val, datetime):
+        if val.tzinfo is None:
+            return val.replace(tzinfo=timezone.utc)
+        return val.astimezone(timezone.utc)
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s_clean = s[:-1]
+            if "T" in s_clean:
+                return datetime.fromisoformat(s_clean).replace(tzinfo=timezone.utc)
+            return datetime.strptime(s_clean, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+        if "T" in s:
+            dt_raw = datetime.fromisoformat(s)
+            if dt_raw.tzinfo is None:
+                return dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+            return dt_raw.astimezone(timezone.utc)
+        dt_raw = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        if dt_raw.tzinfo is None:
+            return dt_raw.replace(tzinfo=ET).astimezone(timezone.utc)
+        return dt_raw.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def calculate_expected_move(
     df: pd.DataFrame,
     spot: float,
     ref_utc: datetime | None = None,
     today_date: date | None = None,
+    cboe_quote_time_utc: datetime | None = None,
 ) -> ExpectedMoveInfo | None:
     """Calcule le move attendu 1 sigma (formule analytique ET straddle ATM du front).
 
-    Formule analytique : S * IV_ATM * sqrt(jours / 252) avec jours en jours de bourse.
-    La fraction de jour du 0DTE ne s'applique que pendant la séance.
-    Hors séance, la durée est le temps de bourse entre maintenant et l'échéance (ex: 1.0 j).
+    - T = temps calendaire restant jusqu'à l'expiration calculé depuis l'horodatage
+      de la chaîne CBOE (pas d'heure codée en dur).
+    - Base ACT/365 pour correspondre à l'annualisation de l'IV CBOE :
+      T_years = (exp_utc - cboe_utc) / (365 * 86400).
+    - Formule analytique 1σ : S * IV_ATM * sqrt(T_years).
+    - Straddle de marché ATM (C_mid + P_mid) ≈ 0,8σ (Brenner-Subrahmanyam).
+    - Comparaison à unités égales : straddle_marché vs straddle_théo (0,8 * 1σ).
     """
     if df.empty:
         return None
 
-    if ref_utc is None:
-        if today_date is not None:
-            ref_utc = datetime.combine(today_date, time(12, 0), tzinfo=ET).astimezone(timezone.utc)
-        else:
-            ref_utc = datetime.now(timezone.utc)
-    elif ref_utc.tzinfo is None:
-        ref_utc = ref_utc.replace(tzinfo=timezone.utc)
-
-    ref_session = get_reference_session_date(ref_utc)
     nearest_exp = df["expiry"].min()
     sub = df[df["expiry"] == nearest_exp]
     if sub.empty:
         return None
 
-    in_regular = CALENDAR.is_us_equity_regular_hours(ref_utc)
+    # Extraction de l'horodatage effectif de cotation CBOE
+    cboe_ts: datetime | None = cboe_quote_time_utc
+    if cboe_ts is None and "last_trade_time" in sub.columns:
+        parsed_dates = []
+        for v in sub["last_trade_time"].dropna():
+            p_dt = _parse_quote_datetime_utc(v)
+            if p_dt is not None:
+                parsed_dates.append(p_dt)
+        if parsed_dates:
+            cboe_ts = max(parsed_dates)
+
+    if cboe_ts is None:
+        if ref_utc is not None:
+            cboe_ts = (
+                ref_utc
+                if ref_utc.tzinfo is not None
+                else ref_utc.replace(tzinfo=timezone.utc)
+            )
+        elif today_date is not None:
+            cboe_ts = datetime.combine(today_date, time(12, 0), tzinfo=ET).astimezone(
+                timezone.utc
+            )
+        else:
+            cboe_ts = datetime.now(timezone.utc)
+    elif cboe_ts.tzinfo is None:
+        cboe_ts = cboe_ts.replace(tzinfo=timezone.utc)
+
+    # Heure d'échéance : AM (09:30 ET) pour NDX mensuel 3e vendredi, PM (16:00 ET) sinon
+    is_third_friday = (
+        (nearest_exp.weekday() == 4 and 15 <= nearest_exp.day <= 21)
+        if isinstance(nearest_exp, date)
+        else False
+    )
+    is_ndxp = any(str(c).startswith("NDXP") for c in sub.get("contract", []))
+    if not is_ndxp and is_third_friday:
+        exp_time = time(9, 30)
+    else:
+        exp_time = time(16, 0)
+
+    if isinstance(nearest_exp, date):
+        exp_dt_et = datetime.combine(nearest_exp, exp_time, tzinfo=ET)
+        exp_dt_utc = exp_dt_et.astimezone(timezone.utc)
+    else:
+        exp_dt_utc = cboe_ts + timedelta(days=1)
+
+    # Calcul des jours de bourse (convention trading days)
+    eval_dt = ref_utc or cboe_ts
+    ref_session = get_reference_session_date(eval_dt)
+    in_regular = CALENDAR.is_us_equity_regular_hours(eval_dt)
     if isinstance(nearest_exp, date):
         if nearest_exp == ref_session:
             if in_regular:
-                days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
+                trading_days = CALENDAR.calculate_trading_days_to_expiry(
+                    eval_dt, nearest_exp
+                )
             else:
-                days = 1.0
+                trading_days = 1.0
         else:
-            days = CALENDAR.calculate_trading_days_to_expiry(ref_utc, nearest_exp)
+            trading_days = CALENDAR.calculate_trading_days_to_expiry(
+                eval_dt, nearest_exp
+            )
     else:
-        days = 1.0
+        trading_days = 1.0
+
+    delta_sec = (exp_dt_utc - cboe_ts).total_seconds()
+    if delta_sec < 60.0:
+        delta_sec = 60.0  # minimum 1 min pour éviter division par zéro
+
+    t_hours = delta_sec / 3600.0
+    t_years = delta_sec / (365.0 * 86400.0)
+    days_to_expiry = float(trading_days)
 
     # IV ATM : strike le plus proche du spot
     sub_valid_iv = sub[sub["iv"] > 1e-4]
@@ -253,8 +341,8 @@ def calculate_expected_move(
     atm_idx = (sub_valid_iv["strike"] - spot).abs().idxmin()
     iv_atm = float(sub_valid_iv.loc[atm_idx, "iv"])
 
-    # Formule analytique : S * IV * sqrt(jours / 252)
-    formula_move = float(spot * iv_atm * np.sqrt(days / 252.0))
+    # Formule analytique 1 sigma : S * IV * sqrt(T_years)
+    formula_move = float(spot * iv_atm * np.sqrt(t_years))
 
     # Prix du straddle ATM du front (C_atm + P_atm) et Diagnostic Straddle détaillé
     straddle_move = None
@@ -296,7 +384,9 @@ def calculate_expected_move(
 
         try:
             cfg = load_config()
-            max_spread_pct = getattr(cfg.levels, "straddle_max_spread_pct", 0.20) * 100.0
+            max_spread_pct = (
+                getattr(cfg.levels, "straddle_max_spread_pct", 0.20) * 100.0
+            )
         except Exception:
             max_spread_pct = 20.0
 
@@ -335,21 +425,30 @@ def calculate_expected_move(
             is_spread_wide=(p_spread_rel > max_spread_pct),
         )
 
-        roots_match = (c_root == p_root)
-        expiries_match = (c_exp == p_exp)
+        roots_match = c_root == p_root
+        expiries_match = c_exp == p_exp
         straddle_pts = c_mid + p_mid
 
+        # Unités égales :
+        # Le straddle de marché est ≈ 0,8σ (Brenner-Subrahmanyam :
+        # straddle ≈ sqrt(2/pi)*sigma*S*sqrt(T) ≈ 0.8 * 1σ)
+        # Move théorique straddle dérivé de l'IV : straddle_theo = 0.8 * formula_move
+        # Move 1σ équivalent dérivé du straddle : straddle_1s_equiv = straddle_pts / 0.8
+        straddle_theo = 0.8 * formula_move
+        straddle_1s_equiv = straddle_pts / 0.8 if straddle_pts > 0 else 0.0
+
         # IV implicite du straddle via approximation Brenner-Subrahmanyam inversée :
-        # straddle / (0.8 * spot * sqrt(j/252))
+        # IV = straddle / (0.8 * spot * sqrt(T_years))
         implied_iv = 0.0
-        denom_iv = 0.8 * spot * np.sqrt(days / 252.0)
+        denom_iv = 0.8 * spot * np.sqrt(t_years)
         if denom_iv > 0:
             implied_iv = straddle_pts / denom_iv
 
+        # Comparaison à unités égales 0,8σ
         spread_pct_vs_iv = 0.0
-        if formula_move > 0:
-            denom_m = max(abs(straddle_pts), abs(formula_move))
-            spread_pct_vs_iv = abs(straddle_pts - formula_move) / denom_m * 100.0
+        denom_comp = max(abs(straddle_pts), abs(straddle_theo))
+        if denom_comp > 0:
+            spread_pct_vs_iv = abs(straddle_pts - straddle_theo) / denom_comp * 100.0
 
         # Les 3 strikes voisins ATM (ATM-1, ATM, ATM+1)
         unique_strikes = np.sort(sub["strike"].unique())
@@ -383,6 +482,50 @@ def calculate_expected_move(
                     )
                 )
 
+        # Cause calculée dynamiquement
+        c_spr = max(0.0, c_ask - c_bid)
+        p_spr = max(0.0, p_ask - p_bid)
+        spr_total = c_spr + p_spr
+        spr_impact_pct = (
+            (spr_total / straddle_pts) * 100.0 if straddle_pts > 0 else 0.0
+        )
+        iv_diff_pct = (
+            ((implied_iv - iv_atm) / iv_atm * 100.0) if iv_atm > 0 else 0.0
+        )
+
+        if spread_pct_vs_iv <= 25.0:
+            calculated_cause = (
+                f"Cohérent à unités égales 0,8σ (écart {spread_pct_vs_iv:.1f}% <= 25%) : "
+                f"IV straddle {implied_iv * 100:.2f}% vs IV CBOE {iv_atm * 100:.2f}% "
+                f"(delta {iv_diff_pct:+.1f}%) sur T={t_hours:.1f}h"
+            )
+        else:
+            if iv_diff_pct > 25.0:
+                vol_expl = (
+                    f"prime de volatilité du straddle (IV straddle {implied_iv * 100:.2f}% "
+                    f"soit +{iv_diff_pct:.1f}% vs IV CBOE {iv_atm * 100:.2f}%) "
+                    "liée à la demande sur les options ATM (skew/prime d'événement)"
+                )
+            elif iv_diff_pct < -25.0:
+                vol_expl = (
+                    f"décote de volatilité du straddle (IV straddle {implied_iv * 100:.2f}% "
+                    f"soit {iv_diff_pct:.1f}% vs IV CBOE {iv_atm * 100:.2f}%) "
+                    "liée à une détente post-événement ou liquidité réduite"
+                )
+            else:
+                vol_expl = (
+                    f"écart de pricing de volatilité (IV straddle {implied_iv * 100:.2f}% "
+                    f"vs IV CBOE {iv_atm * 100:.2f}%, delta {iv_diff_pct:+.1f}%)"
+                )
+            spread_expl = (
+                f"incertitude bid-ask de {spr_impact_pct:.1f}% sur le straddle "
+                f"({c_root} C spread {c_spread_rel:.1f}%, P spread {p_spread_rel:.1f}%)"
+            )
+            calculated_cause = (
+                f"Écart {spread_pct_vs_iv:.1f}% > 25% à 0,8σ [T={t_hours:.1f}h] : "
+                f"{vol_expl} ; {spread_expl}"
+            )
+
         is_diag_degraded = False
         reasons: list[str] = []
         if not roots_match:
@@ -403,12 +546,7 @@ def calculate_expected_move(
             )
         if spread_pct_vs_iv > 25.0:
             is_diag_degraded = True
-            reasons.append(
-                f"Écart Straddle vs IV ({spread_pct_vs_iv:.1f}% > 25%) : "
-                "divergence d'annualisation 0DTE entre base ACT/365 continu (CBOE IV) "
-                "et convention trading-days ACT/252 (cockpit) ; "
-                "straddle réel de marché non forcé"
-            )
+            reasons.append(calculated_cause)
 
         straddle_diag = StraddleDiagnostic(
             spot_ndx_used=spot,
@@ -421,22 +559,30 @@ def calculate_expected_move(
             implied_iv_straddle=implied_iv,
             iv_atm_used=iv_atm,
             spread_pct_vs_iv=spread_pct_vs_iv,
+            time_to_expiry_hours=t_hours,
+            time_to_expiry_years=t_years,
+            formula_move_1sigma=formula_move,
+            straddle_move_1sigma_equiv=straddle_1s_equiv,
+            straddle_theo_from_iv=straddle_theo,
+            calculated_cause=calculated_cause,
             neighbors=neighbors,
             is_degraded=is_diag_degraded,
-            degraded_reason=" | ".join(reasons) if reasons else "OK",
+            degraded_reason=" | ".join(reasons) if reasons else calculated_cause,
         )
 
     return ExpectedMoveInfo(
         formula_move=formula_move,
         straddle_move=straddle_move,
         iv_atm=iv_atm,
-        days_to_expiry=float(days),
+        days_to_expiry=float(days_to_expiry),
         lower_bound_ndx=spot - formula_move,
         upper_bound_ndx=spot + formula_move,
         lower_bound_nq=0.0,  # sera rempli avec la base
         upper_bound_nq=0.0,
         expiry=nearest_exp if isinstance(nearest_exp, date) else None,
         straddle_diagnostic=straddle_diag,
+        time_to_expiry_hours=t_hours,
+        time_to_expiry_years=t_years,
     )
 
 
@@ -635,13 +781,26 @@ def enrich_expected_move_nq(
     if em.expiry is not None:
         expiry_dow = em.expiry.strftime("%A %d/%m/%Y")
 
-    # Contrôle cohérence
+    # Contrôle cohérence à unités égales (straddle ≈ 0,8σ)
     discrepancy_pct: float | None = None
     is_coherent = True
     status = DataStatus.OK
     status_explanation: str | None = None
 
-    if straddle_move_nq is not None and iv_move_nq > 0:
+    if em.straddle_diagnostic is not None:
+        discrepancy_pct = em.straddle_diagnostic.spread_pct_vs_iv
+        is_coherent = not em.straddle_diagnostic.is_degraded
+        status = (
+            DataStatus.DEGRADED
+            if em.straddle_diagnostic.is_degraded
+            else DataStatus.OK
+        )
+        status_explanation = (
+            em.straddle_diagnostic.degraded_reason
+            if em.straddle_diagnostic.is_degraded
+            else f"Cohérence validée à unités égales 0,8σ (écart {discrepancy_pct:.1f}% <= 25%)"
+        )
+    elif straddle_move_nq is not None and iv_move_nq > 0:
         denom = max(abs(straddle_move_nq), abs(iv_move_nq))
         discrepancy_pct = abs(straddle_move_nq - iv_move_nq) / denom * 100.0
         if discrepancy_pct > 25.0:
@@ -1137,7 +1296,12 @@ class LevelsEngine:
             )
 
         # 8. Expected Move — enrichir avec les champs NQ côte à côte
-        em_info = calculate_expected_move(df_gex, spot_ndx, ref_utc=now_utc)
+        em_info = calculate_expected_move(
+            df_gex,
+            spot_ndx,
+            ref_utc=now_utc,
+            cboe_quote_time_utc=chain.latest_quote_time_utc,
+        )
         if em_info is not None:
             em_info.lower_bound_nq = em_info.lower_bound_ndx + basis_val
             em_info.upper_bound_nq = em_info.upper_bound_ndx + basis_val
@@ -1149,10 +1313,19 @@ class LevelsEngine:
                 cboe_age_minutes=chain.age_minutes,
             )
             exp_str = em_info.expiry.isoformat() if em_info.expiry else "N/A"
-            straddle_s = f"{em_info.straddle_move:.1f} pts" if em_info.straddle_move else "N/A"
+            straddle_s = (
+                f"{em_info.straddle_move:.1f} pts"
+                if em_info.straddle_move
+                else "N/A"
+            )
+            t_h = (
+                f"{em_info.time_to_expiry_hours:.1f} h"
+                if em_info.time_to_expiry_hours is not None
+                else f"{em_info.days_to_expiry:.2f} j"
+            )
             anomalies.append(
                 f"Expected Move (échéance {exp_str}) : IV ATM {em_info.iv_atm * 100:.2f} %, "
-                f"Straddle ATM {straddle_s}, durée {em_info.days_to_expiry:.2f} j"
+                f"Straddle ATM {straddle_s}, T {t_h}"
             )
 
         # 9. Max Pain calculé strictement PAR échéance (front / référence)

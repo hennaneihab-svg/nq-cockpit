@@ -587,13 +587,14 @@ def test_expected_move_order_of_magnitude_22pct():
         ]
     )
 
-    # Référence hors séance pour avoir days = 1.0
+    # Référence pour le calcul calendaire ACT/365
+    # (quote 2026-09-28 16:15 -> exp 2026-09-29 16:00, T ≈ 23.75 h)
     ref_utc = datetime(2026, 9, 29, 1, 37, 0, tzinfo=timezone.utc)
     em = calculate_expected_move(df, spot, ref_utc=ref_utc)
 
     assert em is not None
-    assert em.days_to_expiry == 1.0
+    assert em.time_to_expiry_hours == pytest.approx(23.75, abs=0.05)
     ratio = em.formula_move / spot
-    # 1.38586 % ≈ 1.39 %
-    assert abs(ratio - 0.0139) < 0.0005
-    assert pytest.approx(ratio * 100.0, abs=0.05) == 1.39
+    # Ratio analytique ACT/365 : 0.22 * sqrt(23.75 / (365*24)) ≈ 1.15%
+    assert abs(ratio - 0.0115) < 0.0005
+    assert pytest.approx(ratio * 100.0, abs=0.05) == 1.15

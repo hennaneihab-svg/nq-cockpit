@@ -95,9 +95,15 @@ class StraddleDiagnostic:
     roots_match: bool
     expiries_match: bool
     straddle_points: float  # C_mid + P_mid en points d'indice purs
-    implied_iv_straddle: float  # straddle / (0.8 * spot * sqrt(j/252))
+    implied_iv_straddle: float  # straddle / (0.8 * spot * sqrt(T)) avec T = heures / (365 * 24)
     iv_atm_used: float
-    spread_pct_vs_iv: float  # écart relatif
+    spread_pct_vs_iv: float  # écart relatif à unités égales 0.8σ
+    time_to_expiry_hours: float = 0.0
+    time_to_expiry_years: float = 0.0
+    formula_move_1sigma: float = 0.0
+    straddle_move_1sigma_equiv: float = 0.0
+    straddle_theo_from_iv: float = 0.0
+    calculated_cause: str = ""
     neighbors: list[StraddleStrikeNeighbor] = field(default_factory=list)
     is_degraded: bool = False
     degraded_reason: str = ""
@@ -133,6 +139,8 @@ class ExpectedMoveInfo:
     spot_nq_converted: float = 0.0
     spread_nq_vs_converted: float = 0.0
     straddle_diagnostic: StraddleDiagnostic | None = None
+    time_to_expiry_hours: float | None = None
+    time_to_expiry_years: float | None = None
 
 
 @dataclass
@@ -332,6 +340,24 @@ class LevelsSnapshot:
                         "iv_atm_used": self.expected_move.straddle_diagnostic.iv_atm_used,
                         "spread_pct_vs_iv": (
                             self.expected_move.straddle_diagnostic.spread_pct_vs_iv
+                        ),
+                        "time_to_expiry_hours": (
+                            self.expected_move.straddle_diagnostic.time_to_expiry_hours
+                        ),
+                        "time_to_expiry_years": (
+                            self.expected_move.straddle_diagnostic.time_to_expiry_years
+                        ),
+                        "formula_move_1sigma": (
+                            self.expected_move.straddle_diagnostic.formula_move_1sigma
+                        ),
+                        "straddle_move_1sigma_equiv": (
+                            self.expected_move.straddle_diagnostic.straddle_move_1sigma_equiv
+                        ),
+                        "straddle_theo_from_iv": (
+                            self.expected_move.straddle_diagnostic.straddle_theo_from_iv
+                        ),
+                        "calculated_cause": (
+                            self.expected_move.straddle_diagnostic.calculated_cause
                         ),
                         "is_degraded": self.expected_move.straddle_diagnostic.is_degraded,
                         "degraded_reason": (

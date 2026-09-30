@@ -487,7 +487,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"âge chaîne CBOE : {em_age_str}"
             )
             print(f"  IV ATM               : {em.iv_atm * 100:.2f}%")
-            print(f"  Durée                : {em.days_to_expiry:.2f} j (bourse)")
+            t_str = (
+                f"{em.time_to_expiry_hours:.2f} h "
+                f"({em.days_to_expiry:.2f} j calendaires, base ACT/365)"
+                if em.time_to_expiry_hours is not None
+                else f"{em.days_to_expiry:.2f} j (bourse)"
+            )
+            print(f"  Durée (T)            : {t_str}")
 
             # Méthode IV
             iv_pts = em.iv_move_nq if em.iv_move_nq is not None else em.formula_move
@@ -506,7 +512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             spread_sign = f"{em.spread_nq_vs_converted:+,.2f}"
             print(f"      - Écart NQ observé vs converti : {spread_sign} pts")
-            print("    Formule            : spot_ndx x IV x sqrt(j/252) -> [spot_nq +/- move]")
+            print("    Formule            : spot_ndx x IV x sqrt(T/365) -> [spot_nq +/- move]")
 
             # Méthode Straddle
             if em.straddle_move_nq is not None:
@@ -514,7 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 s_hi = em.straddle_upper_nq if em.straddle_upper_nq is not None else "N/A"
                 s_lo_s = f"{s_lo:,.2f}" if isinstance(s_lo, float) else s_lo
                 s_hi_s = f"{s_hi:,.2f}" if isinstance(s_hi, float) else s_hi
-                print(f"  Méthode Straddle     : +/- {em.straddle_move_nq:.1f} pts NQ")
+                print(f"  Méthode Straddle     : +/- {em.straddle_move_nq:.1f} pts NQ (≈ 0,8σ)")
                 print(f"    Bornes Straddle    : [{s_lo_s} .. {s_hi_s}]")
                 print("    Formule            : (C_ATM_mid + P_ATM_mid) via base")
             else:
@@ -522,7 +528,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if em.discrepancy_pct is not None:
                 coh_flag = "OK" if em.is_coherent else "DÉGRADÉ (>25%)"
                 print(
-                    f"  Écart IV vs Straddle : {em.discrepancy_pct:.1f}% [{coh_flag}]"
+                    f"  Écart IV vs Straddle : {em.discrepancy_pct:.1f}% [{coh_flag}] "
+                    "(comparaison à unités égales 0,8σ)"
                 )
             if em.status_explanation:
                 print(f"  [!] {em.status_explanation}")
@@ -583,13 +590,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{sd.put_leg.quote_time_et or 'N/A'} | "
                     f"{sd.put_leg.quote_time_algiers or 'N/A'}"
                 )
-                print(f"      Prix Straddle pur (C+P)         : {sd.straddle_points:.2f} pts NDX")
+                print(
+                    f"      Temps restant à expiration (T)  : "
+                    f"{sd.time_to_expiry_hours:.2f} h "
+                    f"({sd.time_to_expiry_years:.4f} an, base ACT/365)"
+                )
+                print(
+                    f"      Prix Straddle pur (C+P)         : "
+                    f"{sd.straddle_points:.2f} pts NDX (≈ 0,8σ)"
+                )
+                print(
+                    f"      Équivalent 1σ du Straddle       : "
+                    f"{sd.straddle_move_1sigma_equiv:.2f} pts NDX"
+                )
+                print(
+                    f"      Formule analytique 1σ (IV)      : "
+                    f"{sd.formula_move_1sigma:.2f} pts NDX "
+                    f"(Straddle théo 0,8σ = {sd.straddle_theo_from_iv:.2f} pts)"
+                )
                 print(
                     f"      IV implicite du Straddle        : "
                     f"{sd.implied_iv_straddle * 100:.2f}% "
                     f"(vs IV ATM CBOE : {sd.iv_atm_used * 100:.2f}%)"
                 )
-                print(f"      Écart relatif Straddle vs IV    : {sd.spread_pct_vs_iv:.1f}%")
+                print(
+                    f"      Écart relatif à unités égales   : {sd.spread_pct_vs_iv:.1f}%"
+                )
                 if sd.neighbors:
                     print("      Strikes ATM voisins :")
                     for n in sd.neighbors:
@@ -601,7 +627,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         )
                 diag_status_s = "DÉGRADÉ" if sd.is_degraded else "OK"
                 print(f"      Statut diagnostic Straddle      : [{diag_status_s}]")
-                if sd.degraded_reason:
+                if sd.calculated_cause:
+                    print(f"      Cause calculée                  : {sd.calculated_cause}")
+                elif sd.degraded_reason:
                     print(f"      Cause identifiée                : {sd.degraded_reason}")
 
         if snap.max_pain_nq:

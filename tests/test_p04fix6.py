@@ -124,11 +124,17 @@ def test_straddle_diagnostic_calculation_and_cause_documentation():
     strikes = [n.strike for n in diag.neighbors]
     assert strikes == [19900.0, 20000.0, 20100.0]
 
-    # 8. Cause documentée en cas d'écart > 25%
+    # 8. Cause calculée dynamiquement (pas de texte figé) et T en heures
+    assert diag.time_to_expiry_hours == pytest.approx(5.75, abs=0.01)
+    assert diag.time_to_expiry_years == pytest.approx(5.75 / (365 * 24), abs=1e-6)
+    assert diag.formula_move_1sigma > 0.0
+    assert diag.straddle_theo_from_iv > 0.0
+    assert diag.calculated_cause != ""
     if diag.is_degraded:
-        assert "divergence d'annualisation 0DTE" in diag.degraded_reason
-        assert "ACT/365" in diag.degraded_reason
-        assert "ACT/252" in diag.degraded_reason
+        assert f"{diag.spread_pct_vs_iv:.1f}%" in diag.calculated_cause
+        assert "T=" in diag.calculated_cause
+        assert "IV straddle" in diag.calculated_cause
+        assert "IV CBOE" in diag.calculated_cause
 
 
 def test_live_basis_calculation_and_three_way_comparison():
@@ -338,4 +344,118 @@ def test_straddle_diagnostic_serialization_to_dict():
     assert sd_dict["call_leg"]["root"] == "NDXP"
     assert sd_dict["put_leg"]["root"] == "NDXP"
     assert sd_dict["straddle_points"] == 120.0
+    assert "time_to_expiry_hours" in sd_dict
+    assert "formula_move_1sigma" in sd_dict
+    assert "calculated_cause" in sd_dict
+
+
+def test_p04fix6a_straddle_calendar_time_and_dynamic_diagnostic():
+    """P04-fix6a : Test dédié complet :
+    1. T = temps calendaire restant jusqu'à l'expiration (horodatage CBOE, pas d'heure en dur).
+    2. Méthode IV recalculée avec T/365.
+    3. Comparaison straddle et 1σ à unités égales (straddle ≈ 0,8σ).
+    4. T affiché en heures (5.75 h pour 10:15 -> 16:00).
+    5. Diagnostic : cause calculée dynamiquement (pas de texte figé).
+    """
+    spot_ndx = 20000.0
+    exp_date = date(2026, 9, 29)
+    # Quote CBOE à 10:15 ET (14:15 UTC) -> expiration 16:00 ET (20:00 UTC) -> T = 5.75 h
+    cboe_ts_str = "2026-09-29 10:15:00"
+
+    # Cas 1 : Straddle cohérent avec l'IV (écart < 25%)
+    # IV = 0.20, T_years = 5.75 / (365*24) = 0.0006564
+    # 1σ_IV = 102.48 pts -> Théo 0.8σ = 81.98 pts
+    # Marché : Call mid = 41.0, Put mid = 41.0 -> Straddle = 82.0 pts
+    df_coherent = pd.DataFrame(
+        [
+            {
+                "contract": "NDXP260929C20000000",
+                "expiry": exp_date,
+                "type": "C",
+                "strike": 20000.0,
+                "bid": 40.5,
+                "ask": 41.5,
+                "last_trade_price": 41.0,
+                "iv": 0.20,
+                "volume": 200.0,
+                "open_interest": 500.0,
+                "last_trade_time": cboe_ts_str,
+            },
+            {
+                "contract": "NDXP260929P20000000",
+                "expiry": exp_date,
+                "type": "P",
+                "strike": 20000.0,
+                "bid": 40.5,
+                "ask": 41.5,
+                "last_trade_price": 41.0,
+                "iv": 0.20,
+                "volume": 180.0,
+                "open_interest": 600.0,
+                "last_trade_time": cboe_ts_str,
+            },
+        ]
+    )
+
+    em_coh = calculate_expected_move(df_coherent, spot=spot_ndx)
+    assert em_coh is not None
+    assert em_coh.time_to_expiry_hours == pytest.approx(5.75, abs=0.01)
+    # Formule 1σ : 20000 * 0.20 * sqrt(5.75 / (365*24)) ≈ 102.48 pts
+    assert em_coh.formula_move == pytest.approx(102.48, abs=0.1)
+
+    diag_coh = em_coh.straddle_diagnostic
+    assert diag_coh is not None
+    assert diag_coh.time_to_expiry_hours == pytest.approx(5.75, abs=0.01)
+    assert diag_coh.straddle_points == 82.0
+    assert diag_coh.straddle_theo_from_iv == pytest.approx(81.98, abs=0.1)
+    assert diag_coh.spread_pct_vs_iv < 1.0  # quasi 0%
+    assert diag_coh.is_degraded is False
+    assert "Cohérent à unités égales 0,8σ" in diag_coh.calculated_cause
+    assert "T=5.8h" in diag_coh.calculated_cause
+    assert "IV straddle" in diag_coh.calculated_cause
+
+    # Cas 2 : Straddle divergent (> 25%) avec prime de volatilité
+    # Marché : Call mid = 61.0, Put mid = 59.0 -> Straddle = 120.0 pts (écart 31.7% vs 81.98 pts)
+    df_divergent = pd.DataFrame(
+        [
+            {
+                "contract": "NDXP260929C20000000",
+                "expiry": exp_date,
+                "type": "C",
+                "strike": 20000.0,
+                "bid": 60.0,
+                "ask": 62.0,
+                "last_trade_price": 61.0,
+                "iv": 0.20,
+                "volume": 500.0,
+                "open_interest": 1000.0,
+                "last_trade_time": cboe_ts_str,
+            },
+            {
+                "contract": "NDXP260929P20000000",
+                "expiry": exp_date,
+                "type": "P",
+                "strike": 20000.0,
+                "bid": 58.0,
+                "ask": 60.0,
+                "last_trade_price": 59.0,
+                "iv": 0.20,
+                "volume": 450.0,
+                "open_interest": 1200.0,
+                "last_trade_time": cboe_ts_str,
+            },
+        ]
+    )
+
+    em_div = calculate_expected_move(df_divergent, spot=spot_ndx)
+    assert em_div is not None
+    diag_div = em_div.straddle_diagnostic
+    assert diag_div is not None
+    assert diag_div.spread_pct_vs_iv == pytest.approx(31.7, abs=0.2)
+    assert diag_div.is_degraded is True
+    # Cause calculée dynamiquement, aucune phrase statique codée en dur
+    assert "Écart 31.7% > 25% à 0,8σ [T=5.8h]" in diag_div.calculated_cause
+    assert "IV straddle 29.27% soit +46.4% vs IV CBOE 20.00%" in diag_div.calculated_cause
+    assert "incertitude bid-ask de 3.3% sur le straddle" in diag_div.calculated_cause
+    assert "NDXP" in diag_div.calculated_cause
 
