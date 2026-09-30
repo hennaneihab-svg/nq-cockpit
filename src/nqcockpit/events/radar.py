@@ -406,12 +406,18 @@ def render_console(report: EventRiskReport) -> str:
                 else ""
             )
             conf_str = "confirmée" if e.confirmed else "estimée"
-            raw_date = e.raw_date_str or (
-                e.scheduled_utc.strftime("%Y-%m-%d") if e.scheduled_utc else "N/A"
-            )
-            lines.append(
-                f"    {e.ticker}: {dt_str}{eps_str} [{conf_str}, brut: {raw_date}] [{st}]"
-            )
+            if e.raw_dates_list:
+                raw_dates_str = f"dates: {e.raw_dates_list}"
+            elif e.raw_date_str:
+                raw_dates_str = f"brut: {e.raw_date_str}"
+            elif e.scheduled_utc:
+                raw_dates_str = f"brut: {e.scheduled_utc.strftime('%Y-%m-%d')}"
+            else:
+                raw_dates_str = "brut: N/A"
+
+            field_str = f", champ: {e.raw_field_used}" if e.raw_field_used else ""
+            tag_str = f"[{conf_str} | {raw_dates_str}{field_str}] [{st}]"
+            lines.append(f"    {e.ticker}: {dt_str}{eps_str} {tag_str}")
 
     lines.append("-" * 70)
     lines.append("  STATUT DES SOURCES :")

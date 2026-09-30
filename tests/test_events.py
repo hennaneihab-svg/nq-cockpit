@@ -624,14 +624,22 @@ def test_megacaps_confirmed_vs_estimated_and_time_suppression(
 
     mock_yf = MagicMock()
 
-    # 1. Date unique -> confirmée, date seule -> pas d'heure 16:30 codée en dur
-    ticker_single = MagicMock()
-    ticker_single.calendar = {
+    # 1. Date avec preuve de confirmation explicite -> confirmée
+    ticker_confirmed = MagicMock()
+    ticker_confirmed.calendar = {
         "Earnings Date": [date(2026, 10, 29)],
+        "Earnings Date Confirmed": True,
         "Earnings Average": 1.98124,
     }
 
-    # 2. Fourchette -> estimée
+    # 2. Date sans preuve de confirmation -> estimée
+    ticker_unconfirmed = MagicMock()
+    ticker_unconfirmed.calendar = {
+        "Earnings Date": [date(2026, 11, 17)],
+        "Earnings Average": 2.47356,
+    }
+
+    # 3. Fourchette -> estimée
     ticker_range = MagicMock()
     ticker_range.calendar = {
         "Earnings Date": [date(2026, 10, 28), date(2026, 11, 2)],
@@ -640,7 +648,9 @@ def test_megacaps_confirmed_vs_estimated_and_time_suppression(
 
     def mock_get_ticker(symbol: str) -> MagicMock:
         if symbol == "AAPL":
-            return ticker_single
+            return ticker_confirmed
+        if symbol == "NVDA":
+            return ticker_unconfirmed
         return ticker_range
 
     mock_yf.Ticker.side_effect = mock_get_ticker
@@ -651,11 +661,19 @@ def test_megacaps_confirmed_vs_estimated_and_time_suppression(
     assert ev_aapl.time_provided is False
     assert ev_aapl.timing == "après clôture, heure non fournie"
     assert ev_aapl.raw_date_str == "2026-10-29"
+    assert ev_aapl.raw_dates_list == ["2026-10-29"]
+    assert 'calendar["Earnings Date"]' in ev_aapl.raw_field_used
     assert ev_aapl.eps_estimate == 1.98124
+
+    ev_nvda = _fetch_yfinance_earnings("NVDA")
+    assert ev_nvda.confirmed is False  # sans preuve -> estimée
+    assert ev_nvda.raw_dates_list == ["2026-11-17"]
+    assert 'calendar["Earnings Date"]' in ev_nvda.raw_field_used
 
     ev_amzn = _fetch_yfinance_earnings("AMZN")
     assert ev_amzn.confirmed is False
     assert " à " in ev_amzn.raw_date_str
+    assert len(ev_amzn.raw_dates_list) == 2
     assert ev_amzn.eps_estimate == 1.97667
 
     # Les deux EPS sont distincts dans les données brutes
@@ -819,6 +837,61 @@ def test_global_risk_header_coverage_and_aligned_horizons() -> None:
     console_7d = render_console(report_7d)
     assert "horizon de 7 jours" in console_7d
     assert "CALENDRIER (7 prochains jours" in console_7d
+
+
+def test_megacaps_nvda_avgo_raw_yfinance_proof_and_estimated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cas P05-d : Joindre le brut yfinance pour NVDA/AVGO et qualifier 'estimée' sans preuve."""
+    from nqcockpit.events.earnings import _fetch_yfinance_earnings
+    from nqcockpit.events.radar import render_console
+    from nqcockpit.events.risk import compute_event_risk
+
+    mock_yf = MagicMock()
+    nvda_mock = MagicMock()
+    nvda_mock.calendar = {
+        "Earnings Date": [date(2026, 11, 17)],
+        "Earnings Average": 2.47356,
+    }
+    avgo_mock = MagicMock()
+    avgo_mock.calendar = {
+        "Earnings Date": [date(2026, 12, 9)],
+        "Earnings Average": 3.82526,
+    }
+
+    def mock_get(sym: str) -> MagicMock:
+        return nvda_mock if sym == "NVDA" else avgo_mock
+
+    mock_yf.Ticker.side_effect = mock_get
+    monkeypatch.setitem(sys.modules, "yfinance", mock_yf)
+
+    ev_nvda = _fetch_yfinance_earnings("NVDA")
+    assert ev_nvda.confirmed is False
+    assert ev_nvda.raw_dates_list == ["2026-11-17"]
+    assert ev_nvda.raw_field_used == 'calendar["Earnings Date"]'
+
+    ev_avgo = _fetch_yfinance_earnings("AVGO")
+    assert ev_avgo.confirmed is False
+    assert ev_avgo.raw_dates_list == ["2026-12-09"]
+    assert ev_avgo.raw_field_used == 'calendar["Earnings Date"]'
+
+    report = compute_event_risk(
+        events=[],
+        earnings=[ev_nvda, ev_avgo],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=datetime(2026, 9, 30, 10, 0, tzinfo=UTC),
+        horizon_days=90,
+    )
+    console_out = render_console(report)
+    assert "NVDA:" in console_out
+    assert "estimée" in console_out
+    assert "dates: ['2026-11-17']" in console_out
+    assert 'champ: calendar["Earnings Date"]' in console_out
+    assert "AVGO:" in console_out
+    assert "dates: ['2026-12-09']" in console_out
+
 
 
 

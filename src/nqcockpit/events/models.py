@@ -140,6 +140,12 @@ class EarningsEvent:
     raw_date_str: str = ""
     """Date ou fourchette brute renvoyée par yfinance."""
 
+    raw_dates_list: list[str] = field(default_factory=list)
+    """Liste des dates brutes renvoyées par yfinance."""
+
+    raw_field_used: str = ""
+    """Nom du champ brut utilisé (ex: 'calendar[\"Earnings Date\"]')."""
+
     time_provided: bool = False
     """True si une heure de publication exacte a été fournie."""
 

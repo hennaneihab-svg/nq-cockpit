@@ -62,6 +62,8 @@ def _load_cache(
             status=DataStatus(raw.get("status", "OK")),
             error_msg=raw.get("error_msg"),
             raw_date_str=raw.get("raw_date_str", ""),
+            raw_dates_list=raw.get("raw_dates_list", []),
+            raw_field_used=raw.get("raw_field_used", ""),
             time_provided=raw.get("time_provided", False),
             timing=raw.get("timing", "après clôture, heure non fournie"),
         )
@@ -88,6 +90,8 @@ def _save_cache(cache_path: pathlib.Path, ev: EarningsEvent) -> None:
             "status": ev.status.value,
             "error_msg": ev.error_msg,
             "raw_date_str": ev.raw_date_str,
+            "raw_dates_list": ev.raw_dates_list,
+            "raw_field_used": ev.raw_field_used,
             "time_provided": ev.time_provided,
             "timing": ev.timing,
         }
@@ -117,16 +121,21 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         scheduled_dt: datetime | None = None
         confirmed = False
         raw_date_str = ""
+        raw_dates_list: list[str] = []
+        raw_field_used = ""
         time_provided = False
         timing = "après clôture, heure non fournie"
 
         if cal is not None and not (hasattr(cal, "empty") and cal.empty):
             raw_ed = None
             if isinstance(cal, dict):
-                raw_ed = cal.get("Earnings Date")
+                if "Earnings Date" in cal:
+                    raw_ed = cal.get("Earnings Date")
+                    raw_field_used = 'calendar["Earnings Date"]'
             elif hasattr(cal, "loc"):
                 try:
                     raw_ed = cal.loc["Earnings Date"]
+                    raw_field_used = 'calendar.loc["Earnings Date"]'
                 except (KeyError, IndexError):
                     raw_ed = None
 
@@ -139,15 +148,20 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
                 else:
                     items = [raw_ed]
 
-                # Règle de qualification :
-                # - 1 date unique -> confirmée par l'entreprise
-                # - >1 date (fourchette) -> estimée
-                if len(items) > 1:
-                    confirmed = False
-                    raw_date_str = " à ".join(str(d) for d in items)
-                elif len(items) == 1:
-                    confirmed = True
-                    raw_date_str = str(items[0])
+                raw_dates_list = [str(d) for d in items]
+                raw_date_str = " à ".join(raw_dates_list)
+
+                # Qualification : Sans preuve explicite de confirmation d'entreprise,
+                # afficher 'estimée'. Une simple liste de dates renvoyée par yfinance
+                # ne constitue pas une confirmation d'entreprise.
+                has_confirmation_proof = False
+                if isinstance(cal, dict):
+                    has_confirmation_proof = bool(
+                        cal.get("Earnings Date Confirmed")
+                        or cal.get("Confirmed")
+                        or cal.get("is_confirmed")
+                    )
+                confirmed = has_confirmation_proof
 
                 if items:
                     val0 = items[0]
@@ -215,6 +229,8 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
             status=status,
             error_msg=err,
             raw_date_str=raw_date_str,
+            raw_dates_list=raw_dates_list,
+            raw_field_used=raw_field_used,
             time_provided=time_provided,
             timing=timing,
         )
