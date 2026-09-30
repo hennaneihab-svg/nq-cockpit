@@ -260,6 +260,14 @@ def create_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8502,
         help="Port Streamlit (défaut : 8502)"
     )
+    j_coaching_ui = j_sub.add_parser(
+        "coaching-ui",
+        help="Lance l'interface Streamlit dédiée d'analytics et coaching",
+    )
+    j_coaching_ui.add_argument(
+        "--port", type=int, default=8504,
+        help="Port Streamlit (défaut : 8504)"
+    )
     j_import = j_sub.add_parser(
         "import-csv", help="Importe des trades depuis un fichier CSV"
     )
@@ -1936,6 +1944,28 @@ def _handle_journal(args: Any) -> int:
             print("\n[nqcockpit] Journal arrêté.")
         return 0
 
+    if action == "coaching-ui":
+        import subprocess  # noqa: S603
+        import sys
+        from pathlib import Path
+
+        port = getattr(args, "port", 8504)
+        page_path = Path(__file__).parent / "ui" / "coaching_page.py"
+        print(f"[nqcockpit] Coaching & Analytics Streamlit sur http://localhost:{port}")
+        try:
+            subprocess.run(  # noqa: S603
+                [
+                    sys.executable, "-m", "streamlit", "run", str(page_path),
+                    "--server.port", str(port),
+                    "--server.headless", "true",
+                    "--theme.base", "dark",
+                ],
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\n[nqcockpit] Coaching UI arrêté.")
+        return 0
+
     if action == "backup":
         from nqcockpit.journal.backup import create_journal_backup
 
@@ -2197,7 +2227,8 @@ def _handle_journal(args: Any) -> int:
 
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
-        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot, backup, report."
+        "Essayez : stats, daily, coaching, ui, coaching-ui, import-csv, "
+        "attach-screenshot, backup, report."
     )
     return 1
 

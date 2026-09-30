@@ -574,6 +574,22 @@ def segment_performance(
     }
 
 
+def segment_by_setup_tag(
+    trades: list[TradeEntry],
+    min_samples: int = _MIN_PATTERN_SAMPLES,
+) -> dict[str, PerformanceStats]:
+    """Performance segmentée par setup_tag."""
+    return segment_performance(trades, by="setup_tag", min_samples=min_samples)
+
+
+def segment_by_gamma_regime(
+    trades: list[TradeEntry],
+    min_samples: int = _MIN_PATTERN_SAMPLES,
+) -> dict[str, PerformanceStats]:
+    """Performance segmentée par gamma_regime."""
+    return segment_performance(trades, by="gamma_regime", min_samples=min_samples)
+
+
 # ---------------------------------------------------------------------------
 # Rapport de coaching
 # ---------------------------------------------------------------------------

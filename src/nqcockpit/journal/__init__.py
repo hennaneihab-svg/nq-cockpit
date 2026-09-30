@@ -12,6 +12,8 @@ from nqcockpit.journal.engine import (
     finalize_trade,
     generate_coaching_report,
     log_trade,
+    segment_by_gamma_regime,
+    segment_by_setup_tag,
     segment_performance,
 )
 from nqcockpit.journal.importer import (
@@ -58,7 +60,8 @@ __all__ = [
     "finalize_trade", "log_trade", "detect_violations", "detect_tilt_alerts",
     "detect_period_tilt_alerts",
     "compute_daily_stats", "compute_performance_stats",
-    "segment_performance", "generate_coaching_report",
+    "segment_performance", "segment_by_setup_tag", "segment_by_gamma_regime",
+    "generate_coaching_report",
     # importer
     "CSVImportSummary", "import_trades_from_csv",
     # backup
