@@ -107,6 +107,10 @@ class BasisSnapshot:
     is_aligned: bool = True
     formula: str = "base = NQ_close - NDX_spot"
     delay_compensation_note: str | None = None
+    # Distance entre la barre retenue et la cible 16:00 ET (min). None = non calculé.
+    dist_to_target_minutes: float | None = None
+    # Seuil utilisé pour marquer DÉGRADÉ (issu de la config, sinon fallback).
+    target_tolerance_minutes: float | None = None
 
 
 @dataclass
@@ -142,6 +146,8 @@ class PairResult:
     cause_code: str = "AUTRE"
     cause_detail: str = ""
     action_taken: str = ""
+    dist_to_target_minutes: float | None = None
+    target_tolerance_minutes: float = 15.0
 
     @property
     def is_found(self) -> bool:

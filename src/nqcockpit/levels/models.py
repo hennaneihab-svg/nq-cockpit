@@ -197,6 +197,8 @@ class LevelsSnapshot:
     basis_method: str = "paire séance précédente"
     basis_formula: str = "base = NQ_close - NDX_spot"
     basis_delay_compensation_note: str | None = None
+    basis_dist_to_target_minutes: float | None = None
+    basis_target_tolerance_minutes: float | None = None
 
     # Murs utiles (dans fenêtre ±10 %) et globaux (Tâche 3)
     call_wall_useful_ndx: float | None = None
@@ -262,6 +264,8 @@ class LevelsSnapshot:
             "basis": self.basis,
             "basis_label": self.basis_label,
             "basis_status": self.basis_status.value,
+            "basis_dist_to_target_minutes": self.basis_dist_to_target_minutes,
+            "basis_target_tolerance_minutes": self.basis_target_tolerance_minutes,
             "synthetic_basis": self.synthetic_basis,
             "net_gex": self.net_gex,
             "regime": self.regime,

@@ -490,7 +490,8 @@ def test_p04fix6b_prior_session_target_tolerance_and_remote_fallback():
         )
     ]
 
-    # Sans fetcher distant capable : la barre à 10:00 est rejetée car trop éloignée de 16:00 ET
+    # Sans fetcher distant capable : la barre à 10:00 est trouvée
+    # mais trop éloignée de 16:00 ET (360 min)
     conn_mem = sqlite3.connect(":memory:")
     res_rejected = find_basis_pair(
         target=target_utc,
@@ -500,18 +501,40 @@ def test_p04fix6b_prior_session_target_tolerance_and_remote_fallback():
         target_tolerance_minutes=15.0,
         conn=conn_mem,
     )
-    assert res_rejected.is_aligned is False
+    assert res_rejected.is_found is True
+    assert res_rejected.is_aligned is True
     assert res_rejected.cause_code == "DISTANCE_CIBLE_HORS_TOLERANCE"
+    assert res_rejected.dist_to_target_minutes == pytest.approx(360.0)
 
-    # compute_previous_session_basis doit renvoyer INDISPONIBLE (BLOCKED)
-    snap_blocked = compute_previous_session_basis(
+    # compute_previous_session_basis doit renvoyer DÉGRADÉ avec distance affichée
+    snap_degraded = compute_previous_session_basis(
         nq_bars=nq_mem,
         ndx_bars=ndx_mem,
         ref_utc=datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc),
         pair_result=res_rejected,
+        target_tolerance_minutes=15.0,
+    )
+    assert snap_degraded.status == DataStatus.DEGRADED
+    assert snap_degraded.basis == pytest.approx(300.0)  # 20500 - 20200
+    assert snap_degraded.dist_to_target_minutes == pytest.approx(360.0)
+    assert "DÉGRADÉ" in snap_degraded.label
+    assert "360.0 min de 16:00 ET" in snap_degraded.label
+
+    # Cas où aucune barre n'existe du tout pour la séance -> BLOCKED (INDISPONIBLE)
+    res_empty = find_basis_pair(
+        target=target_utc,
+        nq_bars=[],
+        ndx_bars=[],
+        conn=conn_mem,
+    )
+    assert res_empty.is_found is False
+    snap_blocked = compute_previous_session_basis(
+        nq_bars=[],
+        ndx_bars=[],
+        ref_utc=datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc),
+        pair_result=res_empty,
     )
     assert snap_blocked.status == DataStatus.BLOCKED
-    assert snap_blocked.basis == 0.0
     assert "INDISPONIBLE" in snap_blocked.label
 
     # Avec fetcher distant retournant la barre de 15:59 ET (19:59 UTC, distance 1.0 min <= 15 min)
@@ -562,15 +585,18 @@ def test_p04fix6b_prior_session_target_tolerance_and_remote_fallback():
     assert res_remote.ndx_origin == "source_distante"
     assert res_remote.nq_bar is not None and res_remote.nq_bar.close == 20600.0
     assert res_remote.ndx_bar is not None and res_remote.ndx_bar.close == 20300.0
+    assert res_remote.dist_to_target_minutes == pytest.approx(1.0)
 
     snap_ok = compute_previous_session_basis(
         nq_bars=nq_mem,
         ndx_bars=ndx_mem,
         ref_utc=datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc),
         pair_result=res_remote,
+        target_tolerance_minutes=15.0,
     )
     assert snap_ok.status == DataStatus.OK
     assert snap_ok.basis == pytest.approx(300.0)
+    assert snap_ok.dist_to_target_minutes == pytest.approx(1.0)
 
 
 def test_p04fix6b_live_basis_anchored_on_spot_nq(tmp_path):
@@ -877,4 +903,168 @@ def test_p04fix6d_put_wall_global_degraded_when_absent(tmp_path):
     # Le snapshot ne doit jamais inventer un Put Wall à 0.0
     if snap.put_wall_ndx is not None:
         assert snap.put_wall_ndx != 0.0
+
+
+def test_p04fix6_calendar_time_t_vs_trading_days_252():
+    """Vérifie le calcul de T en temps calendaire réel (heures / (365*24))
+    et non en jours de bourse / 252.
+
+    Exemple concret :
+    Évaluation le 2026-09-29 à 10:15 ET (14:15 UTC).
+    Échéance le 2026-09-30 à 16:00 ET (20:00 UTC).
+    Temps calendaire réel restant : 29.75 heures = 107 100 secondes.
+    T calendaire = 29.75 / (365 * 24) = 0.003396118 an.
+    sqrt(T calendaire) = 0.0582762.
+
+    Avec Spot NDX = 20000.0 et IV ATM = 0.2395 :
+    Expected move corrigé (T calendaire) = 20000 * 0.2395 * 0.0582762 = 279.14 pts NDX.
+    """
+    now_utc = datetime(2026, 9, 29, 14, 15, tzinfo=timezone.utc)
+    spot = 20000.0
+    iv_atm = 0.2395
+    exp_date = date(2026, 9, 30)
+
+    df_test = pd.DataFrame(
+        [
+            {
+                "contract": "NDX260930C20000000",
+                "strike": 20000.0,
+                "type": "C",
+                "expiry": exp_date,
+                "bid": 110.0,
+                "ask": 112.0,
+                "iv": iv_atm,
+                "last_trade_price": 111.0,
+                "last_trade_time": now_utc,
+            },
+            {
+                "contract": "NDX260930P20000000",
+                "strike": 20000.0,
+                "type": "P",
+                "expiry": exp_date,
+                "bid": 108.0,
+                "ask": 110.0,
+                "iv": iv_atm,
+                "last_trade_price": 109.0,
+                "last_trade_time": now_utc,
+            },
+        ]
+    )
+
+    em = calculate_expected_move(
+        df_test,
+        spot=spot,
+        ref_utc=now_utc,
+        cboe_quote_time_utc=now_utc,
+    )
+    assert em is not None
+    # Durée calendaire exacte : 29.75 heures
+    assert em.time_to_expiry_hours == pytest.approx(29.75, abs=0.01)
+    # T en années calendaires : 29.75 / (365 * 24)
+    expected_t_years = 29.75 / (365.0 * 24.0)
+    assert em.time_to_expiry_years == pytest.approx(expected_t_years, rel=1e-4)
+
+    # Formule analytique : spot * iv_atm * sqrt(T_years)
+    expected_move_ndx = spot * iv_atm * (expected_t_years**0.5)
+    assert em.formula_move == pytest.approx(expected_move_ndx, rel=1e-4)
+    assert em.formula_move == pytest.approx(279.14, abs=0.5)
+
+
+def test_p04fix6_explicit_16h_distance_and_degraded_basis(tmp_path):
+    """Vérifie le contrôle explicite de distance à 16:00 ET pour la séance précédente :
+    - Appariement trouvé à 12:25 ET (distance 215.0 min > seuil 15.0 min).
+    - La base NQ/NDX est calculée (20500 - 20200 = 300 pts) et NON bloquée.
+    - La distance est explicitement mesurée et égale à 215.0 min.
+    - Le statut passe à DÉGRADÉ avec la distance affichée en minutes.
+    - LevelsSnapshot reflète basis_dist_to_target_minutes et basis_status=DÉGRADÉ.
+    """
+    import sqlite3
+
+    from nqcockpit.data.basis import compute_previous_session_basis, find_basis_pair
+
+    # Séance précédente : 2026-09-28. Clôture 16:00 ET = 20:00 UTC.
+    target_utc = datetime(2026, 9, 28, 20, 0, tzinfo=timezone.utc)
+    conn_empty = sqlite3.connect(":memory:")
+
+    # Données disponibles uniquement jusqu'à 12:25 ET = 16:25 UTC
+    t_1225_utc = datetime(2026, 9, 28, 16, 25, tzinfo=timezone.utc)
+    nq_bars = [
+        Bar(timestamp_utc=t_1225_utc, open=20500.0, high=20505.0, low=20495.0, close=20500.0)
+    ]
+    ndx_bars = [
+        Bar(timestamp_utc=t_1225_utc, open=20200.0, high=20205.0, low=20195.0, close=20200.0)
+    ]
+
+    # Recherche de la paire avec seuil de tolérance cible de 15.0 min
+    pair_res = find_basis_pair(
+        target=target_utc,
+        nq_bars=nq_bars,
+        ndx_bars=ndx_bars,
+        tolerance_minutes=1.0,
+        target_tolerance_minutes=15.0,
+        conn=conn_empty,
+    )
+    assert pair_res.is_found is True
+    assert pair_res.is_aligned is True
+    # Distance à 16:00 ET : 3 heures et 35 minutes = 215 minutes
+    assert pair_res.dist_to_target_minutes == pytest.approx(215.0, abs=0.1)
+    assert pair_res.cause_code == "DISTANCE_CIBLE_HORS_TOLERANCE"
+
+    # Calcul de la base séance précédente
+    now_utc = datetime(2026, 9, 29, 14, 0, tzinfo=timezone.utc)
+    snap = compute_previous_session_basis(
+        nq_bars=nq_bars,
+        ndx_bars=ndx_bars,
+        ref_utc=now_utc,
+        pair_result=pair_res,
+        target_tolerance_minutes=15.0,
+    )
+    assert snap.status == DataStatus.DEGRADED
+    assert snap.basis == pytest.approx(300.0)
+    assert snap.dist_to_target_minutes == pytest.approx(215.0, abs=0.1)
+    assert "215.0 min de 16:00 ET" in snap.label
+    assert "DÉGRADÉ" in snap.label
+
+    # Intégration complète via LevelsEngine.compute_snapshot
+    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    df_chain = pd.DataFrame(
+        [
+            {
+                "contract": "NDX260930C20200000",
+                "expiry": date(2026, 9, 30),
+                "type": "C",
+                "strike": 20200.0,
+                "bid": 10.0,
+                "ask": 12.0,
+                "iv": 0.20,
+                "open_interest": 1000.0,
+                "volume": 500.0,
+                "delta": 0.50,
+                "gamma": 0.0001,
+                "last_trade_price": 11.0,
+                "last_trade_time": now_utc,
+            }
+        ]
+    )
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=20200.0,
+        options_df=df_chain,
+        latest_quote_time_utc=now_utc,
+        fetched_at_utc=now_utc,
+        age_minutes=0.0,
+        status=DataStatus.OK,
+    )
+    # now_utc à 08:00 ET (hors séance régulière pour utiliser la base séance précédente)
+    t_premarket = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+    lvl_snap = engine.compute_snapshot(
+        chain=chain,
+        nq_bars=nq_bars,
+        ndx_bars=ndx_bars,
+        now_utc=t_premarket,
+        conn=conn_empty,
+    )
+    assert lvl_snap.basis_status == DataStatus.DEGRADED
+    assert lvl_snap.basis == pytest.approx(300.0)
+    assert lvl_snap.basis_dist_to_target_minutes == pytest.approx(215.0, abs=0.1)
 

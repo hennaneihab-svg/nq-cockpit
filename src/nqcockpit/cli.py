@@ -121,6 +121,12 @@ def create_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Main CLI entrypoint."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = create_parser()
     args = parser.parse_args(argv)
 
@@ -371,10 +377,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"       Delta-t NQ/NDX       : {snap.basis_delta_t_minutes:.2f} min "
                     f"(tol. {snap.basis_tolerance_minutes:.1f} min) [{align_s}]"
                 )
-                print(
-                    f"       Tolérance cible 16h  : "
-                    f"{target_tol_val:.1f} min [source: {target_tol_src}]"
-                )
+                if snap.basis_dist_to_target_minutes is not None:
+                    dist_flag = (
+                        "OK"
+                        if snap.basis_dist_to_target_minutes <= target_tol_val
+                        else "DÉGRADÉ"
+                    )
+                    print(
+                        f"       Distance cible 16h   : "
+                        f"{snap.basis_dist_to_target_minutes:.1f} min "
+                        f"(seuil {target_tol_val:.1f} min [source: {target_tol_src}]) [{dist_flag}]"
+                    )
+                else:
+                    print(
+                        f"       Tolérance cible 16h  : "
+                        f"{target_tol_val:.1f} min [source: {target_tol_src}]"
+                    )
             if snap.basis_delay_compensation_note:
                 print(f"       Origine données      : {snap.basis_delay_compensation_note}")
         else:

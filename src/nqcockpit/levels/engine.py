@@ -115,6 +115,7 @@ def calculate_gamma_profile(
     spot: float,
     risk_free_rate: float = 0.045,
     today_date: date | None = None,
+    ref_utc: datetime | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Recalcule le GEX net sur une grille de spots hypothétiques (+/- 8%)."""
     if df.empty:
@@ -124,14 +125,38 @@ def calculate_gamma_profile(
     if valid.empty:
         return None
 
-    if today_date is None:
+    # Référence temporelle : utiliser ref_utc si disponible, sinon today_date
+    if ref_utc is None and today_date is None:
+        ref_utc = datetime.now(timezone.utc)
+    if ref_utc is not None and today_date is None:
+        today_date = ref_utc.astimezone(ZoneInfo("America/New_York")).date()
+    elif today_date is None:
         today_date = datetime.now(timezone.utc).date()
 
-    # Calcul du temps à expiration en années pour chaque contrat
+    # Calcul du temps à expiration en années calendaires pour chaque contrat.
+    # Formule : T_years = (exp_close_utc - ref_utc) / (365 * 86400)
+    # exp_close = expiry @ 16:00 ET (PM) ou 09:30 ET (AM settlement, 3e vendredi mensuel)
+    # Minimum = 1 minute pour éviter division par zéro (pas 1 jour entier).
     if "t_years" not in valid.columns:
-        valid["t_years"] = valid["expiry"].apply(
-            lambda exp: max(1, (exp - today_date).days if isinstance(exp, date) else 1) / 365.25
-        )
+        _et = ZoneInfo("America/New_York")
+        _min_t = 60.0 / (365.0 * 86400.0)  # 1 minute minimum
+
+        def _t_years_for(exp: date) -> float:
+            if not isinstance(exp, date):
+                return _min_t
+            # Heure d'expiration : 09:30 ET pour NDX mensuel 3e vendredi, 16:00 ET sinon
+            _is_3rd_fri = exp.weekday() == 4 and 15 <= exp.day <= 21
+            exp_time_et = time(9, 30) if _is_3rd_fri else time(16, 0)
+            exp_dt_et = datetime.combine(exp, exp_time_et, tzinfo=_et)
+            exp_dt_utc = exp_dt_et.astimezone(timezone.utc)
+            if ref_utc is not None:
+                delta_sec = (exp_dt_utc - ref_utc).total_seconds()
+            else:
+                # Fallback : jours calendaires entiers depuis today_date
+                delta_sec = (exp - today_date).days * 86400.0
+            return max(_min_t, delta_sec / (365.0 * 86400.0))
+
+        valid["t_years"] = valid["expiry"].apply(_t_years_for)
 
     grid = np.linspace(spot * (1 - ZG_RANGE), spot * (1 + ZG_RANGE), ZG_STEPS)
 
@@ -897,6 +922,7 @@ class LevelsEngine:
         nq_bars: list[Bar],
         ndx_bars: list[Bar],
         now_utc: datetime | None = None,
+        conn: Any | None = None,
     ) -> LevelsSnapshot:
         """Calcule un snapshot complet à partir de la chaîne d'options et des barres."""
         if now_utc is None:
@@ -931,6 +957,7 @@ class LevelsEngine:
             ndx_bars=ndx_bars,
             tolerance_minutes=1.0,
             target_tolerance_minutes=target_tol,
+            conn=conn,
         )
 
         # 3. Ordre de priorité de la base NQ/NDX :
@@ -1504,6 +1531,12 @@ class LevelsEngine:
             basis_method=basis_method_str,
             basis_formula="base = NQ_close - NDX_spot",
             basis_delay_compensation_note=basis_delay_note,
+            basis_dist_to_target_minutes=(
+                candidate_basis.dist_to_target_minutes if candidate_basis else None
+            ),
+            basis_target_tolerance_minutes=(
+                candidate_basis.target_tolerance_minutes if candidate_basis else None
+            ),
             # Murs utiles et globaux (Tâche 3)
             call_wall_useful_ndx=call_wall_useful_ndx,
             call_wall_useful_nq=call_wall_useful_nq,

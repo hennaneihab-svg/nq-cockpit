@@ -157,9 +157,8 @@ def find_basis_pair(
             best_nq = valid_nq_mem[-1]
             dist_mem = _dist_to_16h_minutes(best_nq)
             nq_mem_closest_dist = dist_mem
-            if dist_mem <= target_tolerance_minutes:
-                nq_candidate_mem = best_nq
-            else:
+            nq_candidate_mem = best_nq
+            if dist_mem > target_tolerance_minutes:
                 nq_mem_too_far = True
 
     ndx_candidate_mem: Bar | None = None
@@ -171,28 +170,27 @@ def find_basis_pair(
             best_ndx = valid_ndx_mem[-1]
             dist_mem = _dist_to_16h_minutes(best_ndx)
             ndx_mem_closest_dist = dist_mem
-            if dist_mem <= target_tolerance_minutes:
-                ndx_candidate_mem = best_ndx
-            else:
+            ndx_candidate_mem = best_ndx
+            if dist_mem > target_tolerance_minutes:
                 ndx_mem_too_far = True
 
     nq_mem_det = (
-        "trouvé"
-        if nq_candidate_mem
-        else (
-            f"trop éloigné ({nq_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+        (
+            f"éloigné ({nq_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
             if nq_mem_too_far
-            else "non trouvé"
+            else "trouvé"
         )
+        if nq_candidate_mem
+        else "non trouvé"
     )
     ndx_mem_det = (
-        "trouvé"
-        if ndx_candidate_mem
-        else (
-            f"trop éloigné ({ndx_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+        (
+            f"éloigné ({ndx_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
             if ndx_mem_too_far
-            else "non trouvé"
+            else "trouvé"
         )
+        if ndx_candidate_mem
+        else "non trouvé"
     )
     search_steps.append(
         SearchStepResult(
@@ -213,32 +211,40 @@ def find_basis_pair(
     nq_candidate_db: Bar | None = None
     nq_db_too_far = False
     nq_db_closest_dist: float | None = None
-    if nq_candidate_mem is None:
+    if nq_candidate_mem is None or nq_mem_too_far:
         try:
             bar_db = get_bar_at_or_before("NQ=F", target_utc, conn=conn)
             if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
                 dist_db = _dist_to_16h_minutes(bar_db)
                 nq_db_closest_dist = dist_db
-                if dist_db <= target_tolerance_minutes:
+                if nq_candidate_mem is None or (
+                    nq_mem_closest_dist is not None and dist_db < nq_mem_closest_dist
+                ):
                     nq_candidate_db = bar_db
-                else:
-                    nq_db_too_far = True
+                    if dist_db <= target_tolerance_minutes:
+                        nq_mem_too_far = False
+                    else:
+                        nq_db_too_far = True
         except Exception as e:
             log.warning("Erreur lecture barre NQ SQLite : %s", e)
 
     ndx_candidate_db: Bar | None = None
     ndx_db_too_far = False
     ndx_db_closest_dist: float | None = None
-    if ndx_candidate_mem is None:
+    if ndx_candidate_mem is None or ndx_mem_too_far:
         try:
             bar_db = get_bar_at_or_before("^NDX", target_utc, conn=conn)
             if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
                 dist_db = _dist_to_16h_minutes(bar_db)
                 ndx_db_closest_dist = dist_db
-                if dist_db <= target_tolerance_minutes:
+                if ndx_candidate_mem is None or (
+                    ndx_mem_closest_dist is not None and dist_db < ndx_mem_closest_dist
+                ):
                     ndx_candidate_db = bar_db
-                else:
-                    ndx_db_too_far = True
+                    if dist_db <= target_tolerance_minutes:
+                        ndx_mem_too_far = False
+                    else:
+                        ndx_db_too_far = True
         except Exception as e:
             log.warning("Erreur lecture barre NDX SQLite : %s", e)
 
@@ -298,8 +304,16 @@ def find_basis_pair(
     )
 
     # 3. Étape SOURCE DISTANTE (rechargement si manquant ou trop éloigné)
-    need_remote_nq = (nq_candidate_mem is None and nq_candidate_db is None) or reload_source
-    need_remote_ndx = (ndx_candidate_mem is None and ndx_candidate_db is None) or reload_source
+    need_remote_nq = (
+        (nq_candidate_mem is None and nq_candidate_db is None)
+        or nq_mem_too_far
+        or reload_source
+    )
+    need_remote_ndx = (
+        (ndx_candidate_mem is None and ndx_candidate_db is None)
+        or ndx_mem_too_far
+        or reload_source
+    )
     need_remote = need_remote_nq or need_remote_ndx
     nq_candidate_remote: Bar | None = None
     ndx_candidate_remote: Bar | None = None
@@ -390,29 +404,45 @@ def find_basis_pair(
         )
     )
 
-    # Sélection des barres retenues et de leur origine
+    # Sélection des barres retenues : choisir le candidat le plus proche de 16:00 ET
+    nq_candidates = []
+    if nq_candidate_remote is not None:
+        nq_candidates.append(
+            (nq_candidate_remote, "source_distante", _dist_to_16h_minutes(nq_candidate_remote))
+        )
+    if nq_candidate_db is not None:
+        nq_candidates.append(
+            (nq_candidate_db, "sqlite", _dist_to_16h_minutes(nq_candidate_db))
+        )
     if nq_candidate_mem is not None:
-        final_nq = nq_candidate_mem
-        origin_nq = "memoire"
-    elif nq_candidate_db is not None:
-        final_nq = nq_candidate_db
-        origin_nq = "sqlite"
-    elif nq_candidate_remote is not None:
-        final_nq = nq_candidate_remote
-        origin_nq = "source_distante"
+        nq_candidates.append(
+            (nq_candidate_mem, "memoire", _dist_to_16h_minutes(nq_candidate_mem))
+        )
+
+    if nq_candidates:
+        nq_candidates.sort(key=lambda x: x[2])
+        final_nq, origin_nq, _ = nq_candidates[0]
     else:
         final_nq = None
         origin_nq = None
 
+    ndx_candidates = []
+    if ndx_candidate_remote is not None:
+        ndx_candidates.append(
+            (ndx_candidate_remote, "source_distante", _dist_to_16h_minutes(ndx_candidate_remote))
+        )
+    if ndx_candidate_db is not None:
+        ndx_candidates.append(
+            (ndx_candidate_db, "sqlite", _dist_to_16h_minutes(ndx_candidate_db))
+        )
     if ndx_candidate_mem is not None:
-        final_ndx = ndx_candidate_mem
-        origin_ndx = "memoire"
-    elif ndx_candidate_db is not None:
-        final_ndx = ndx_candidate_db
-        origin_ndx = "sqlite"
-    elif ndx_candidate_remote is not None:
-        final_ndx = ndx_candidate_remote
-        origin_ndx = "source_distante"
+        ndx_candidates.append(
+            (ndx_candidate_mem, "memoire", _dist_to_16h_minutes(ndx_candidate_mem))
+        )
+
+    if ndx_candidates:
+        ndx_candidates.sort(key=lambda x: x[2])
+        final_ndx, origin_ndx, _ = ndx_candidates[0]
     else:
         final_ndx = None
         origin_ndx = None
@@ -424,6 +454,7 @@ def find_basis_pair(
     cause_detail: str
     action_taken: str
 
+    dist_target: float | None = None
     if final_nq is None and final_ndx is None:
         if nq_mem_too_far or ndx_mem_too_far or nq_db_too_far or ndx_db_too_far:
             cause_code = "DISTANCE_CIBLE_HORS_TOLERANCE"
@@ -473,6 +504,10 @@ def find_basis_pair(
             abs((final_nq.timestamp_utc - final_ndx.timestamp_utc).total_seconds())
             / 60.0
         )
+        dist_nq = _dist_to_16h_minutes(final_nq)
+        dist_ndx = _dist_to_16h_minutes(final_ndx)
+        dist_target = max(dist_nq, dist_ndx)
+
         if delta_t > tolerance_minutes:
             is_aligned = False
             cause_code = "HORS_TOLERANCE"
@@ -486,12 +521,21 @@ def find_basis_pair(
             action_taken = "Statut INDISPONIBLE retenu ; repli sur base de parité call-put"
         else:
             is_aligned = True
-            cause_code = "PAIRE_TROUVEE"
-            cause_detail = (
-                f"Paire valide trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, "
-                f"Delta-t={delta_t:.2f} min)"
-            )
-            action_taken = "Base de la séance précédente retenue"
+            if dist_target > target_tolerance_minutes:
+                cause_code = "DISTANCE_CIBLE_HORS_TOLERANCE"
+                cause_detail = (
+                    f"Paire trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, "
+                    f"Delta-t={delta_t:.2f} min), mais distance cible 16h={dist_target:.1f} min "
+                    f"> seuil {target_tolerance_minutes:.1f} min"
+                )
+                action_taken = "Base calculée avec statut DÉGRADÉ et mention de la distance"
+            else:
+                cause_code = "PAIRE_TROUVEE"
+                cause_detail = (
+                    f"Paire valide trouvée (NQ: {origin_nq}, NDX: {origin_ndx}, "
+                    f"Delta-t={delta_t:.2f} min)"
+                )
+                action_taken = "Base de la séance précédente retenue"
 
     return PairResult(
         target_utc=target_utc,
@@ -506,6 +550,8 @@ def find_basis_pair(
         cause_code=cause_code,
         cause_detail=cause_detail,
         action_taken=action_taken,
+        dist_to_target_minutes=dist_target,
+        target_tolerance_minutes=target_tolerance_minutes,
     )
 
 
@@ -520,6 +566,10 @@ def compute_previous_session_basis(
 
     Lit obligatoirement le PairResult unique (produit par find_basis_pair).
     Si introuvable ou hors tolérance, retourne le statut INDISPONIBLE (BLOCKED) avec base 0.0.
+
+    Mesure explicitement la distance entre la barre retenue et la cible 16:00 ET.
+    Si cette distance dépasse target_tolerance_minutes, le statut est DÉGRADÉ et la distance
+    est affichée en minutes. Aucun repli silencieux.
     """
     if ref_utc is None:
         ref_utc = datetime.now(timezone.utc)
@@ -556,6 +606,8 @@ def compute_previous_session_basis(
             tolerance_minutes=pair_result.tolerance_minutes,
             is_aligned=False,
             formula="base = NQ_close - NDX_spot",
+            dist_to_target_minutes=None,
+            target_tolerance_minutes=target_tolerance_minutes,
         )
 
     last_nq = pair_result.nq_bar
@@ -566,10 +618,26 @@ def compute_previous_session_basis(
         last_ndx.timestamp_utc, ref_utc=ref_utc
     )
 
+    # Distance explicite à la cible 16:00 ET (contrôle point 2)
+    # On mesure la distance entre la barre NQ retenue et la clôture 16:00 ET ciblée.
+    dist_nq_to_16h = _dist_to_16h_minutes(last_nq)
+    dist_ndx_to_16h = _dist_to_16h_minutes(last_ndx)
+    # Distance maximale entre les deux pattes et la cible 16:00 ET
+    dist_max_to_16h = max(dist_nq_to_16h, dist_ndx_to_16h)
+
     if drift > 60.0 or is_stale_session:
         status = DataStatus.DEGRADED
+        dist_note = ""
+    elif dist_max_to_16h > target_tolerance_minutes:
+        # La barre trouvée est trop éloignée de 16:00 ET : DÉGRADÉ explicite
+        status = DataStatus.DEGRADED
+        dist_note = (
+            f" | DÉGRADÉ : barre la plus proche à {dist_max_to_16h:.1f} min de 16:00 ET "
+            f"(seuil {target_tolerance_minutes:.1f} min, config: levels.target_tolerance_minutes)"
+        )
     else:
         status = DataStatus.OK
+        dist_note = ""
 
     age_min = (ref_utc - last_ndx.timestamp_utc).total_seconds() / 60.0
     age_h = age_min / 60.0
@@ -577,12 +645,14 @@ def compute_previous_session_basis(
 
     nq_ny_str = last_nq.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
     ndx_ny_str = last_ndx.timestamp_utc.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S EDT")
-    nq_utc_str = last_nq.timestamp_utc.strftime("%H:%M:%SZ")
-    ndx_utc_str = last_ndx.timestamp_utc.strftime("%H:%M:%SZ")
+    nq_utc_str = last_nq.timestamp_utc.strftime("%H:%MZ")
+    ndx_utc_str = last_ndx.timestamp_utc.strftime("%H:%MZ")
 
     label = (
         f"base de la séance précédente (méthode: séance précédente | "
-        f"NQ: {nq_ny_str} [{nq_utc_str}] / NDX: {ndx_ny_str} [{ndx_utc_str}], âge {age_h:.1f} h)"
+        f"NQ: {nq_ny_str} [{nq_utc_str}] / NDX: {ndx_ny_str} [{ndx_utc_str}], "
+        f"âge {age_h:.1f} h, dist 16h: NQ {dist_nq_to_16h:.1f}m / NDX {dist_ndx_to_16h:.1f}m"
+        f"){dist_note}"
     )
 
     proven_origin_note = (
@@ -607,6 +677,8 @@ def compute_previous_session_basis(
         is_aligned=pair_result.is_aligned and not is_stale_session,
         formula="base = NQ_close - NDX_spot",
         delay_compensation_note=proven_origin_note,
+        dist_to_target_minutes=dist_max_to_16h,
+        target_tolerance_minutes=target_tolerance_minutes,
     )
 
 
