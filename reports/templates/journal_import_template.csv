@@ -1,0 +1,4 @@
+session_date,instrument,direction,entry_price,stop_price,exit_price,entry_time_ny,exit_time_ny,tp1_price,exit_reason,fees_points,window_name,setup_tag,notes,sl_moved,early_exit,risk_pct_used,minutes_after_last_sl,event_risk_label,gamma_regime,vol_regime
+2026-09-28,MNQ,LONG,20850.00,20800.00,20950.00,2026-09-28 09:35:00,2026-09-28 10:15:00,20950.00,TP1,0.50,trade1,ICT_FVG_retest,Rejet propre sur VWAP + FVG M5,False,False,0.50,,Aucun événement,GEX+,normale
+2026-09-28,MNQ,SHORT,20920.00,20960.00,20960.00,2026-09-28 11:05:00,2026-09-28 11:20:00,,SL,0.50,trade2,Breakdown_reversal,Sortie au SL initial,False,False,0.50,45.0,Aucun événement,GEX+,normale
+2026-09-29,NQ,LONG,20700.00,20660.00,20780.00,2026-09-29 09:40:00,2026-09-29 10:30:00,20780.00,TP1,1.00,trade1,VWAP_retest,Cassure et retest du VWAP séance,False,False,0.50,,CPI Tier 1 dans 24h,GEX-,élevée

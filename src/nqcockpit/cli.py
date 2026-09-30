@@ -260,6 +260,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8502,
         help="Port Streamlit (défaut : 8502)"
     )
+    j_import = j_sub.add_parser(
+        "import-csv", help="Importe des trades depuis un fichier CSV"
+    )
+    j_import.add_argument(
+        "csv_path", type=str, help="Chemin du fichier CSV à importer"
+    )
 
     # 13. discipline (P09 réel)
     parser_disc = subparsers.add_parser(
@@ -2010,9 +2016,33 @@ def _handle_journal(args: Any) -> int:
         print(sep + "\n")
         return 0
 
+    if action == "import-csv":
+        from nqcockpit.journal.importer import import_trades_from_csv
+
+        csv_path = getattr(args, "csv_path", "")
+        summary = import_trades_from_csv(csv_path, conn, config)
+        sep = "=" * 65
+        print(f"\n{sep}")
+        print(f"  RÉSUMÉ D'IMPORT CSV — {csv_path}")
+        print(sep)
+        print(f"  Lignes lues      : {summary.total_rows}")
+        print(f"  Lignes importées : {summary.imported}")
+        print(f"  Doublons ignorés : {summary.duplicates}")
+        print(f"  Lignes rejetées  : {summary.rejected}")
+        if summary.missing_optional_columns:
+            print("\n  Colonnes optionnelles absentes (valeurs par défaut appliquées) :")
+            for col in summary.missing_optional_columns:
+                print(f"    - {col}")
+        if summary.errors:
+            print("\n  Erreurs / Alertes :")
+            for err in summary.errors:
+                print(f"    - {err}")
+        print(sep + "\n")
+        return 0 if summary.is_success else 1
+
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
-        "Essayez : stats, daily, coaching, ui."
+        "Essayez : stats, daily, coaching, ui, import-csv."
     )
     return 1
 

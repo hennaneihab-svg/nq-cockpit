@@ -9,6 +9,10 @@ from nqcockpit.journal.engine import (
     log_trade,
     segment_performance,
 )
+from nqcockpit.journal.importer import (
+    CSVImportSummary,
+    import_trades_from_csv,
+)
 from nqcockpit.journal.models import (
     CoachingReport,
     DailyStats,
@@ -41,4 +45,7 @@ __all__ = [
     "finalize_trade", "log_trade", "detect_violations", "detect_tilt_alerts",
     "compute_daily_stats", "compute_performance_stats",
     "segment_performance", "generate_coaching_report",
+    # importer
+    "CSVImportSummary", "import_trades_from_csv",
 ]
+
