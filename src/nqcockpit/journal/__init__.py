@@ -30,6 +30,11 @@ from nqcockpit.journal.models import (
     TradeOutcome,
     VolRegime,
 )
+from nqcockpit.journal.reports import (
+    PeriodReportResult,
+    generate_period_report,
+    run_period_report_cli,
+)
 from nqcockpit.journal.store import (
     delete_trade,
     get_trade,
@@ -56,5 +61,7 @@ __all__ = [
     "CSVImportSummary", "import_trades_from_csv",
     # backup
     "BackupResult", "create_journal_backup",
+    # reports
+    "PeriodReportResult", "generate_period_report", "run_period_report_cli",
 ]
 

@@ -283,6 +283,29 @@ def create_parser() -> argparse.ArgumentParser:
         "--retention-days", type=int, default=None,
         help="Nombre de jours de rétention (défaut : config.data.backup_retention_days)"
     )
+    j_report = j_sub.add_parser(
+        "report",
+        help="Génère un rapport de synthèse hebdomadaire ou mensuel en Markdown",
+    )
+    j_report.add_argument(
+        "--period",
+        type=str,
+        required=True,
+        choices=["week", "month"],
+        help="Période : 'week' (hebdomadaire) ou 'month' (mensuel)",
+    )
+    j_report.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Date de référence YYYY-MM-DD (défaut : date du jour en Africa/Algiers)",
+    )
+    j_report.add_argument(
+        "--output-dir",
+        type=str,
+        default="reports/journal",
+        help="Dossier de destination (défaut : reports/journal)",
+    )
 
     # 13. discipline (P09 réel)
     parser_disc = subparsers.add_parser(
@@ -2133,9 +2156,48 @@ def _handle_journal(args: Any) -> int:
         print(f"[ERREUR] Échec de mise à jour du trade {trade_id}")
         return 1
 
+    if action == "report":
+        from nqcockpit.journal.reports import run_period_report_cli
+
+        period = getattr(args, "period", "week")
+        date_str = getattr(args, "date", None)
+        out_dir = getattr(args, "output_dir", "reports/journal")
+
+        try:
+            res = run_period_report_cli(
+                conn, period=period, date_str=date_str, output_dir=out_dir, config=config
+            )
+        except ValueError as exc:
+            print(f"[ERREUR] Paramètre invalide : {exc}")
+            return 1
+
+        sep = "=" * 65
+        print(f"\n{sep}")
+        period_name = "HEBDOMADAIRE" if res.period == "week" else "MENSUEL"
+        print(f"  RAPPORT DE PERFORMANCE {period_name} — {res.period_label}")
+        print(sep)
+        print(f"  Période observée : du {res.start_date} au {res.end_date}")
+        print(f"  Fichier généré   : {res.report_path}")
+        print(f"  Trades analysés  : {res.n_trades}")
+        print(f"  R cumulé         : {res.r_total:+.4f}R")
+        status_sig = (
+            "✅ Échantillon représentatif"
+            if res.sample_sufficient
+            else "⚠️ Échantillon insuffisant (descriptif uniquement)"
+        )
+        print(f"  Significativité  : {status_sig}")
+        status_prev = (
+            "Données comparées avec succès"
+            if res.has_prev_data
+            else "Non disponible (signalée explicitement)"
+        )
+        print(f"  Période précéd.  : {status_prev}")
+        print(sep + "\n")
+        return 0
+
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
-        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot, backup."
+        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot, backup, report."
     )
     return 1
 
