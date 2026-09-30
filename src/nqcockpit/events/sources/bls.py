@@ -28,43 +28,73 @@ _BLS_CALENDAR_2026: list[dict] = [
     # NFP (Employment Situation) — 1er vendredi du mois
     {"date": "2026-10-02", "name": "NFP", "tier": 1,
      "desc": "Emplois non-agricoles, taux de chômage (sept. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/empsit.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-11-06", "name": "NFP", "tier": 1,
      "desc": "Emplois non-agricoles, taux de chômage (oct. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/empsit.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-12-04", "name": "NFP", "tier": 1,
      "desc": "Emplois non-agricoles, taux de chômage (nov. 2026)",
-     "time_et": (8, 30)},
-    # CPI — ~2e mardi/mois
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/empsit.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
+    # CPI — 14 oct 2026 (source officielle BLS)
     {"date": "2026-10-14", "name": "CPI", "tier": 1,
      "desc": "Indice des prix à la consommation (sept. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/cpi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-11-12", "name": "CPI", "tier": 1,
      "desc": "Indice des prix à la consommation (oct. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/cpi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-12-11", "name": "CPI", "tier": 1,
      "desc": "Indice des prix à la consommation (nov. 2026)",
-     "time_et": (8, 30)},
-    # PPI — ~2e mercredi/mois
-    {"date": "2026-10-08", "name": "PPI", "tier": 2,
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/cpi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
+    # PPI — 15 oct attendu, pas le 8 (source officielle BLS)
+    {"date": "2026-10-15", "name": "PPI", "tier": 2,
      "desc": "Indice des prix à la production (sept. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/ppi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-11-13", "name": "PPI", "tier": 2,
      "desc": "Indice des prix à la production (oct. 2026)",
-     "time_et": (8, 30)},
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/ppi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-12-10", "name": "PPI", "tier": 2,
      "desc": "Indice des prix à la production (nov. 2026)",
-     "time_et": (8, 30)},
-    # JOLTS — ~2e mardi/mois suivant (10:00 ET)
-    {"date": "2026-10-07", "name": "JOLTS", "tier": 2,
-     "desc": "Offres d'emploi et rotation (août 2026)",
-     "time_et": (10, 0)},
-    {"date": "2026-11-04", "name": "JOLTS", "tier": 2,
+     "time_et": (8, 30),
+     "primary_source": "https://www.bls.gov/schedule/news_release/ppi.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
+    # JOLTS — 3 nov attendu, pas le 7 oct (10:00 ET, source officielle BLS)
+    {"date": "2026-11-03", "name": "JOLTS", "tier": 2,
      "desc": "Offres d'emploi et rotation (sept. 2026)",
-     "time_et": (10, 0)},
+     "time_et": (10, 0),
+     "primary_source": "https://www.bls.gov/schedule/news_release/jolts.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
     {"date": "2026-12-08", "name": "JOLTS", "tier": 2,
      "desc": "Offres d'emploi et rotation (oct. 2026)",
-     "time_et": (10, 0)},
+     "time_et": (10, 0),
+     "primary_source": "https://www.bls.gov/schedule/news_release/jolts.htm",
+     "consultation_date": "2026-09-30",
+     "verified": True},
 ]
 
 
@@ -150,9 +180,16 @@ def fetch_bls_events(
         today_et = now_utc.astimezone(ET_TZ).date()
         if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end:
             continue
+        is_verified = bool(entry.get("verified", False) and entry.get("primary_source"))
+        primary_url = entry.get("primary_source", "")
+        consult_dt = entry.get("consultation_date", "")
         ev_status = (
             DataStatus.DEGRADED
-            if (status == DataStatus.DEGRADED or time_status == DataStatus.DEGRADED)
+            if (
+                status == DataStatus.DEGRADED
+                or time_status == DataStatus.DEGRADED
+                or not is_verified
+            )
             else DataStatus.OK
         )
         events.append(
@@ -167,6 +204,9 @@ def fetch_bls_events(
                 status=ev_status,
                 all_sources=["bls"],
                 time_provenance=time_prov,
+                verified=is_verified,
+                primary_source_url=primary_url,
+                consultation_date=consult_dt,
             )
         )
 

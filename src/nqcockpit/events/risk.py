@@ -123,6 +123,9 @@ def compute_event_risk(
         # il est publié et ne compte ni dans le risque à venir ni dans le décompte
         if ev_utc + post_delta < ref_utc:
             continue
+        if not ev.verified:
+            # Une date non vérifiée ne compte pas comme Tier dans le risque
+            continue
 
         alg_str = _fmt_algiers(ev_utc)
         countdown = _fmt_countdown(ev_utc - ref_utc)
@@ -204,7 +207,8 @@ def compute_event_risk(
             continue
         alg = ev.scheduled_utc.astimezone(TZ_ALGIERS)
         et = ev.scheduled_utc.astimezone(TZ_ET)
-        sym = tier_sym.get(ev.tier, "[--]")
+        sym = tier_sym.get(ev.tier, "[--]") if ev.verified else "[--]"
+        tier_label = f"Tier {ev.tier}" if ev.verified else "Tier non vérifié"
         consensus_str = f" | fcst={ev.consensus}" if ev.consensus else ""
         previous_str = f" | prec={ev.previous}" if ev.previous else ""
         val_src_str = (
@@ -216,11 +220,19 @@ def compute_event_risk(
         is_published = ev.scheduled_utc < ref_utc
         pub_tag = " [publié]" if is_published else ""
         time_prov_str = f" | heure: {ev.time_provenance}" if ev.time_provenance else ""
+        if ev.verified and ev.primary_source_url:
+            source_proof = (
+                f" | source_primaire: {ev.primary_source_url} (cons. {ev.consultation_date})"
+            )
+        elif not ev.verified:
+            source_proof = " | [NON VÉRIFIÉE (DÉGRADÉ)]"
+        else:
+            source_proof = ""
         line = (
             f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger ({et.strftime('%H:%M')} ET) | "
-            f"Tier {ev.tier} | {ev.name}"
+            f"{tier_label} | {ev.name}"
             f"{consensus_str}{previous_str}{val_src_str} | date: {ev.date_origin}{pub_tag}"
-            f"{time_prov_str} | [{src_str}]"
+            f"{time_prov_str}{source_proof} | [{src_str}]"
         )
         cal_display.append(line)
 
@@ -259,12 +271,16 @@ def compute_event_risk(
 
         d_red: list[str] = []
         d_amber: list[str] = []
+        d_unconfirmed: list[str] = []
         day_evs = [
             e for e in events
             if e.scheduled_utc.astimezone(TZ_ALGIERS).date() == target_alg_date
         ]
         for e in day_evs:
             if day_offset == 0 and e.scheduled_utc + post_delta < ref_utc:
+                continue
+            if not e.verified:
+                d_unconfirmed.append(f"[{e.name}] date à confirmer [NON VÉRIFIÉE (DÉGRADÉ)]")
                 continue
             e_utc = e.scheduled_utc
             for w_name, w_start, w_end in day_w_bounds:
@@ -332,22 +348,33 @@ def compute_event_risk(
         if d_red:
             d_risk = "RED"
             d_reason = " | ".join(d_red)
+            if d_unconfirmed:
+                d_reason += f" | {' | '.join(d_unconfirmed)}"
             if missing_indicators:
                 d_reason += f" | {' | '.join(missing_indicators)} [DÉGRADÉ]"
         elif d_amber:
             d_risk = "AMBER"
             d_reason = " | ".join(d_amber)
+            if d_unconfirmed:
+                d_reason += f" | {' | '.join(d_unconfirmed)}"
             if missing_indicators:
                 d_reason += f" | {' | '.join(missing_indicators)} [DÉGRADÉ]"
         elif is_uncovered_by_ff and is_trading_weekday:
             d_risk = "DÉGRADÉ / INCONNU"
+            parts = []
+            if d_unconfirmed:
+                parts.extend(d_unconfirmed)
             if missing_indicators:
-                d_reason = (
+                parts.append(
                     f"Couverture incomplète (ForexFactory nextweek 404) — "
                     f"{' | '.join(missing_indicators)}"
                 )
             else:
-                d_reason = "Couverture incomplète (source calendrier active absente)"
+                parts.append("Couverture incomplète (source calendrier active absente)")
+            d_reason = " | ".join(parts)
+        elif d_unconfirmed:
+            d_risk = "DÉGRADÉ / INCONNU"
+            d_reason = f"Date à confirmer — {' | '.join(d_unconfirmed)}"
         else:
             d_risk = "GREEN"
             d_reason = "Aucun événement impactant les fenêtres de trading"

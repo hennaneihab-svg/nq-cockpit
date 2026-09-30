@@ -130,6 +130,9 @@ def merge_and_classify(
                     all_sources=list(set(existing.all_sources + ev.all_sources)),
                     time_provenance=ev.time_provenance or existing.time_provenance,
                     consensus_source=ev.consensus_source or existing.consensus_source,
+                    verified=ev.verified if ev.verified is not None else existing.verified,
+                    primary_source_url=ev.primary_source_url or existing.primary_source_url,
+                    consultation_date=ev.consultation_date or existing.consultation_date,
                 )
                 del index[matched_key]
                 index[(merged.name.lower(), merged.scheduled_utc.strftime("%Y-%m-%d"))] = merged
@@ -148,6 +151,12 @@ def merge_and_classify(
                     existing.actual = ev.actual
                 if not existing.consensus_source and ev.consensus_source:
                     existing.consensus_source = ev.consensus_source
+                if not existing.primary_source_url and ev.primary_source_url:
+                    existing.primary_source_url = ev.primary_source_url
+                if not existing.consultation_date and ev.consultation_date:
+                    existing.consultation_date = ev.consultation_date
+                if not ev.verified:
+                    existing.verified = False
 
     merged_list = sorted(index.values(), key=lambda e: e.scheduled_utc)
     return merged_list, divergences

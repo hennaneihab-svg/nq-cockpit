@@ -60,13 +60,25 @@ class CalendarEvent:
     consensus_source: str = ""
     """Source de la valeur de prévision/précédent (ex: 'ForexFactory')."""
 
+    verified: bool = True
+    """True si la date est vérifiée avec une source primaire officielle."""
+
+    primary_source_url: str = ""
+    """URL de la source primaire officielle (ex: 'https://www.bls.gov/schedule/news_release/cpi.htm')."""
+
+    consultation_date: str = ""
+    """Date de consultation de la source primaire (ex: '2026-09-30')."""
+
     @property
     def date_origin(self) -> str:
         """Origine de la date réellement retenue.
 
-        'officielle', 'ForexFactory', 'calendrier statique', 'estimée (règle)'.
-        Si deux sources concordent, ne retourne jamais 'estimée'.
+        'officielle', 'ForexFactory', 'calendrier statique', 'estimée (règle)', 'à confirmer'.
+        Si la date n'est pas vérifiée, retourne 'à confirmer'.
         """
+        if not self.verified:
+            return "à confirmer"
+
         # Si deux sources concordent sur la même date, pas une estimation
         if len(self.all_sources) >= 2 and self.source == "fred":
             if "forexfactory" in self.all_sources:

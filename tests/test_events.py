@@ -499,9 +499,9 @@ def test_cpi_ppi_source_priority_and_holiday_exclusion() -> None:
 
 
 def test_jolts_time_10_et_and_explicit_time_provenance() -> None:
-    """Cas Point 2 : JOLTS à 10:00 ET, provenance d'heure explicite et suppression heure implicite.
+    """Cas Point 2 : JOLTS à 10:00 ET, provenance d'heure explicite.
 
-    - JOLTS du 7 oct 2026 est planifié à 10:00 ET (14:00 UTC = 15:00 Alger).
+    - JOLTS du 3 nov 2026 est planifié à 10:00 ET (15:00 UTC = 15:00 Alger après DST US).
     - time_provenance = 'table versionnée BLS (10:00 ET)'.
     - Absence d'heure -> statut DÉGRADÉ visible avec 'non fournie [DÉGRADÉ]'.
     """
@@ -510,18 +510,19 @@ def test_jolts_time_10_et_and_explicit_time_provenance() -> None:
     # 1. Vérification dans fetch_bls_events
     ref_utc = datetime(2026, 9, 30, 0, 0, tzinfo=UTC)
     events, _, _ = fetch_bls_events(
-        base_url="https://invalid.example.com", now_utc=ref_utc, horizon_days=14
+        base_url="https://invalid.example.com", now_utc=ref_utc, horizon_days=45
     )
-    jolts_evs = [e for e in events if e.name == "JOLTS" and e.scheduled_utc.month == 10]
+    jolts_evs = [e for e in events if e.name == "JOLTS" and e.scheduled_utc.month == 11]
     assert len(jolts_evs) == 1
     jolts = jolts_evs[0]
-    # 10:00 ET en été/EDT (UTC-4) = 14:00 UTC
-    assert jolts.scheduled_utc.hour == 14
+    assert jolts.scheduled_utc.day == 3
+    # 10:00 ET en hiver/EST (UTC-5) = 15:00 UTC
+    assert jolts.scheduled_utc.hour == 15
     assert jolts.scheduled_utc.minute == 0
     assert jolts.time_provenance == "table versionnée BLS (10:00 ET)"
 
     # 2. Absence d'heure explicite déclenche DÉGRADÉ
-    dt, prov, status = _make_utc("2026-10-07", None)
+    dt, prov, status = _make_utc("2026-11-03", None)
     assert status == DataStatus.DEGRADED
     assert "DÉGRADÉ" in prov
 
@@ -660,6 +661,76 @@ def test_megacaps_confirmed_vs_estimated_and_time_suppression(
     # Les deux EPS sont distincts dans les données brutes
     assert ev_aapl.eps_estimate != ev_amzn.eps_estimate
     assert abs(ev_aapl.eps_estimate - ev_amzn.eps_estimate) > 0.004
+
+
+def test_bls_verified_dates_and_unverified_tier_suspension() -> None:
+    """Cas P05-a : Table BLS avec source primaire et suspension de Tier si non vérifiée.
+
+    - JOLTS septembre : 3 nov 2026 (source officielle BLS jolts.htm).
+    - PPI septembre : 15 oct 2026 (source officielle BLS ppi.htm).
+    - CPI septembre : 14 oct 2026 (source officielle BLS cpi.htm).
+    - NFP septembre : 2 oct 2026 (source officielle BLS empsit.htm).
+    - Chaque événement vérifié porte son URL et date de consultation.
+    - Événement non vérifié : 'à confirmer', ne compte pas comme Tier dans le risque.
+    """
+    from nqcockpit.events.risk import compute_event_risk
+    from nqcockpit.events.sources.bls import _BLS_CALENDAR_2026, fetch_bls_events
+
+    # 1. Dates et sources primaires dans la table BLS 2026
+    jolts_entry = next(
+        e for e in _BLS_CALENDAR_2026 if e["name"] == "JOLTS" and "2026-11" in e["date"]
+    )
+    assert jolts_entry["date"] == "2026-11-03"
+    assert "jolts.htm" in jolts_entry["primary_source"]
+    assert jolts_entry["verified"] is True
+
+    ppi_entry = next(e for e in _BLS_CALENDAR_2026 if e["name"] == "PPI" and "2026-10" in e["date"])
+    assert ppi_entry["date"] == "2026-10-15"
+    assert "ppi.htm" in ppi_entry["primary_source"]
+    assert ppi_entry["verified"] is True
+
+    cpi_entry = next(e for e in _BLS_CALENDAR_2026 if e["name"] == "CPI" and "2026-10" in e["date"])
+    assert cpi_entry["date"] == "2026-10-14"
+    assert "cpi.htm" in cpi_entry["primary_source"]
+    assert cpi_entry["verified"] is True
+
+    nfp_entry = next(e for e in _BLS_CALENDAR_2026 if e["name"] == "NFP" and "2026-10" in e["date"])
+    assert nfp_entry["date"] == "2026-10-02"
+    assert "empsit.htm" in nfp_entry["primary_source"]
+    assert nfp_entry["verified"] is True
+
+    # 2. Vérification dans fetch_bls_events
+    ref_utc = datetime(2026, 9, 30, 0, 0, tzinfo=UTC)
+    events, _, _ = fetch_bls_events(
+        base_url="https://invalid.example.com", now_utc=ref_utc, horizon_days=45
+    )
+    for ev in events:
+        assert ev.verified is True
+        assert ev.primary_source_url != ""
+        assert ev.consultation_date != ""
+
+    # 3. Événement non vérifié : ne compte pas comme Tier dans le risque, affiché 'à confirmer'
+    unverified_event = CalendarEvent(
+        name="UNCONFIRMED_DATA",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 5, 15, 45, tzinfo=UTC),  # en pleine session
+        source="static",
+        verified=False,
+    )
+    assert unverified_event.date_origin == "à confirmer"
+
+    report = compute_event_risk(
+        events=[unverified_event],
+        earnings=[],
+        trading_windows=[{"name": "trade", "start": "15:30", "end": "18:30"}],
+        post_buffer_min=15,
+        stand_aside_before_min=15,
+        ref_utc=datetime(2026, 10, 5, 14, 0, tzinfo=UTC),
+    )
+    # L'événement non vérifié ne déclenche pas RED malgré tier=1 en pleine fenêtre
+    assert report.risk_level != "RED"
+    assert any("[NON VÉRIFIÉE (DÉGRADÉ)]" in line for line in report.calendar_display_algiers)
+
 
 
 
