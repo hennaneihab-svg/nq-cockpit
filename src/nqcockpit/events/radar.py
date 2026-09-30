@@ -239,6 +239,7 @@ def fetch_event_radar(
         post_buffer_min=ev_cfg.post_event_buffer_minutes,
         stand_aside_before_min=ev_cfg.stand_aside_before_minutes,
         ref_utc=ref_utc,
+        source_health=source_health,
     )
     report.divergences = divergences
     report.source_health = source_health

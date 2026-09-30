@@ -18,7 +18,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from nqcockpit.events.models import CalendarEvent, EarningsEvent, EventRiskReport
+from nqcockpit.events.models import (
+    CalendarEvent,
+    DataStatus,
+    EarningsEvent,
+    EventRiskReport,
+    SourceHealth,
+)
 
 UTC = timezone.utc
 TZ_ALGIERS = ZoneInfo("Africa/Algiers")
@@ -71,6 +77,7 @@ def compute_event_risk(
     post_buffer_min: int,
     stand_aside_before_min: int,
     ref_utc: datetime | None = None,
+    source_health: list[SourceHealth] | None = None,
 ) -> EventRiskReport:
     """Calcule le niveau de risque événementiel pour la journée de trading.
 
@@ -217,6 +224,16 @@ def compute_event_risk(
         )
         cal_display.append(line)
 
+    # Fin de la semaine couverte par ForexFactory thisweek (dimanche inclus)
+    ff_health = next(
+        (s for s in (source_health or []) if s.source == "forexfactory"), None
+    )
+    ff_nextweek_down = ff_health is not None and (
+        ff_health.status == DataStatus.DEGRADED
+        or "nextweek" in (ff_health.error_msg or "").lower()
+    )
+    cur_sunday = ref_alg_date + timedelta(days=(6 - ref_alg_date.weekday()))
+
     # Évaluation du risque pour chaque jour de l'horizon (14 jours)
     daily_risks: list[dict] = []
     for day_offset in range(14):
@@ -285,12 +302,52 @@ def compute_event_risk(
                     if (w_start - amber_delta) <= earn_utc <= (w_end + amber_delta):
                         d_amber.append(f"Résultats {earn.ticker} proche {w_name}")
 
+        is_trading_weekday = target_alg_date.weekday() < 5
+        is_uncovered_by_ff = ff_nextweek_down and (target_alg_date > cur_sunday)
+
+        missing_indicators: list[str] = []
+        if is_uncovered_by_ff and is_trading_weekday:
+            # Jobless Claims attendu chaque jeudi (weekday == 3)
+            if target_alg_date.weekday() == 3:
+                has_claims = any(
+                    "claim" in e.name.lower() or "jobless" in e.name.lower()
+                    for e in day_evs
+                )
+                if not has_claims:
+                    dm = target_alg_date.strftime("%d/%m")
+                    missing_indicators.append(
+                        f"absence des Jobless Claims ({dm}) non couvert"
+                    )
+            # ISM Services attendu le 05/10
+            if target_alg_date.month == 10 and target_alg_date.day == 5:
+                has_ism = any(
+                    "ism" in e.name.lower() for e in day_evs
+                )
+                if not has_ism:
+                    dm = target_alg_date.strftime("%d/%m")
+                    missing_indicators.append(
+                        f"absence de l'ISM Services ({dm}) non couvert"
+                    )
+
         if d_red:
             d_risk = "RED"
             d_reason = " | ".join(d_red)
+            if missing_indicators:
+                d_reason += f" | {' | '.join(missing_indicators)} [DÉGRADÉ]"
         elif d_amber:
             d_risk = "AMBER"
             d_reason = " | ".join(d_amber)
+            if missing_indicators:
+                d_reason += f" | {' | '.join(missing_indicators)} [DÉGRADÉ]"
+        elif is_uncovered_by_ff and is_trading_weekday:
+            d_risk = "DÉGRADÉ / INCONNU"
+            if missing_indicators:
+                d_reason = (
+                    f"Couverture incomplète (ForexFactory nextweek 404) — "
+                    f"{' | '.join(missing_indicators)}"
+                )
+            else:
+                d_reason = "Couverture incomplète (source calendrier active absente)"
         else:
             d_risk = "GREEN"
             d_reason = "Aucun événement impactant les fenêtres de trading"

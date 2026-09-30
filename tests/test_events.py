@@ -558,4 +558,62 @@ def test_nfp_date_origin_distinct_indicators_and_consensus_source() -> None:
     assert ev_nfp.consensus_source == "ForexFactory"
 
 
+def test_uncovered_days_marked_degraded_and_missing_indicators_signaled() -> None:
+    """Cas Point 4 : Jours non couverts DÉGRADÉ / INCONNU et signalement ISM / Jobless Claims.
+
+    - Les jours ouvrés sans source active (FF nextweek 404) ne sont pas 'GREEN'.
+    - L'absence d'ISM Services (05/10) est explicitement signalée.
+    - L'absence de Jobless Claims (08/10) est explicitement signalée.
+    """
+    from nqcockpit.events.models import SourceHealth
+
+    ref_utc = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
+    source_health = [
+        SourceHealth(
+            source="forexfactory",
+            status=DataStatus.DEGRADED,
+            events_count=8,
+            error_msg="semaine en cours OK, nextweek indisponible (404)",
+            fetched_utc=ref_utc,
+        ),
+        SourceHealth(
+            source="bls",
+            status=DataStatus.DEGRADED,
+            events_count=4,
+            error_msg="403",
+            fetched_utc=ref_utc,
+        ),
+    ]
+
+    report = compute_event_risk(
+        events=[],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+        source_health=source_health,
+    )
+
+    daily_by_date = {dr["date"]: dr for dr in report.daily_risks}
+
+    # 1. 05/10 (lundi de la semaine suivante) : DÉGRADÉ / INCONNU avec mention ISM Services
+    dr_0510 = daily_by_date.get("2026-10-05")
+    assert dr_0510 is not None
+    assert dr_0510["risk_level"] == "DÉGRADÉ / INCONNU"
+    assert "ISM Services" in dr_0510["reason"]
+
+    # 2. 08/10 (jeudi de la semaine suivante) : mention Jobless Claims
+    dr_0810 = daily_by_date.get("2026-10-08")
+    assert dr_0810 is not None
+    assert dr_0810["risk_level"] == "DÉGRADÉ / INCONNU"
+    assert "Jobless Claims" in dr_0810["reason"]
+
+    # 3. 06/10 (mardi) : DÉGRADÉ / INCONNU (pas GREEN)
+    dr_0610 = daily_by_date.get("2026-10-06")
+    assert dr_0610 is not None
+    assert dr_0610["risk_level"] == "DÉGRADÉ / INCONNU"
+
+
+
 
