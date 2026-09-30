@@ -1791,7 +1791,7 @@ def _handle_profile(args: Any) -> int:
 
 def _handle_journal(args: Any) -> int:
     """Sous-commande journal (P09) — stats, daily, coaching, ui."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from zoneinfo import ZoneInfo
 
     from nqcockpit.config import load_config
@@ -1827,7 +1827,6 @@ def _handle_journal(args: Any) -> int:
         return 0
 
     if action == "daily":
-        from datetime import date
         target = getattr(args, "date", None) or str(datetime.now(tz_ny).date())
         trades = load_trades(conn, session_date=target)
         stats = compute_daily_stats(target, trades, config)
@@ -1839,12 +1838,38 @@ def _handle_journal(args: Any) -> int:
         print(f"  R total : {stats.r_total:+.3f}R  |  Conformité : {stats.compliance_rate:.0%}")
         if stats.limit_hit:
             print(f"  *** LIMITE JOURNALIÈRE ATTEINTE ({stats.r_total:+.3f}R) ***")
+
+        if trades:
+            days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+            print("\n  DÉTAIL DES TRADES ENREGISTRÉS :")
+            for i, t in enumerate(trades, 1):
+                day_name = days[t.day_of_week] if 0 <= t.day_of_week <= 6 else "Inconnu"
+                w_str = t.window_name or "sans fenêtre"
+                print(
+                    f"  [{i}] ID: {t.trade_id[:8]} | "
+                    f"{t.instrument} {t.direction.value} ({w_str})"
+                )
+                print(
+                    f"      Prix: Entrée {t.entry_price:.2f} | "
+                    f"Stop {t.stop_price:.2f} | Sortie {t.exit_price:.2f}"
+                )
+                setup_str = t.setup_tag or "N/A"
+                print(
+                    f"      Résultat: {t.r_realized:+.3f}R ({t.outcome.value}) | "
+                    f"Setup: {setup_str}"
+                )
+                print(
+                    f"      Contexte auto-taggé: Gamma={t.gamma_regime.value} | "
+                    f"Vol={t.vol_regime.value} | Jour={day_name}"
+                )
+                print(f"      Événement: {t.event_risk_label or 'Aucun événement'}")
+
         if stats.violations:
-            print(f"\n  Violations ({len(stats.violations)}) :")
+            print(f"\n  VIOLATIONS DÉTECTÉES ({len(stats.violations)}) :")
             for v in stats.violations:
                 print(f"    [{v.violation.value}] {v.detail}")
         if stats.tilt_alerts:
-            print(f"\n  Alertes tilt ({len(stats.tilt_alerts)}) :")
+            print(f"\n  ALERTES TILT ({len(stats.tilt_alerts)}) :")
             for a in stats.tilt_alerts:
                 print(f"    {a.reason}")
         print(sep + "\n")
@@ -1868,19 +1893,25 @@ def _handle_journal(args: Any) -> int:
                 f"  ⚠ Échantillon insuffisant : {stats.n_trades}/{stats.min_trades_required} trades"
             )
             print("    Espérance, drawdown, profit factor : non calculés.")
-        print(f"  Win rate : {stats.win_rate:.1%}" if stats.win_rate is not None else "  Win rate : —")
+        wr_str = f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—"
+        print(f"  Win rate : {wr_str}")
         if stats.win_rate_ci_low is not None:
-            print(f"    IC 95% Wilson : [{stats.win_rate_ci_low:.1%}, {stats.win_rate_ci_high:.1%}]")
+            print(
+                f"    IC 95% Wilson : [{stats.win_rate_ci_low:.1%}, {stats.win_rate_ci_high:.1%}]"
+            )
         if stats.sample_sufficient:
             print(f"  Espérance  : {stats.expectancy_r:+.4f}R")
             if stats.expectancy_ci_low is not None:
                 print(
-                    f"    IC 95%  : [{stats.expectancy_ci_low:+.4f}, {stats.expectancy_ci_high:+.4f}]"
+                    f"    IC 95%  : [{stats.expectancy_ci_low:+.4f}, "
+                    f"{stats.expectancy_ci_high:+.4f}]"
                 )
-            print(f"  Profit factor : {stats.profit_factor:.2f}" if stats.profit_factor else "  Profit factor : N/A")
+            pf_str = f"{stats.profit_factor:.2f}" if stats.profit_factor else "N/A"
+            print(f"  Profit factor : {pf_str}")
             print(f"  Max drawdown (R) : -{stats.max_drawdown_r:.3f}R")
             print(f"  Max série pertes : {stats.max_loss_streak}")
-        print(f"  Conformité : {stats.compliance_rate:.0%}" if stats.compliance_rate else "  Conformité : —")
+        comp_str = f"{stats.compliance_rate:.0%}" if stats.compliance_rate else "—"
+        print(f"  Conformité : {comp_str}")
         if stats.expectancy_r_compliant is not None:
             print(f"  Espérance conformes     : {stats.expectancy_r_compliant:+.4f}R")
         if stats.expectancy_r_noncompliant is not None:
@@ -1900,7 +1931,9 @@ def _handle_journal(args: Any) -> int:
         print(f"  Généré : {report.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
         print(sep)
         if report.insufficient_data:
-            print(f"  ⚠ Données insuffisantes : {report.stats.n_trades if report.stats else 0}/{config.validation.min_sessions} trades")
+            n_done = report.stats.n_trades if report.stats else 0
+            n_req = config.validation.min_sessions
+            print(f"  ⚠ Données insuffisantes : {n_done}/{n_req} trades")
         print("\n  TOP 3 FUITES :")
         for i, leak in enumerate(report.top_leaks, 1):
             print(f"    {i}. {leak}")
@@ -1912,7 +1945,10 @@ def _handle_journal(args: Any) -> int:
         print(sep + "\n")
         return 0
 
-    print(f"[nqcockpit journal] Action inconnue : {action!r}. Essayez : stats, daily, coaching, ui.")
+    print(
+        f"[nqcockpit journal] Action inconnue : {action!r}. "
+        "Essayez : stats, daily, coaching, ui."
+    )
     return 1
 
 

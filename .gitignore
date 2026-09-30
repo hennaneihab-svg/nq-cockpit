@@ -30,6 +30,10 @@ vendor/
 
 # Data & database files
 data/*.db
+data/*.db-shm
+data/*.db-wal
+*.db-shm
+*.db-wal
 data/*.sqlite
 data/*.parquet
 data/cache/

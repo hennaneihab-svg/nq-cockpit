@@ -68,6 +68,15 @@ def init_journal_db(db_path: str | Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+
+    # Migration si table legacy existante sans 'session_date'
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
+    if cols and "session_date" not in cols:
+        row_count = conn.execute("SELECT count(*) FROM trades").fetchone()[0]
+        if row_count == 0:
+            conn.execute("DROP TABLE trades")
+            conn.commit()
+
     conn.executescript(_DDL)
     conn.commit()
     logger.debug("journal DB initialisée : %s", path)

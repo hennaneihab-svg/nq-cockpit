@@ -293,6 +293,7 @@ def compute_performance_stats(
     trades: list[TradeEntry],
     min_trades: int = 60,
     min_pattern_samples: int = _MIN_PATTERN_SAMPLES,
+    config: AppConfig | None = None,
 ) -> PerformanceStats:
     """Calcule les métriques de performance sur un ensemble de trades.
 
@@ -362,12 +363,35 @@ def compute_performance_stats(
                 streak = 0
         stats.max_loss_streak = max_streak
 
-    # Compliance et performance différentielle
-    compliant = [t for t in trades if not (t.sl_moved or t.early_exit)]
-    non_compliant = [t for t in trades if t.sl_moved or t.early_exit]
+    # Compliance cohérente avec compute_daily_stats : trade sans aucune violation
+    cfg = config
+    if cfg is None:
+        try:
+            from nqcockpit.config import load_config
+            cfg = load_config()
+        except Exception:
+            cfg = None
+
+    violated_ids: set[str] = set()
+    if cfg is not None:
+        by_session: dict[str, list[TradeEntry]] = {}
+        for t in trades:
+            by_session.setdefault(t.session_date, []).append(t)
+        for s_trades in by_session.values():
+            for t in s_trades:
+                if detect_violations(t, s_trades, cfg):
+                    violated_ids.add(t.trade_id)
+    else:
+        for t in trades:
+            if t.sl_moved or t.early_exit:
+                violated_ids.add(t.trade_id)
+
+    compliant = [t for t in trades if t.trade_id not in violated_ids]
+    non_compliant = [t for t in trades if t.trade_id in violated_ids]
     stats.n_compliant = len(compliant)
     if len(trades) > 0:
         stats.compliance_rate = len(compliant) / len(trades)
+
 
     if len(compliant) >= min_pattern_samples:
         stats.expectancy_r_compliant = sum(t.r_realized for t in compliant) / len(compliant)

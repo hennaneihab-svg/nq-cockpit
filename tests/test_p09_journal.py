@@ -29,7 +29,6 @@ from nqcockpit.journal.models import (
     TradeDirection,
     TradeEntry,
     TradeOutcome,
-    VolRegime,
 )
 from nqcockpit.journal.store import (
     delete_trade,
@@ -37,7 +36,6 @@ from nqcockpit.journal.store import (
     load_trades,
     save_trade,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -438,16 +436,13 @@ def test_coaching_report_goals_measurable():
 
 def test_cli_journal_stats_empty(tmp_path, monkeypatch):
     """CLI `journal stats` s'exécute sans erreur même avec 0 trade."""
-    import os
 
     # Utilise une DB temporaire
     db_path = str(tmp_path / "test.db")
     monkeypatch.setenv("NQ_DATA_DB_PATH", db_path)
 
-    from nqcockpit.cli import main
     # On ne peut pas facilement patcher la config, on vérifie juste que le
     # parser reconnaît la sous-commande
-    parser_obj = None
     from nqcockpit.cli import create_parser
     p = create_parser()
     args = p.parse_args(["journal", "stats"])
