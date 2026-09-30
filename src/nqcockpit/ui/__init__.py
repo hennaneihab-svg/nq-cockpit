@@ -1,5 +1,5 @@
-"""User interface module for NQ Cockpit.
+"""Interface utilisateur Streamlit NQ Cockpit."""
 
-Streamlit dark theme dashboard: traffic lights, NQ points level tables,
-event countdowns, source health, discipline gate.
-"""
+from nqcockpit.ui.cockpit_page import render_cockpit
+
+__all__ = ["render_cockpit"]

@@ -77,9 +77,15 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # 5. ui
-    subparsers.add_parser(
+    parser_ui = subparsers.add_parser(
         "ui",
         help="Lance l'interface utilisateur Streamlit",
+    )
+    parser_ui.add_argument(
+        "--port",
+        type=int,
+        default=8501,
+        help="Port d'écoute Streamlit (défaut : 8501)",
     )
 
     # 6. data
@@ -199,6 +205,29 @@ def create_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Sortie en JSON (défaut : console structurée)",
+    )
+
+    # 11. profile (P08)
+    parser_profile = subparsers.add_parser(
+        "profile",
+        help="Profil de séance, carte de scénarios et drapeaux NO-TRADE (P08)",
+    )
+    parser_profile.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Date cible (défaut : séance courante YYYY-MM-DD)",
+    )
+    parser_profile.add_argument(
+        "--json",
+        action="store_true",
+        help="Sortie brute en JSON",
+    )
+    parser_profile.add_argument(
+        "--export-csv",
+        type=str,
+        default=None,
+        help="Chemin de fichier pour l'export CSV des niveaux clés",
     )
 
     return parser
@@ -996,6 +1025,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _handle_macro(args)
     elif args.subcommand == "amplitude":
         return _handle_amplitude(args)
+    elif args.subcommand == "profile":
+        return _handle_profile(args)
+    elif args.subcommand == "ui":
+        return _handle_ui(args)
 
     return 0
 
@@ -1588,6 +1621,166 @@ def _handle_amplitude(args: object) -> int:
     print("  Rapport généré           : reports/calibration.md")
     print(sep)
 
+    return 0
+
+
+def _handle_profile(args: Any) -> int:
+    """Affiche le profil de séance, la carte de scénarios et les drapeaux NO-TRADE (P08)."""
+    import json
+    from datetime import datetime, timezone
+
+    from nqcockpit.config import load_config
+    from nqcockpit.data.db import apply_migrations, get_db_connection
+    from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
+
+    cfg = load_config(getattr(args, "config", None))
+    now_utc = datetime.now(timezone.utc)
+
+    # Connexion DB
+    try:
+        conn = get_db_connection()
+        apply_migrations(conn)
+    except Exception:
+        conn = None
+
+    profile = build_day_profile(conn=conn, config=cfg, now_utc=now_utc)
+    if conn:
+        conn.close()
+
+    # Export CSV optionnel
+    csv_path = getattr(args, "export_csv", None)
+    if csv_path and profile.key_levels:
+        export_levels_to_csv(profile.key_levels, filepath=csv_path, now_utc=now_utc)
+        print(f"[nqcockpit] Niveaux exportés → {csv_path}")
+
+    # Sortie JSON
+    if getattr(args, "json", False):
+        print(json.dumps(profile.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+
+    # Sortie console structurée
+    sep = "=" * 75
+    sub = "-" * 75
+    print()
+    print(sep)
+    print("  NQ COCKPIT — PROFIL DE SÉANCE, SCÉNARIOS & DRAPEAUX NO-TRADE (P08)")
+    print(f"  Horodatage : {profile.as_of_et} | {profile.as_of_algiers}")
+    print(f"  Séance     : {profile.target_date}  |  Spot NQ : {profile.spot_nq:.2f} pts")
+    print(f"  Statut     : {profile.status}")
+    if profile.status_detail:
+        print(f"  Détail     : {profile.status_detail}")
+    print(sep)
+
+    # --- STATUT NO-TRADE ---
+    nt = profile.no_trade
+    if nt.is_trading_allowed:
+        print("  🟢 TRADING AUTORISÉ (sous conditions de setup et Kill Zones)")
+    else:
+        print(f"  🔴 NO-TRADE ACTIF — {nt.active_flags_count} drapeau(x) bloquant(s)")
+    print(sub)
+
+    print("  DRAPEAUX NO-TRADE (un par catégorie, cause explicite)")
+    print(sub)
+    for flag in nt.all_flags:
+        if flag.triggered:
+            icon = "🔴 ACTIF    "
+        elif "DÉGRADÉ" in flag.status:
+            icon = "🟡 DÉGRADÉ  "
+        else:
+            icon = "🟢 INACTIF  "
+        print(f"  {icon} [{flag.code.value}] {flag.title}")
+        print(f"           Cause   : {flag.reason}")
+        print(f"           Module  : {flag.source_module} | Sévérité : {flag.severity}")
+    print(sub)
+
+    # --- SANTÉ DES COMPOSANTS ---
+    print("  SANTÉ DES COMPOSANTS (statut individuel — aucun masquage)")
+    print(sub)
+    for _c_key, c_val in profile.component_statuses.items():
+        icon = "🟢" if "DÉGRADÉ" not in c_val.status else "🔴"
+        print(f"  {icon} {c_val.name}")
+        print(f"     Statut  : {c_val.status}")
+        if c_val.detail:
+            print(f"     Détail  : {c_val.detail}")
+    print(sub)
+
+    # --- PROFIL CONTEXTUEL ---
+    print("  PROFIL CONTEXTUEL DE LA SÉANCE")
+    print(sub)
+    print(f"  Risque événementiel : {profile.event_risk_level} — {profile.event_risk_reason}")
+    if profile.next_tier1_event:
+        cd_str = profile.next_tier1_countdown or "imminent"
+        print(f"  Prochain Tier 1     : {profile.next_tier1_event} (dans {cd_str})")
+    print(f"  Régime de Volatilité: {profile.volatility_regime}"
+          f" (VIX={profile.vix_level}, VXN={profile.vxn_level})")
+    print(f"  Régime Gamma (P04)  : {profile.gamma_regime}"
+          f" | Distance au Flip : {profile.distance_to_flip_pts}")
+    if profile.em_consumption_pct is not None:
+        em_cons_str = f"{profile.em_consumption_pct:.1f} %"
+    else:
+        em_cons_str = "N/A"
+    print(f"  Expected Move base  : {profile.base_expected_move_pts:.1f} pts"
+          f" | Consommé overnight : {em_cons_str}")
+    if profile.overnight_range_pts is not None:
+        on_range = f"{profile.overnight_range_pts:.1f} pts"
+    else:
+        on_range = "N/A"
+    print(f"  Range overnight     : {on_range}")
+    print(f"  Type de séance      : {profile.probable_day_type}")
+    for reason in profile.day_type_reasons:
+        print(f"    → {reason}")
+    print(sub)
+
+    # --- NIVEAUX CLÉS ---
+    print("  NIVEAUX CLÉS EN POINTS NQ")
+    print(sub)
+    hdr = f"  {'Niveau':<30} {'Prix':>10} {'Dist.(pts)':>12} {'Écart %':>9}  Source"
+    print(hdr)
+    print(f"  {'-'*28} {'-'*10} {'-'*12} {'-'*9}  {'-'*18}")
+    for lvl in profile.key_levels:
+        print(
+            f"  {lvl.name:<30} {lvl.price:>10.2f} {lvl.distance_pts:>+12.1f}"
+            f" {lvl.distance_pct:>+9.2f}%  {lvl.source}"
+        )
+    print(sub)
+
+    # --- CARTE DE SCÉNARIOS ---
+    print("  CARTE DE SCÉNARIOS « SI… ALORS… » (ZÉRO PRÉDICTION DIRECTIONNELLE)")
+    print(sub)
+    for i, sc in enumerate(profile.scenarios, 1):
+        print(f"  [{i}] {sc.level_name} ({sc.level_price:.1f} pts) — {sc.level_type}")
+        print(f"      Condition : {sc.if_condition}")
+        print(f"      Plan      : {sc.then_plan}")
+        if sc.context_notes:
+            print(f"      Contexte  : {sc.context_notes}")
+    print(sep)
+
+    return 0
+
+
+def _handle_ui(args: Any) -> int:
+    """Lance l'interface Streamlit Cockpit (P08)."""
+    import subprocess  # noqa: S603
+    import sys
+    from pathlib import Path
+
+    port = getattr(args, "port", 8501)
+    page_path = Path(__file__).parent / "ui" / "cockpit_page.py"
+
+    print(f"[nqcockpit] Lancement de l'interface Streamlit sur http://localhost:{port}")
+    print(f"[nqcockpit] Page : {page_path}")
+    print("[nqcockpit] Ctrl+C pour arrêter.")
+
+    try:
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "streamlit", "run", str(page_path),
+             "--server.port", str(port),
+             "--server.headless", "true",
+             "--theme.base", "dark"],
+            check=True,
+        )
+    except KeyboardInterrupt:
+        print("\n[nqcockpit] Interface arrêtée.")
     return 0
 
 
