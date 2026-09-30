@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS trades (
     risk_pct_used       REAL NOT NULL DEFAULT 0,
     setup_tag           TEXT NOT NULL DEFAULT '',
     notes               TEXT NOT NULL DEFAULT '',
-    screenshot_path     TEXT NOT NULL DEFAULT ''
+    screenshot_path     TEXT NOT NULL DEFAULT '',
+    contracts           INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_session ON trades(session_date);
@@ -77,6 +78,10 @@ def init_journal_db(db_path: str | Path) -> sqlite3.Connection:
             conn.execute("DROP TABLE trades")
             conn.commit()
 
+    if cols and "contracts" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN contracts INTEGER")
+        conn.commit()
+
     conn.executescript(_DDL)
     conn.commit()
     logger.debug("journal DB initialisée : %s", path)
@@ -98,9 +103,9 @@ def save_trade(conn: sqlite3.Connection, trade: TradeEntry) -> str:
             event_risk_label, gamma_regime, vol_regime,
             distance_flip_pts, distance_wall_pts, day_of_week,
             sl_moved, early_exit, risk_pct_used,
-            setup_tag, notes, screenshot_path
+            setup_tag, notes, screenshot_path, contracts
         ) VALUES (
-            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
         )
         """,
         (
@@ -134,6 +139,7 @@ def save_trade(conn: sqlite3.Connection, trade: TradeEntry) -> str:
             trade.setup_tag,
             trade.notes,
             trade.screenshot_path,
+            int(trade.contracts) if trade.contracts is not None else None,
         ),
     )
     conn.commit()
@@ -223,7 +229,7 @@ def _column_names() -> list[str]:
         "event_risk_label", "gamma_regime", "vol_regime",
         "distance_flip_pts", "distance_wall_pts", "day_of_week",
         "sl_moved", "early_exit", "risk_pct_used",
-        "setup_tag", "notes", "screenshot_path",
+        "setup_tag", "notes", "screenshot_path", "contracts",
     ]
 
 
@@ -264,5 +270,6 @@ def _row_to_trade(d: dict) -> TradeEntry:
         setup_tag=d.get("setup_tag", ""),
         notes=d.get("notes", ""),
         screenshot_path=d.get("screenshot_path", ""),
+        contracts=int(d["contracts"]) if d.get("contracts") is not None else None,
     )
     return t

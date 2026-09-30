@@ -173,46 +173,180 @@ def detect_tilt_alerts(
     session_date: str,
     session_trades: list[TradeEntry],
     config: AppConfig,
+    period_trades: list[TradeEntry] | None = None,
 ) -> list[TiltAlert]:
-    """Détecte les signaux de tilt pour la séance.
+    """Détecte les signaux et patterns de tilt pour la séance.
 
-    Ne bloque pas — signale uniquement le risque comportemental.
+    Ne bloque pas — signale factuellement les déviations statistiques et
+    comportementales sans vocabulaire émotionnel ni jugement moral.
     """
     alerts: list[TiltAlert] = []
-    if len(session_trades) < 2:
+    if not session_trades:
         return alerts
 
-    # Trier par recorded_at
-    ordered = sorted(session_trades, key=lambda t: t.recorded_at)
+    # Configuration des seuils
+    max_daily = config.rules.max_trades_per_day
+    raw_tilt = getattr(config.rules, "tilt", None)
+    vengeance_minutes = (
+        raw_tilt.vengeance_minutes
+        if raw_tilt is not None
+        else getattr(config.rules, "vengeance_minutes", 30.0)
+    )
+    size_mult_threshold = (
+        raw_tilt.size_multiplier_threshold
+        if raw_tilt is not None
+        else getattr(config.rules, "size_multiplier_threshold", 1.5)
+    )
+    freq_max_trades = (
+        raw_tilt.frequency_max_trades
+        if raw_tilt is not None
+        else getattr(config.rules, "frequency_max_trades", 3)
+    )
+    freq_window_min = (
+        raw_tilt.frequency_window_minutes
+        if raw_tilt is not None
+        else getattr(config.rules, "frequency_window_minutes", 45.0)
+    )
 
-    # Alerte 1 : 2 pertes consécutives
+    # Trier par horodatage (entry_time_ny ou recorded_at)
+    ordered = sorted(
+        session_trades,
+        key=lambda t: t.entry_time_ny or t.recorded_at,
+    )
+
+    # Pattern 1 : 2 pertes consécutives sur la même séance
     for i in range(1, len(ordered)):
         if (ordered[i - 1].outcome == TradeOutcome.LOSS
                 and ordered[i].outcome == TradeOutcome.LOSS):
             alerts.append(TiltAlert(
                 session_date=session_date,
-                reason="2 pertes consécutives détectées.",
+                reason="2 pertes consécutives détectées sur la séance.",
                 trades_involved=[ordered[i - 1].trade_id, ordered[i].trade_id],
+                pattern_type="pertes_consécutives",
             ))
-            break  # 1 alerte max par type
+            break  # 1 alerte max par séance
 
-    # Alerte 2 : rentrée rapide (< cooldown) après perte
-    cooldown = config.rules.cooldown_after_sl_minutes
-    for t in ordered:
-        if (t.outcome == TradeOutcome.LOSS
-                and t.minutes_after_last_sl is not None
-                and 0 < t.minutes_after_last_sl < cooldown):
-            alerts.append(TiltAlert(
-                session_date=session_date,
-                reason=(
-                    f"Rentrée {t.minutes_after_last_sl:.1f} min après un SL "
-                    f"(cooldown : {cooldown} min) — signal de tilt."
-                ),
-                trades_involved=[t.trade_id],
-            ))
-            break
+    # Pattern 2 : Sur-trading (dépassement de la limite journalière)
+    if len(ordered) > max_daily:
+        alerts.append(TiltAlert(
+            session_date=session_date,
+            reason=(
+                f"Sur-trading : {len(ordered)} trades enregistrés sur la séance "
+                f"(seuil configuré : {max_daily} trades/jour max)."
+            ),
+            trades_involved=[t.trade_id for t in ordered],
+            pattern_type="surtrading",
+        ))
+
+    # Pattern 3 : Vengeance trading (nouveau trade pris < X min après une perte)
+    for i in range(1, len(ordered)):
+        prev_t = ordered[i - 1]
+        curr_t = ordered[i]
+        if prev_t.outcome == TradeOutcome.LOSS:
+            delta_min: float | None = None
+            if curr_t.minutes_after_last_sl is not None:
+                delta_min = float(curr_t.minutes_after_last_sl)
+            elif prev_t.exit_time_ny and curr_t.entry_time_ny:
+                delta_min = (curr_t.entry_time_ny - prev_t.exit_time_ny).total_seconds() / 60.0
+            elif prev_t.recorded_at and curr_t.recorded_at:
+                delta_min = (curr_t.recorded_at - prev_t.recorded_at).total_seconds() / 60.0
+
+            if delta_min is not None and 0 <= delta_min < vengeance_minutes:
+                alerts.append(TiltAlert(
+                    session_date=session_date,
+                    reason=(
+                        f"Vengeance trading : nouveau trade pris {delta_min:.1f} min "
+                        f"après une perte (seuil configuré : < {vengeance_minutes:.0f} min)."
+                    ),
+                    trades_involved=[prev_t.trade_id, curr_t.trade_id],
+                    pattern_type="vengeance_trading",
+                ))
+                break
+
+    # Pattern 4 : Taille de position anormale
+    ref_trades = period_trades if period_trades is not None else session_trades
+    valid_size_trades = [t for t in ref_trades if t.contracts is not None]
+    if len(valid_size_trades) >= 2:
+        mean_contracts = sum(t.contracts for t in valid_size_trades) / len(valid_size_trades)
+        if mean_contracts > 0:
+            for t in ordered:
+                if t.contracts is None:
+                    continue  # Purement ignoré : aucun chiffre inventé
+                c = t.contracts
+                if c >= mean_contracts * size_mult_threshold and c > mean_contracts:
+                    alerts.append(TiltAlert(
+                        session_date=session_date,
+                        reason=(
+                            f"Taille de position anormale : {c} contrat(s) exécuté(s) "
+                            f"(moyenne observée : {mean_contracts:.2f} contrat(s), "
+                            f"seuil configuré : >= {size_mult_threshold:.1f}x)."
+                        ),
+                        trades_involved=[t.trade_id],
+                        pattern_type="taille_anormale",
+                    ))
+
+    # Pattern 5 : Accélération de fréquence (> N trades en <= M minutes glissantes)
+    if len(ordered) > freq_max_trades:
+        seen_bursts: set[tuple[str, ...]] = set()
+        for i in range(len(ordered)):
+            t_i = ordered[i]
+            t_start = t_i.entry_time_ny or t_i.recorded_at
+            window = [t_i]
+            for j in range(i + 1, len(ordered)):
+                t_j = ordered[j]
+                t_time = t_j.entry_time_ny or t_j.recorded_at
+                span = (t_time - t_start).total_seconds() / 60.0
+                if span <= freq_window_min:
+                    window.append(t_j)
+                else:
+                    break
+            if len(window) > freq_max_trades:
+                ids = tuple(t.trade_id for t in window)
+                if not any(set(ids).issubset(set(s)) for s in seen_bursts):
+                    seen_bursts.add(ids)
+                    actual_span = (
+                        (window[-1].entry_time_ny or window[-1].recorded_at) - t_start
+                    ).total_seconds() / 60.0
+                    alerts.append(TiltAlert(
+                        session_date=session_date,
+                        reason=(
+                            f"Accélération de fréquence : {len(window)} trades exécutés "
+                            f"en {actual_span:.1f} min (seuil configuré : > {freq_max_trades} "
+                            f"trades en {freq_window_min:.0f} min)."
+                        ),
+                        trades_involved=list(ids),
+                        pattern_type="accélération_fréquence",
+                    ))
 
     return alerts
+
+
+def detect_period_tilt_alerts(
+    trades: list[TradeEntry],
+    config: AppConfig,
+) -> list[TiltAlert]:
+    """Détecte les patterns de tilt sur un ensemble de trades (semaine ou mois).
+
+    Regroupe les trades par séance tout en évaluant la taille anormale
+    par rapport à l'échantillon complet de la période.
+    """
+    if not trades:
+        return []
+
+    sessions: dict[str, list[TradeEntry]] = {}
+    for t in sorted(trades, key=lambda x: x.entry_time_ny or x.recorded_at):
+        sessions.setdefault(t.session_date, []).append(t)
+
+    period_alerts: list[TiltAlert] = []
+    for s_date, s_trades in sessions.items():
+        session_alerts = detect_tilt_alerts(
+            session_date=s_date,
+            session_trades=s_trades,
+            config=config,
+            period_trades=trades,
+        )
+        period_alerts.extend(session_alerts)
+    return period_alerts
 
 
 # ---------------------------------------------------------------------------

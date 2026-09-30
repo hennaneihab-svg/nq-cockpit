@@ -30,11 +30,20 @@ class TradingWindowConfig:
 
 
 @dataclass(frozen=True)
+class TiltConfig:
+    vengeance_minutes: float = 30.0
+    size_multiplier_threshold: float = 1.5
+    frequency_max_trades: int = 3
+    frequency_window_minutes: float = 45.0
+
+
+@dataclass(frozen=True)
 class RulesConfig:
     max_trades_per_day: int = 2
     cancel_trade2_if_trade1_loss: bool = True
     cooldown_after_sl_minutes: int = 15
     daily_loss_limit_r: float = 2.0
+    tilt: TiltConfig = field(default_factory=TiltConfig)
 
 
 @dataclass(frozen=True)
@@ -298,11 +307,31 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     loss_limit = raw_rules.get("daily_loss_limit_r", 2.0)
     if not isinstance(loss_limit, (int, float)) or loss_limit <= 0:
         raise ConfigError("rules.daily_loss_limit_r must be a number > 0.")
+
+    raw_tilt = raw_rules.get("tilt")
+    if isinstance(raw_tilt, dict):
+        vengeance_min = float(raw_tilt.get("vengeance_minutes", 30.0))
+        size_mult = float(raw_tilt.get("size_multiplier_threshold", 1.5))
+        freq_max = int(raw_tilt.get("frequency_max_trades", 3))
+        freq_win = float(raw_tilt.get("frequency_window_minutes", 45.0))
+    else:
+        vengeance_min = float(raw_rules.get("vengeance_minutes", 30.0))
+        size_mult = float(raw_rules.get("size_multiplier_threshold", 1.5))
+        freq_max = int(raw_rules.get("frequency_max_trades", 3))
+        freq_win = float(raw_rules.get("frequency_window_minutes", 45.0))
+
+    tilt = TiltConfig(
+        vengeance_minutes=vengeance_min,
+        size_multiplier_threshold=size_mult,
+        frequency_max_trades=freq_max,
+        frequency_window_minutes=freq_win,
+    )
     rules = RulesConfig(
         max_trades_per_day=max_trades,
         cancel_trade2_if_trade1_loss=bool(raw_rules.get("cancel_trade2_if_trade1_loss", True)),
         cooldown_after_sl_minutes=cooldown,
         daily_loss_limit_r=float(loss_limit),
+        tilt=tilt,
     )
 
     # 5. Risk

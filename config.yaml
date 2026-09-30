@@ -11,6 +11,11 @@ rules:
   cancel_trade2_if_trade1_loss: true
   cooldown_after_sl_minutes: 15
   daily_loss_limit_r: 2.0
+  tilt:
+    vengeance_minutes: 30
+    size_multiplier_threshold: 1.5
+    frequency_max_trades: 3
+    frequency_window_minutes: 45
 risk:
   instrument: MNQ            # MNQ ($2/pt) ou NQ ($20/pt)
   risk_per_trade_pct: 0.5

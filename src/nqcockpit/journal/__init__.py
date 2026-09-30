@@ -6,6 +6,7 @@ from nqcockpit.journal.backup import (
 from nqcockpit.journal.engine import (
     compute_daily_stats,
     compute_performance_stats,
+    detect_period_tilt_alerts,
     detect_tilt_alerts,
     detect_violations,
     finalize_trade,
@@ -55,6 +56,7 @@ __all__ = [
     "get_trade", "update_trade_screenshot",
     # engine
     "finalize_trade", "log_trade", "detect_violations", "detect_tilt_alerts",
+    "detect_period_tilt_alerts",
     "compute_daily_stats", "compute_performance_stats",
     "segment_performance", "generate_coaching_report",
     # importer

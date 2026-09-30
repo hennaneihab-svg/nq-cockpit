@@ -114,6 +114,7 @@ class TradeEntry:
     setup_tag: str = ""
     notes: str = ""
     screenshot_path: str = ""
+    contracts: int | None = None
 
     def compute_r(self) -> float:
         """Calcule le R réalisé depuis les prix bruts."""
@@ -153,6 +154,7 @@ class TiltAlert:
     session_date: str
     reason: str         # "2 pertes consécutives", "rentrée < Xmin après SL", etc.
     trades_involved: list[str] = field(default_factory=list)
+    pattern_type: str = ""
 
 
 @dataclass

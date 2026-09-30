@@ -16,7 +16,11 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from nqcockpit.config import AppConfig, load_config
-from nqcockpit.journal.engine import compute_performance_stats, detect_violations
+from nqcockpit.journal.engine import (
+    compute_performance_stats,
+    detect_period_tilt_alerts,
+    detect_violations,
+)
 from nqcockpit.journal.models import PerformanceStats, TradeEntry
 from nqcockpit.journal.store import load_trades
 
@@ -357,12 +361,36 @@ def generate_period_report(
             "— comparaison non applicable."
         )
 
+    # Patterns de tilt détectés sur la période
+    tilt_alerts = detect_period_tilt_alerts(curr_trades, config)
+    md_lines.extend([
+        "",
+        "---",
+        "",
+        "## 5. Patterns de Tilt Détectés",
+        "",
+    ])
+    if not tilt_alerts:
+        md_lines.append("✅ **Aucun pattern de tilt détecté** sur la période étudiée.")
+    else:
+        md_lines.append(
+            f"⚠️ **{len(tilt_alerts)} pattern(s) de tilt détecté(s)** sur les trades de la période :"
+        )
+        md_lines.append("")
+        md_lines.append("| Séance | Type de pattern | Constat factuel | Trades impliqués |")
+        md_lines.append("| :---: | :--- | :--- | :--- |")
+        for alert in tilt_alerts:
+            t_str = ", ".join(alert.trades_involved) if alert.trades_involved else "—"
+            md_lines.append(
+                f"| {alert.session_date} | `{alert.pattern_type}` | {alert.reason} | {t_str} |"
+            )
+
     if curr_trades:
         md_lines.extend([
             "",
             "---",
             "",
-            "## 5. Détail des Trades de la Période",
+            "## 6. Détail des Trades de la Période",
             "",
             "| Date | Instrument | Direction | Entrée | Sortie | Résultat (R) | Issue | Setup |",
             "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",

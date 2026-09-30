@@ -60,6 +60,7 @@ OPTIONAL_COLUMNS: list[str] = [
     "gamma_regime",
     "vol_regime",
     "screenshot_path",
+    "contracts",
 ]
 
 
@@ -72,6 +73,7 @@ class CSVImportSummary:
     duplicates: int = 0
     rejected: int = 0
     missing_optional_columns: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -183,6 +185,11 @@ def import_trades_from_csv(
     for opt_col in OPTIONAL_COLUMNS:
         if opt_col.lower() not in raw_headers:
             summary.missing_optional_columns.append(opt_col)
+
+    if "contracts" not in raw_headers:
+        summary.warnings.append(
+            "Colonne optionnelle 'contracts' absente : taille non renseignée (laissée à None)."
+        )
 
     # 4. Chargement des trades existants pour détection des doublons
     # Si entry_time_ny est fourni dans le CSV, on l'inclut dans la clé de déduplication :
@@ -330,6 +337,23 @@ def import_trades_from_csv(
             str(Path(raw_screenshot).resolve()) if raw_screenshot else ""
         )
 
+        # Parsing de la taille en contrats (optionnelle)
+        raw_contracts = get_opt("contracts", None)
+        contracts_val: Optional[int] = None
+        if raw_contracts is not None and str(raw_contracts).strip() != "":
+            try:
+                contracts_val = int(raw_contracts)
+            except (ValueError, TypeError):
+                summary.warnings.append(
+                    f"Ligne {row_idx} : valeur de 'contracts' invalide ({raw_contracts!r}), "
+                    "laissée à None."
+                )
+                contracts_val = None
+        elif "contracts" in raw_headers:
+            summary.warnings.append(
+                f"Ligne {row_idx} : colonne 'contracts' vide, laissée à None."
+            )
+
         trade = TradeEntry(
             trade_id=str(uuid.uuid4()),
             recorded_at=datetime.now(timezone.utc),
@@ -360,6 +384,7 @@ def import_trades_from_csv(
             if get_opt("vol_regime", "inconnu") in [v.value for v in VolRegime]
             else VolRegime.UNKNOWN,
             screenshot_path=resolved_screenshot,
+            contracts=contracts_val,
         )
 
         # Calcul automatique du R et de l'outcome via le moteur
