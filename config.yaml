@@ -21,7 +21,7 @@ events:
   stand_aside_before_minutes: 5
   wait_after_minutes: 3
   tier1: [FOMC, CPI, NFP, PCE, "FOMC Minutes", "Powell", "GDP"]
-  tier2: [PPI, JOLTS, "Retail Sales", "Consumer Sentiment", "ISM", "ADP"]
+  tier2: [PPI, JOLTS, "Retail Sales", "Consumer Sentiment", "ISM", "ADP", "Average Hourly Earnings", "Unemployment Rate"]
   megacaps: [NVDA, MSFT, AAPL, AMZN, GOOGL, META, AVGO, TSLA]
   horizon_days: 14
   cache_ttl_hours: 6

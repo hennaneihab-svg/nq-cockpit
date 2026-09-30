@@ -200,6 +200,11 @@ def compute_event_risk(
         sym = tier_sym.get(ev.tier, "[--]")
         consensus_str = f" | fcst={ev.consensus}" if ev.consensus else ""
         previous_str = f" | prec={ev.previous}" if ev.previous else ""
+        val_src_str = (
+            f" | val_src: {ev.consensus_source}"
+            if (ev.consensus or ev.previous) and ev.consensus_source
+            else ""
+        )
         src_str = ",".join(ev.all_sources) if ev.all_sources else ev.source
         is_published = ev.scheduled_utc < ref_utc
         pub_tag = " [publié]" if is_published else ""
@@ -207,7 +212,7 @@ def compute_event_risk(
         line = (
             f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger ({et.strftime('%H:%M')} ET) | "
             f"Tier {ev.tier} | {ev.name}"
-            f"{consensus_str}{previous_str} | date: {ev.date_origin}{pub_tag}"
+            f"{consensus_str}{previous_str}{val_src_str} | date: {ev.date_origin}{pub_tag}"
             f"{time_prov_str} | [{src_str}]"
         )
         cal_display.append(line)

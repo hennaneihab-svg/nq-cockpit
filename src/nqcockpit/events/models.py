@@ -57,28 +57,40 @@ class CalendarEvent:
     time_provenance: str = ""
     """Origine explicite de l'heure (ex: 'table versionnée BLS (10:00 ET)')."""
 
+    consensus_source: str = ""
+    """Source de la valeur de prévision/précédent (ex: 'ForexFactory')."""
+
     @property
     def date_origin(self) -> str:
-        """Origine de la date.
+        """Origine de la date réellement retenue.
 
-        'officielle', 'ForexFactory', 'estimée (règle)', 'calendrier statique'.
+        'officielle', 'ForexFactory', 'calendrier statique', 'estimée (règle)'.
+        Si deux sources concordent, ne retourne jamais 'estimée'.
         """
-        if "static" in self.all_sources or self.source == "static":
+        # Si deux sources concordent sur la même date, pas une estimation
+        if len(self.all_sources) >= 2 and self.source == "fred":
+            if "forexfactory" in self.all_sources:
+                return "ForexFactory"
+            if "bls" in self.all_sources or "static" in self.all_sources:
+                return "calendrier statique"
+            return "FRED (concordante)"
+
+        if self.source == "forexfactory":
+            return "ForexFactory"
+        if self.source in ("static", "bls") and self.status == DataStatus.DEGRADED:
             return "calendrier statique"
         if self.source in ("fed_html", "fed_rss", "bea") or (
             self.source == "bls" and self.status == DataStatus.OK
         ):
             return "officielle"
-        if self.source == "forexfactory":
-            return "ForexFactory"
         if self.source == "fred":
+            if len(self.all_sources) >= 2:
+                return "FRED (concordante)"
             return "estimée (règle)"
-        if any(s in ("fed_html", "fed_rss", "bea") for s in self.all_sources):
-            return "officielle"
         if "forexfactory" in self.all_sources:
             return "ForexFactory"
-        if "fred" in self.all_sources:
-            return "estimée (règle)"
+        if "bls" in self.all_sources or "static" in self.all_sources:
+            return "calendrier statique"
         return "calendrier statique"
 
 

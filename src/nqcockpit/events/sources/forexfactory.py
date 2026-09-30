@@ -29,8 +29,10 @@ _NAME_MAP = {
     "adp": "ADP",
     "non-farm employment change": "NFP",
     "nonfarm payrolls": "NFP",
-    "average hourly earnings m/m": "NFP",
-    "unemployment rate": "NFP",
+    "average hourly earnings m/m": "Average Hourly Earnings",
+    "average hourly earnings y/y": "Average Hourly Earnings",
+    "average hourly earnings": "Average Hourly Earnings",
+    "unemployment rate": "Unemployment Rate",
     "cpi m/m": "CPI",
     "cpi y/y": "CPI",
     "core cpi m/m": "CPI",
@@ -59,6 +61,7 @@ _TIER_MAP = {
     "NFP": 1, "CPI": 1, "FOMC": 1, "FOMC Minutes": 1,
     "Powell": 1, "GDP": 1, "PCE": 1,
     "PPI": 2, "JOLTS": 2, "ISM": 2, "ADP": 2, "Jobless Claims": 2,
+    "Average Hourly Earnings": 2, "Unemployment Rate": 2,
 }
 
 
@@ -194,6 +197,11 @@ def fetch_forexfactory_events(
             else DataStatus.OK
         )
 
+        fcst = entry.get("forecast") or None
+        prec = entry.get("previous") or None
+        act = entry.get("actual") or None
+        c_source = "ForexFactory" if (fcst or prec or act) else ""
+
         events.append(
             CalendarEvent(
                 name=name,
@@ -201,14 +209,15 @@ def fetch_forexfactory_events(
                 scheduled_utc=scheduled,
                 source="forexfactory",
                 description=f"[ForexFactory] {raw_title}",
-                consensus=entry.get("forecast") or None,
-                previous=entry.get("previous") or None,
-                actual=entry.get("actual") or None,
+                consensus=fcst,
+                previous=prec,
+                actual=act,
                 source_fetched_utc=fetched_utc,
                 source_age_seconds=0.0,
                 status=ev_status,
                 all_sources=["forexfactory"],
                 time_provenance=time_prov,
+                consensus_source=c_source,
             )
         )
 

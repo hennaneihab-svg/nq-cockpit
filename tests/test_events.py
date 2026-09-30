@@ -36,7 +36,10 @@ DEFAULT_WINDOWS = [
     {"name": "trade2", "start": "17:00", "end": "18:30"},
 ]
 DEFAULT_TIER1 = ["FOMC", "CPI", "NFP", "PCE", "FOMC Minutes", "Powell", "GDP"]
-DEFAULT_TIER2 = ["PPI", "JOLTS", "Retail Sales", "Consumer Sentiment", "ISM", "ADP"]
+DEFAULT_TIER2 = [
+    "PPI", "JOLTS", "Retail Sales", "Consumer Sentiment", "ISM", "ADP",
+    "Average Hourly Earnings", "Unemployment Rate",
+]
 
 
 def test_day_without_events_is_green() -> None:
@@ -521,5 +524,38 @@ def test_jolts_time_10_et_and_explicit_time_provenance() -> None:
     dt, prov, status = _make_utc("2026-10-07", None)
     assert status == DataStatus.DEGRADED
     assert "DÉGRADÉ" in prov
+
+
+def test_nfp_date_origin_distinct_indicators_and_consensus_source() -> None:
+    """Cas Point 3 : NFP date réelle, séparation indicateurs d'emploi et source valeur.
+
+    - NFP ne prend pas fcst/prec d'Average Hourly Earnings (0.3%).
+    - Average Hourly Earnings et Unemployment Rate sont des indicateurs distincts.
+    - Origine de la date n'est pas 'estimée' quand deux sources concordent.
+    - consensus_source est renseigné (ForexFactory).
+    """
+    from nqcockpit.events.sources.forexfactory import _normalize_name
+
+    assert _normalize_name("Non-Farm Employment Change") == "NFP"
+    assert _normalize_name("Average Hourly Earnings m/m") == "Average Hourly Earnings"
+    assert _normalize_name("Unemployment Rate") == "Unemployment Rate"
+
+    # Vérification fusion et non-écrasement
+    ev_nfp = CalendarEvent(
+        name="NFP",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 2, 12, 30, tzinfo=UTC),
+        source="forexfactory",
+        consensus="90K",
+        previous="162K",
+        consensus_source="ForexFactory",
+        all_sources=["forexfactory", "bls"],
+    )
+    # Deux sources concordent -> date_origin == "ForexFactory" (source retenue), pas estimée
+    assert ev_nfp.date_origin == "ForexFactory"
+    assert "estimée" not in ev_nfp.date_origin
+    assert ev_nfp.consensus == "90K"
+    assert ev_nfp.consensus_source == "ForexFactory"
+
 
 
