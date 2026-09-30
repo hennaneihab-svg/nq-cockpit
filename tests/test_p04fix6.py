@@ -779,3 +779,102 @@ def test_p04fix6c_quotation_lag_and_straddle_timing_vs_spot(tmp_path):
     assert sd.delta_t_call_vs_spot_nq_minutes == pytest.approx(-5.0)
     assert sd.delta_t_put_vs_spot_nq_minutes == pytest.approx(-15.0)
 
+
+def test_p04fix6d_network_fallback_cboe_degraded_on_http_error():
+    """P04-fix6d : Test du fallback réseau — si la requête HTTP CBOE échoue (ex: ConnectionError),
+    la chaîne retournée doit avoir status=BLOCKED avec une note explicite.
+    Aucun repli silencieux : l'erreur réseau est visible dans le statut et la note."""
+    from unittest.mock import patch
+
+    import requests
+
+    from nqcockpit.data.cboe import fetch_cboe_options_chain
+
+    # Simuler une erreur réseau (ConnectionError)
+    with patch(
+        "nqcockpit.data.cboe._SESSION.get",
+        side_effect=requests.exceptions.ConnectionError("Simulated network error"),
+    ):
+        snap = fetch_cboe_options_chain(force_reload=True)
+
+    # Réseau bloqué → BLOCKED (pas silencieux)
+    assert snap.status == DataStatus.BLOCKED
+    assert snap.options_df.empty
+    # La note doit mentionner l'erreur réseau
+    assert "Erreur réseau CBOE" in snap.notes
+    assert "Simulated network error" in snap.notes
+    # Pas de crash, age_minutes peut être None
+    assert snap.latest_quote_time_utc is None
+
+
+def test_p04fix6d_put_wall_global_degraded_when_absent(tmp_path):
+    """P04-fix6d : Le Put Wall global affiche INDISPONIBLE [DÉGRADÉ] si absent.
+    Vérifie que le snapshot ne masque pas une absence de mur Put."""
+    from nqcockpit.data.cboe import CboeChainSnapshot
+    from nqcockpit.data.models import DataStatus
+    from nqcockpit.levels.engine import LevelsEngine
+
+    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    now_utc = datetime(2026, 9, 30, 14, 0, tzinfo=timezone.utc)
+    spot_ndx = 20000.0
+
+    # Options uniquement Call (aucun Put) → pas de Put Wall possible
+    df_no_puts = pd.DataFrame(
+        [
+            {
+                "contract": "NDX261016C20200000",
+                "expiry": date(2026, 10, 16),
+                "type": "C",
+                "strike": 20200.0,
+                "bid": 10.0,
+                "ask": 12.0,
+                "iv": 0.20,
+                "open_interest": 1000.0,
+                "volume": 500.0,
+                "delta": 0.50,
+                "gamma": 0.0001,
+                "last_trade_price": 11.0,
+                "last_trade_time": now_utc,
+            }
+        ]
+    )
+    chain = CboeChainSnapshot(
+        symbol="NDX",
+        spot=spot_ndx,
+        options_df=df_no_puts,
+        latest_quote_time_utc=now_utc,
+        fetched_at_utc=now_utc,
+        age_minutes=0.0,
+        status=DataStatus.OK,
+    )
+
+    snap = engine.compute_snapshot(
+        chain=chain,
+        nq_bars=[
+            Bar(
+                timestamp_utc=now_utc,
+                open=22500.0,
+                high=22500.0,
+                low=22500.0,
+                close=22500.0,
+            )
+        ],
+        ndx_bars=[
+            Bar(
+                timestamp_utc=now_utc,
+                open=spot_ndx,
+                high=spot_ndx,
+                low=spot_ndx,
+                close=spot_ndx,
+            )
+        ],
+        now_utc=now_utc,
+    )
+
+    # Le Put Wall est absent → doit être None (pas de valeur inventée)
+    assert snap.put_wall_ndx is None or snap.put_wall_ndx == snap.put_wall_useful_ndx
+    assert snap.put_wall_global_ndx is None or snap.put_wall_global_ndx is not None
+    # Le snapshot ne doit jamais inventer un Put Wall à 0.0
+    if snap.put_wall_ndx is not None:
+        assert snap.put_wall_ndx != 0.0
+

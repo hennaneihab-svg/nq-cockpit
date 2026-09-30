@@ -517,7 +517,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f" (dist: {snap.put_wall_useful_dist_pts:+,.2f} pts / "
                 f"{snap.put_wall_useful_dist_pct:+.2f}%)"
             )
-        print(f"  Put Wall utile ({win_str})  : NDX {pw_u_ndx} | NQ {pw_u_nq}{pw_dist}")
+        if snap.put_wall_useful_ndx is None:
+            print(f"  Put Wall utile ({win_str})  : INDISPONIBLE [DÉGRADÉ]")
+        else:
+            print(f"  Put Wall utile ({win_str})  : NDX {pw_u_ndx} | NQ {pw_u_nq}{pw_dist}")
 
         if snap.put_wall_is_outside_window and snap.put_wall_global_ndx:
             pw_g_ndx = f"{snap.put_wall_global_ndx:,.2f}"
@@ -535,6 +538,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"    -> Mur Put global (hors fenêtre)  : "
                 f"NDX {pw_g_ndx} | NQ {pw_g_nq}{pw_g_dist}"
             )
+        elif snap.put_wall_global_ndx is None and snap.put_wall_useful_ndx is None:
+            print("    -> Mur Put global                 : INDISPONIBLE [DÉGRADÉ]")
 
         if snap.zero_dte_call_wall_nq or snap.zero_dte_put_wall_nq:
             z_cw = f"{snap.zero_dte_call_wall_nq:,.2f}" if snap.zero_dte_call_wall_nq else "N/A"
