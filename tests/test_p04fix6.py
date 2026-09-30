@@ -459,3 +459,166 @@ def test_p04fix6a_straddle_calendar_time_and_dynamic_diagnostic():
     assert "incertitude bid-ask de 3.3% sur le straddle" in diag_div.calculated_cause
     assert "NDXP" in diag_div.calculated_cause
 
+
+def test_p04fix6b_prior_session_target_tolerance_and_remote_fallback():
+    """P04-fix6b : Distance cible 16:00 ET, repli distant et statut INDISPONIBLE."""
+    import sqlite3
+
+    from nqcockpit.data.basis import compute_previous_session_basis, find_basis_pair
+    from nqcockpit.data.models import Bar, BarSeries, DataStatus
+
+    # Cible : clôture 16:00 ET (20:00 UTC)
+    target_utc = datetime(2026, 9, 28, 20, 0, tzinfo=timezone.utc)
+
+    # Barres en mémoire à 10:00 ET (14:00 UTC), soit 360 min de distance > tolérance 15 min
+    nq_mem = [
+        Bar(
+            timestamp_utc=datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc),
+            open=20500.0,
+            high=20505.0,
+            low=20495.0,
+            close=20500.0,
+        )
+    ]
+    ndx_mem = [
+        Bar(
+            timestamp_utc=datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc),
+            open=20200.0,
+            high=20205.0,
+            low=20195.0,
+            close=20200.0,
+        )
+    ]
+
+    # Sans fetcher distant capable : la barre à 10:00 est rejetée car trop éloignée de 16:00 ET
+    conn_mem = sqlite3.connect(":memory:")
+    res_rejected = find_basis_pair(
+        target=target_utc,
+        nq_bars=nq_mem,
+        ndx_bars=ndx_mem,
+        tolerance_minutes=1.0,
+        target_tolerance_minutes=15.0,
+        conn=conn_mem,
+    )
+    assert res_rejected.is_aligned is False
+    assert res_rejected.cause_code == "DISTANCE_CIBLE_HORS_TOLERANCE"
+
+    # compute_previous_session_basis doit renvoyer INDISPONIBLE (BLOCKED)
+    snap_blocked = compute_previous_session_basis(
+        nq_bars=nq_mem,
+        ndx_bars=ndx_mem,
+        ref_utc=datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc),
+        pair_result=res_rejected,
+    )
+    assert snap_blocked.status == DataStatus.BLOCKED
+    assert snap_blocked.basis == 0.0
+    assert "INDISPONIBLE" in snap_blocked.label
+
+    # Avec fetcher distant retournant la barre de 15:59 ET (19:59 UTC, distance 1.0 min <= 15 min)
+    class MockFetcher:
+        def fetch_yahoo_bars(self, symbol, interval="1m", period="5d"):
+            t_bar = datetime(2026, 9, 28, 19, 59, tzinfo=timezone.utc)
+            if symbol == "NQ=F":
+                return BarSeries(
+                    symbol="NQ=F",
+                    interval="1m",
+                    bars=[
+                        Bar(
+                            timestamp_utc=t_bar,
+                            open=20600.0,
+                            high=20605.0,
+                            low=20595.0,
+                            close=20600.0,
+                        )
+                    ],
+                )
+            else:
+                return BarSeries(
+                    symbol="^NDX",
+                    interval="1m",
+                    bars=[
+                        Bar(
+                            timestamp_utc=t_bar,
+                            open=20300.0,
+                            high=20305.0,
+                            low=20295.0,
+                            close=20300.0,
+                        )
+                    ],
+                )
+
+    res_remote = find_basis_pair(
+        target=target_utc,
+        nq_bars=nq_mem,
+        ndx_bars=ndx_mem,
+        tolerance_minutes=1.0,
+        target_tolerance_minutes=15.0,
+        conn=conn_mem,
+        fetcher=MockFetcher(),
+    )
+    assert res_remote.is_aligned is True
+    assert res_remote.cause_code == "PAIRE_TROUVEE"
+    assert res_remote.nq_origin == "source_distante"
+    assert res_remote.ndx_origin == "source_distante"
+    assert res_remote.nq_bar is not None and res_remote.nq_bar.close == 20600.0
+    assert res_remote.ndx_bar is not None and res_remote.ndx_bar.close == 20300.0
+
+    snap_ok = compute_previous_session_basis(
+        nq_bars=nq_mem,
+        ndx_bars=ndx_mem,
+        ref_utc=datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc),
+        pair_result=res_remote,
+    )
+    assert snap_ok.status == DataStatus.OK
+    assert snap_ok.basis == pytest.approx(300.0)
+
+
+def test_p04fix6b_live_basis_anchored_on_spot_nq(tmp_path):
+    """P04-fix6b : Base live ancrée sur l'horodatage du spot NQ pour choisir la cotation NDX."""
+    from nqcockpit.data.models import Bar, DataStatus
+    from nqcockpit.levels.engine import LevelsEngine
+
+    engine = LevelsEngine(output_dir=tmp_path / "levels")
+
+    t_spot_nq = datetime(2026, 9, 29, 14, 35, tzinfo=timezone.utc)
+    t_ndx_earlier = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
+    t_ndx_match = datetime(2026, 9, 29, 14, 35, tzinfo=timezone.utc)
+    t_ndx_later = datetime(2026, 9, 29, 14, 40, tzinfo=timezone.utc)
+
+    # NQ a son dernier spot à 14:35
+    nq_bars = [
+        Bar(timestamp_utc=t_spot_nq, open=20500.0, high=20505.0, low=20495.0, close=20500.0)
+    ]
+    # NDX a plusieurs barres, dont une plus récente à 14:40
+    ndx_bars = [
+        Bar(timestamp_utc=t_ndx_earlier, open=20180.0, high=20185.0, low=20175.0, close=20180.0),
+        Bar(timestamp_utc=t_ndx_match, open=20200.0, high=20205.0, low=20195.0, close=20200.0),
+        Bar(timestamp_utc=t_ndx_later, open=20220.0, high=20225.0, low=20215.0, close=20220.0),
+    ]
+
+    from nqcockpit.data.cboe import CboeChainSnapshot
+
+    chain = CboeChainSnapshot(
+        symbol="^NDX",
+        spot=20200.0,
+        options_df=pd.DataFrame(),
+        latest_quote_time_utc=t_spot_nq,
+        fetched_at_utc=t_spot_nq,
+        age_minutes=0.0,
+        status=DataStatus.OK,
+    )
+    snap = engine.compute_snapshot(
+        chain=chain,
+        nq_bars=nq_bars,
+        ndx_bars=ndx_bars,
+        now_utc=t_spot_nq,
+    )
+
+    # La base live doit être calculée par rapport à NDX à l'heure du spot NQ (14:35, close=20200)
+    # et NON la dernière barre NDX (14:40, close=20220)
+    assert snap.live_basis_available is True
+    assert snap.live_basis_status == DataStatus.OK
+    assert snap.live_basis_value == pytest.approx(300.0)  # 20500 - 20200
+    assert snap.live_basis_nq_time_utc == t_spot_nq
+    assert snap.live_basis_ndx_time_utc == t_ndx_match
+

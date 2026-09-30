@@ -120,6 +120,7 @@ class DataConfig:
     )
     delay_margin_minutes: int = 10
     parity_basis_tolerance_points: float = 50.0
+    target_tolerance_minutes: float = 15.0
 
 
 @dataclass(frozen=True)

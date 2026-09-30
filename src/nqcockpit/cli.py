@@ -131,6 +131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from nqcockpit.data.cboe import fetch_cboe_options_chain
         from nqcockpit.data.db import get_bars, get_db_connection, insert_bars
         from nqcockpit.data.fetcher import DataFetcher
+        from nqcockpit.data.models import DataStatus
         from nqcockpit.levels.engine import LevelsEngine
 
         print("[nqcockpit] Commande 'snapshot' invoquée (niveaux gamma)...")
@@ -280,7 +281,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("-" * 70)
         print("  BLOC BASE (SÉANCE PRÉCÉDENTE / PARITÉ / LIVE)")
         # 1. Base séance précédente
-        if snap.basis_nq_time_utc and snap.basis_ndx_time_utc:
+        if snap.basis_status == DataStatus.BLOCKED:
+            print(
+                f"  1. Base séance précédente : INDISPONIBLE ({snap.basis_label}) "
+                f"[{snap.basis_status.value}]"
+            )
+            if snap.basis_delay_compensation_note:
+                print(f"       Origine données      : {snap.basis_delay_compensation_note}")
+        elif snap.basis_nq_time_utc and snap.basis_ndx_time_utc:
             b_nq_et = snap.basis_nq_time_utc.astimezone(et_tz).strftime("%Y-%m-%d %H:%M:%S ET")
             b_nq_alg = snap.basis_nq_time_utc.astimezone(alg_tz).strftime(
                 "%Y-%m-%d %H:%M:%S (Alger)"

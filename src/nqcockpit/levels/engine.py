@@ -671,11 +671,17 @@ def build_diagnostic_1c(
     target_utc = target_et.astimezone(timezone.utc)
 
     if pair_result is None:
+        try:
+            cfg = load_config()
+            target_tol = getattr(cfg.data, "target_tolerance_minutes", 15.0)
+        except Exception:
+            target_tol = 15.0
         pair_result = find_basis_pair(
             target=target_utc,
             nq_bars=nq_bars,
             ndx_bars=ndx_bars,
             tolerance_minutes=tolerance_minutes,
+            target_tolerance_minutes=target_tol,
         )
 
     target_et_str = target_et.strftime(_ET_FMT)
@@ -871,8 +877,10 @@ class LevelsEngine:
         try:
             cfg = load_config()
             tol = getattr(cfg.data, "parity_basis_tolerance_points", 50.0)
+            target_tol = getattr(cfg.data, "target_tolerance_minutes", 15.0)
         except Exception:
             tol = 50.0
+            target_tol = 15.0
 
         # 2. Recherche UNIQUE de la paire pour la séance précédente (lue par base et 1c)
         session_close_utc = CALENDAR.get_last_equity_session_close(now_utc)
@@ -881,6 +889,7 @@ class LevelsEngine:
             nq_bars=nq_bars,
             ndx_bars=ndx_bars,
             tolerance_minutes=1.0,
+            target_tolerance_minutes=target_tol,
         )
 
         # 3. Ordre de priorité de la base NQ/NDX :
@@ -892,7 +901,12 @@ class LevelsEngine:
         candidate_basis: BasisSnapshot | None = None
 
         if in_regular_session and nq_bars and ndx_bars:
-            live_snap = compute_live_basis(nq_bars[-1], ndx_bars[-1], now_utc=now_utc)
+            last_nq = nq_bars[-1]
+            best_ndx = min(
+                ndx_bars,
+                key=lambda b: abs((b.timestamp_utc - last_nq.timestamp_utc).total_seconds()),
+            )
+            live_snap = compute_live_basis(last_nq, best_ndx, now_utc=now_utc)
             if live_snap.status != DataStatus.BLOCKED:
                 candidate_basis = live_snap
 
@@ -1001,19 +1015,19 @@ class LevelsEngine:
 
         tol_live_min = 1.0
 
-        if ndx_bars and nq_bars:
-            last_ndx_bar = ndx_bars[-1]
-            live_basis_ndx_ts = last_ndx_bar.timestamp_utc
-            best_nq_match = min(
-                nq_bars,
-                key=lambda b: abs((b.timestamp_utc - last_ndx_bar.timestamp_utc).total_seconds()),
+        if nq_bars and ndx_bars:
+            last_nq_bar = nq_bars[-1]
+            live_basis_nq_ts = last_nq_bar.timestamp_utc
+            best_ndx_match = min(
+                ndx_bars,
+                key=lambda b: abs((b.timestamp_utc - last_nq_bar.timestamp_utc).total_seconds()),
             )
-            dt_s = abs((best_nq_match.timestamp_utc - last_ndx_bar.timestamp_utc).total_seconds())
+            dt_s = abs((best_ndx_match.timestamp_utc - last_nq_bar.timestamp_utc).total_seconds())
             live_basis_delta_t = dt_s / 60.0
-            live_basis_nq_ts = best_nq_match.timestamp_utc
+            live_basis_ndx_ts = best_ndx_match.timestamp_utc
 
             if live_basis_delta_t <= tol_live_min:
-                live_basis_val = best_nq_match.close - last_ndx_bar.close
+                live_basis_val = last_nq_bar.close - best_ndx_match.close
                 live_basis_avail = True
                 live_basis_status = DataStatus.OK
             else:

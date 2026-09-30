@@ -110,23 +110,32 @@ def compute_live_basis(
     )
 
 
+def _dist_to_16h_minutes(bar: Bar) -> float:
+    """Distance en minutes de la barre à la clôture 16:00 ET de sa séance."""
+    b_et = bar.timestamp_utc.astimezone(ET)
+    c_16h = datetime(b_et.year, b_et.month, b_et.day, 16, 0, 0, tzinfo=ET)
+    return abs((c_16h - b_et).total_seconds()) / 60.0
+
+
 def find_basis_pair(
     target: datetime,
     nq_bars: list[Bar] | None = None,
     ndx_bars: list[Bar] | None = None,
     tolerance_minutes: float = 1.0,
+    target_tolerance_minutes: float = 15.0,
     conn: Any | None = None,
     reload_source: bool = False,
+    fetcher: Any | None = None,
 ) -> PairResult:
     """Recherche unique et ordonnée de la paire NQ / NDX à une cible temporelle.
 
     Ordre de recherche rigoureux :
       1. Mémoire (listes nq_bars, ndx_bars)
       2. SQLite (table bars locale via get_bar_at_or_before)
-      3. Rechargement source distante (si demandé)
+      3. Rechargement source distante (si demandé ou si barre hors tolérance cible)
 
-    Cette fonction produit le PairResult unique qui DOIT être lu à la fois par
-    compute_previous_session_basis et build_diagnostic_1c.
+    Contrôle la distance à la cible 16:00 ET (target_tolerance_minutes) en plus de l'écart
+    entre les deux barres NQ et NDX (tolerance_minutes).
     """
     if target.tzinfo is None:
         target_utc = target.replace(tzinfo=timezone.utc)
@@ -140,17 +149,51 @@ def find_basis_pair(
 
     # 1. Étape MÉMOIRE
     nq_candidate_mem: Bar | None = None
+    nq_mem_too_far = False
+    nq_mem_closest_dist: float | None = None
     if nq_bars:
         valid_nq_mem = [b for b in nq_bars if b.timestamp_utc <= target_utc]
         if valid_nq_mem:
-            nq_candidate_mem = valid_nq_mem[-1]
+            best_nq = valid_nq_mem[-1]
+            dist_mem = _dist_to_16h_minutes(best_nq)
+            nq_mem_closest_dist = dist_mem
+            if dist_mem <= target_tolerance_minutes:
+                nq_candidate_mem = best_nq
+            else:
+                nq_mem_too_far = True
 
     ndx_candidate_mem: Bar | None = None
+    ndx_mem_too_far = False
+    ndx_mem_closest_dist: float | None = None
     if ndx_bars:
         valid_ndx_mem = [b for b in ndx_bars if b.timestamp_utc <= target_utc]
         if valid_ndx_mem:
-            ndx_candidate_mem = valid_ndx_mem[-1]
+            best_ndx = valid_ndx_mem[-1]
+            dist_mem = _dist_to_16h_minutes(best_ndx)
+            ndx_mem_closest_dist = dist_mem
+            if dist_mem <= target_tolerance_minutes:
+                ndx_candidate_mem = best_ndx
+            else:
+                ndx_mem_too_far = True
 
+    nq_mem_det = (
+        "trouvé"
+        if nq_candidate_mem
+        else (
+            f"trop éloigné ({nq_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+            if nq_mem_too_far
+            else "non trouvé"
+        )
+    )
+    ndx_mem_det = (
+        "trouvé"
+        if ndx_candidate_mem
+        else (
+            f"trop éloigné ({ndx_mem_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+            if ndx_mem_too_far
+            else "non trouvé"
+        )
+    )
     search_steps.append(
         SearchStepResult(
             step_name="memoire",
@@ -160,10 +203,7 @@ def find_basis_pair(
             ndx_found=ndx_candidate_mem is not None,
             ndx_time_utc=ndx_candidate_mem.timestamp_utc if ndx_candidate_mem else None,
             ndx_spot=ndx_candidate_mem.close if ndx_candidate_mem else None,
-            details=(
-                f"NQ: {'trouvé' if nq_candidate_mem else 'non trouvé'}, "
-                f"NDX: {'trouvé' if ndx_candidate_mem else 'non trouvé'}"
-            ),
+            details=f"NQ: {nq_mem_det}, NDX: {ndx_mem_det}",
         )
     )
 
@@ -171,28 +211,62 @@ def find_basis_pair(
     from nqcockpit.data.db import get_bar_at_or_before
 
     nq_candidate_db: Bar | None = None
+    nq_db_too_far = False
+    nq_db_closest_dist: float | None = None
     if nq_candidate_mem is None:
         try:
             bar_db = get_bar_at_or_before("NQ=F", target_utc, conn=conn)
             if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
-                nq_candidate_db = bar_db
+                dist_db = _dist_to_16h_minutes(bar_db)
+                nq_db_closest_dist = dist_db
+                if dist_db <= target_tolerance_minutes:
+                    nq_candidate_db = bar_db
+                else:
+                    nq_db_too_far = True
         except Exception as e:
             log.warning("Erreur lecture barre NQ SQLite : %s", e)
 
     ndx_candidate_db: Bar | None = None
+    ndx_db_too_far = False
+    ndx_db_closest_dist: float | None = None
     if ndx_candidate_mem is None:
         try:
             bar_db = get_bar_at_or_before("^NDX", target_utc, conn=conn)
             if bar_db and bar_db.timestamp_utc.astimezone(ET).date() == target_date:
-                ndx_candidate_db = bar_db
+                dist_db = _dist_to_16h_minutes(bar_db)
+                ndx_db_closest_dist = dist_db
+                if dist_db <= target_tolerance_minutes:
+                    ndx_candidate_db = bar_db
+                else:
+                    ndx_db_too_far = True
         except Exception as e:
             log.warning("Erreur lecture barre NDX SQLite : %s", e)
 
     nq_db_det = (
-        "en mémoire" if nq_candidate_mem else ("trouvé" if nq_candidate_db else "non trouvé")
+        "en mémoire"
+        if nq_candidate_mem
+        else (
+            "trouvé"
+            if nq_candidate_db
+            else (
+                f"trop éloigné ({nq_db_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+                if nq_db_too_far
+                else "non trouvé"
+            )
+        )
     )
     ndx_db_det = (
-        "en mémoire" if ndx_candidate_mem else ("trouvé" if ndx_candidate_db else "non trouvé")
+        "en mémoire"
+        if ndx_candidate_mem
+        else (
+            "trouvé"
+            if ndx_candidate_db
+            else (
+                f"trop éloigné ({ndx_db_closest_dist:.1f}m > tol {target_tolerance_minutes:.1f}m)"
+                if ndx_db_too_far
+                else "non trouvé"
+            )
+        )
     )
     search_steps.append(
         SearchStepResult(
@@ -223,13 +297,96 @@ def find_basis_pair(
         )
     )
 
-    # 3. Étape SOURCE DISTANTE (rechargement)
+    # 3. Étape SOURCE DISTANTE (rechargement si manquant ou trop éloigné)
+    need_remote_nq = (nq_candidate_mem is None and nq_candidate_db is None) or reload_source
+    need_remote_ndx = (ndx_candidate_mem is None and ndx_candidate_db is None) or reload_source
+    need_remote = need_remote_nq or need_remote_ndx
+    nq_candidate_remote: Bar | None = None
+    ndx_candidate_remote: Bar | None = None
+    remote_details_list: list[str] = []
+
+    if need_remote and (fetcher is not None or reload_source):
+        if fetcher is None:
+            try:
+                from nqcockpit.data.fetcher import DataFetcher
+                fetcher = DataFetcher()
+            except Exception as e:
+                fetcher = None
+                remote_details_list.append(f"fetcher indisponible ({e})")
+
+        if fetcher is not None:
+            if need_remote_nq:
+                try:
+                    s_nq = fetcher.fetch_yahoo_bars("NQ=F", interval="1m", period="5d")
+                    if s_nq and s_nq.bars:
+                        valid_rem = [b for b in s_nq.bars if b.timestamp_utc <= target_utc]
+                        if valid_rem:
+                            cand = valid_rem[-1]
+                            dist_rem = _dist_to_16h_minutes(cand)
+                            if dist_rem <= target_tolerance_minutes:
+                                nq_candidate_remote = cand
+                                remote_details_list.append(f"NQ trouvé (dist {dist_rem:.1f} min)")
+                            else:
+                                remote_details_list.append(
+                                    f"NQ distant trop éloigné "
+                                    f"({dist_rem:.1f} min > tol {target_tolerance_minutes:.1f} min)"
+                                )
+                        else:
+                            remote_details_list.append("NQ distant aucune barre <= cible")
+                    else:
+                        remote_details_list.append("NQ distant réponse vide")
+                except Exception as e:
+                    remote_details_list.append(f"NQ distant échec ({e})")
+
+            if need_remote_ndx:
+                try:
+                    s_ndx = fetcher.fetch_yahoo_bars("^NDX", interval="1m", period="5d")
+                    if s_ndx and s_ndx.bars:
+                        valid_rem = [b for b in s_ndx.bars if b.timestamp_utc <= target_utc]
+                        if valid_rem:
+                            cand = valid_rem[-1]
+                            dist_rem = _dist_to_16h_minutes(cand)
+                            if dist_rem <= target_tolerance_minutes:
+                                ndx_candidate_remote = cand
+                                remote_details_list.append(f"NDX trouvé (dist {dist_rem:.1f} min)")
+                            else:
+                                remote_details_list.append(
+                                    f"NDX distant trop éloigné "
+                                    f"({dist_rem:.1f} min > tol {target_tolerance_minutes:.1f} min)"
+                                )
+                        else:
+                            remote_details_list.append("NDX distant aucune barre <= cible")
+                    else:
+                        remote_details_list.append("NDX distant réponse vide")
+                except Exception as e:
+                    remote_details_list.append(f"NDX distant échec ({e})")
+
+    final_nq_found = (
+        nq_candidate_mem is not None
+        or nq_candidate_db is not None
+        or nq_candidate_remote is not None
+    )
+    final_ndx_found = (
+        ndx_candidate_mem is not None
+        or ndx_candidate_db is not None
+        or ndx_candidate_remote is not None
+    )
+
+    remote_msg = (
+        ", ".join(remote_details_list)
+        if remote_details_list
+        else "non requis (données trouvées en mémoire/sqlite)"
+    )
     search_steps.append(
         SearchStepResult(
             step_name="source_distante",
-            nq_found=nq_candidate_mem is not None or nq_candidate_db is not None,
-            ndx_found=ndx_candidate_mem is not None or ndx_candidate_db is not None,
-            details="non requis (données trouvées ou rechargement non sollicité)",
+            nq_found=final_nq_found,
+            nq_time_utc=nq_candidate_remote.timestamp_utc if nq_candidate_remote else None,
+            nq_close=nq_candidate_remote.close if nq_candidate_remote else None,
+            ndx_found=final_ndx_found,
+            ndx_time_utc=ndx_candidate_remote.timestamp_utc if ndx_candidate_remote else None,
+            ndx_spot=ndx_candidate_remote.close if ndx_candidate_remote else None,
+            details=remote_msg,
         )
     )
 
@@ -240,6 +397,9 @@ def find_basis_pair(
     elif nq_candidate_db is not None:
         final_nq = nq_candidate_db
         origin_nq = "sqlite"
+    elif nq_candidate_remote is not None:
+        final_nq = nq_candidate_remote
+        origin_nq = "source_distante"
     else:
         final_nq = None
         origin_nq = None
@@ -250,6 +410,9 @@ def find_basis_pair(
     elif ndx_candidate_db is not None:
         final_ndx = ndx_candidate_db
         origin_ndx = "sqlite"
+    elif ndx_candidate_remote is not None:
+        final_ndx = ndx_candidate_remote
+        origin_ndx = "source_distante"
     else:
         final_ndx = None
         origin_ndx = None
@@ -262,26 +425,49 @@ def find_basis_pair(
     action_taken: str
 
     if final_nq is None and final_ndx is None:
-        cause_code = "NQ_BAR_ABSENTE"
-        cause_detail = (
-            f"Aucune barre NQ ni NDX trouvée pour le {target_date.isoformat()} "
-            f"avant {target_et.strftime('%H:%M:%S ET')} après échec de toutes les étapes"
-        )
-        action_taken = "Repli sur base de parité call-put"
+        if nq_mem_too_far or ndx_mem_too_far or nq_db_too_far or ndx_db_too_far:
+            cause_code = "DISTANCE_CIBLE_HORS_TOLERANCE"
+            cause_detail = (
+                f"Barres NQ/NDX trouvées mais trop éloignées de la cible 16:00 ET "
+                f"(> tolérance {target_tolerance_minutes:.1f} min) après tentative source distante"
+            )
+        else:
+            cause_code = "NQ_BAR_ABSENTE"
+            cause_detail = (
+                f"Aucune barre NQ ni NDX trouvée pour le {target_date.isoformat()} "
+                f"avant {target_et.strftime('%H:%M:%S ET')} après échec de toutes les étapes"
+            )
+        action_taken = "Statut INDISPONIBLE retenu ; repli sur base de parité call-put"
     elif final_nq is None:
-        cause_code = "NQ_BAR_ABSENTE"
-        cause_detail = (
-            f"Aucune barre NQ trouvée pour le {target_date.isoformat()} "
-            f"avant {target_et.strftime('%H:%M:%S ET')} (mémoire: non trouvé, SQLite: non trouvé)"
-        )
-        action_taken = "Repli sur base de parité call-put"
+        if nq_mem_too_far or nq_db_too_far:
+            cause_code = "DISTANCE_CIBLE_HORS_TOLERANCE"
+            cause_detail = (
+                f"Barre NQ trop éloignée de la cible 16:00 ET "
+                f"(> tolérance {target_tolerance_minutes:.1f} min) après tentative source distante"
+            )
+        else:
+            cause_code = "NQ_BAR_ABSENTE"
+            t_str = target_et.strftime('%H:%M:%S ET')
+            cause_detail = (
+                f"Aucune barre NQ trouvée pour le {target_date.isoformat()} "
+                f"avant {t_str} (mémoire: non trouvé, SQLite: non trouvé)"
+            )
+        action_taken = "Statut INDISPONIBLE retenu ; repli sur base de parité call-put"
     elif final_ndx is None:
-        cause_code = "NDX_QUOTE_ABSENTE"
-        cause_detail = (
-            f"Aucune cotation NDX trouvée pour le {target_date.isoformat()} "
-            f"avant {target_et.strftime('%H:%M:%S ET')} (mémoire: non trouvé, SQLite: non trouvé)"
-        )
-        action_taken = "Repli sur base de parité call-put"
+        if ndx_mem_too_far or ndx_db_too_far:
+            cause_code = "DISTANCE_CIBLE_HORS_TOLERANCE"
+            cause_detail = (
+                f"Cotation NDX trop éloignée de la cible 16:00 ET "
+                f"(> tolérance {target_tolerance_minutes:.1f} min) après tentative source distante"
+            )
+        else:
+            cause_code = "NDX_QUOTE_ABSENTE"
+            t_str = target_et.strftime('%H:%M:%S ET')
+            cause_detail = (
+                f"Aucune cotation NDX trouvée pour le {target_date.isoformat()} "
+                f"avant {t_str} (mémoire: non trouvé, SQLite: non trouvé)"
+            )
+        action_taken = "Statut INDISPONIBLE retenu ; repli sur base de parité call-put"
     else:
         delta_t = (
             abs((final_nq.timestamp_utc - final_ndx.timestamp_utc).total_seconds())
@@ -297,9 +483,7 @@ def find_basis_pair(
                 f"{tolerance_minutes:.1f} min. "
                 f"NQ ({origin_nq}): {nq_time_str}, NDX ({origin_ndx}): {ndx_time_str}"
             )
-            action_taken = (
-                "Base calculée quand même avec mention 'non alignée' ; contrôle parité"
-            )
+            action_taken = "Statut INDISPONIBLE retenu ; repli sur base de parité call-put"
         else:
             is_aligned = True
             cause_code = "PAIRE_TROUVEE"
@@ -330,10 +514,12 @@ def compute_previous_session_basis(
     ndx_bars: list[Bar],
     ref_utc: datetime | None = None,
     pair_result: PairResult | None = None,
+    target_tolerance_minutes: float = 15.0,
 ) -> BasisSnapshot:
     """Trouve la dernière clôture de séance régulière actions US et calcule la base de clôture.
 
     Lit obligatoirement le PairResult unique (produit par find_basis_pair).
+    Si introuvable ou hors tolérance, retourne le statut INDISPONIBLE (BLOCKED) avec base 0.0.
     """
     if ref_utc is None:
         ref_utc = datetime.now(timezone.utc)
@@ -348,10 +534,12 @@ def compute_previous_session_basis(
             nq_bars=nq_bars,
             ndx_bars=ndx_bars,
             tolerance_minutes=1.0,
+            target_tolerance_minutes=target_tolerance_minutes,
         )
 
     if (
         not pair_result.is_found
+        or not pair_result.is_aligned
         or pair_result.nq_bar is None
         or pair_result.ndx_bar is None
     ):
@@ -362,7 +550,7 @@ def compute_previous_session_basis(
             basis=0.0,
             is_session_basis=False,
             status=DataStatus.BLOCKED,
-            label=f"historique insuffisant ({pair_result.cause_code})",
+            label=f"INDISPONIBLE ({pair_result.cause_code}: {pair_result.cause_detail})",
             method="séance précédente",
             delta_t_minutes=pair_result.delta_t_minutes or 0.0,
             tolerance_minutes=pair_result.tolerance_minutes,
