@@ -42,6 +42,9 @@ class RiskConfig:
     instrument: str = "MNQ"
     risk_per_trade_pct: float = 0.5
     account_size: float = 0.0
+    point_values: dict[str, float] = field(
+        default_factory=lambda: {"NQ": 20.0, "MNQ": 2.0}
+    )
     prop_profile: dict[str, Any] = field(default_factory=dict)
 
 
@@ -310,10 +313,20 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     risk_pct = raw_risk.get("risk_per_trade_pct", 0.5)
     if not isinstance(risk_pct, (int, float)) or risk_pct <= 0:
         raise ConfigError("risk.risk_per_trade_pct must be a number > 0.")
+    raw_pt_values = raw_risk.get("point_values", {"NQ": 20.0, "MNQ": 2.0})
+    pt_values: dict[str, float] = {}
+    if isinstance(raw_pt_values, dict):
+        for k, v in raw_pt_values.items():
+            if isinstance(v, (int, float)) and v > 0:
+                pt_values[str(k).upper()] = float(v)
+    if not pt_values:
+        pt_values = {"NQ": 20.0, "MNQ": 2.0}
+
     risk = RiskConfig(
         instrument=instrument,
         risk_per_trade_pct=float(risk_pct),
         account_size=float(raw_risk.get("account_size", 0.0)),
+        point_values=pt_values,
         prop_profile=dict(raw_risk.get("prop_profile", {})),
     )
 

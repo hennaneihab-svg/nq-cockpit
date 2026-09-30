@@ -261,6 +261,69 @@ def create_parser() -> argparse.ArgumentParser:
         help="Port Streamlit (défaut : 8502)"
     )
 
+    # 13. discipline (P09 réel)
+    parser_disc = subparsers.add_parser(
+        "discipline",
+        help="Porte de discipline live et gestionnaire de risque (P09 réel)",
+    )
+    d_sub = parser_disc.add_subparsers(
+        title="actions discipline",
+        dest="discipline_action",
+        help="Action spécifique",
+    )
+    d_sub.add_parser("status", help="État vivant de la séance (verrous, cooldown)")
+
+    d_check = d_sub.add_parser(
+        "check", help="Checklist pré-trade interactive (verdict GO / STOP)"
+    )
+    d_check.add_argument("--plan", type=str, default="", help="Plan de trade écrit")
+    d_check.add_argument(
+        "--p08-reviewed", action="store_true", help="Confirmer consultation P08"
+    )
+    d_check.add_argument(
+        "--account", type=float, default=None, help="Capital compte ($)"
+    )
+    d_check.add_argument(
+        "--risk-pct", type=float, default=None, help="Risque (pourcentage)"
+    )
+    d_check.add_argument(
+        "--stop-pts", type=float, default=30.0, help="Stop loss (points)"
+    )
+    d_check.add_argument(
+        "--instrument", type=str, default="MNQ", choices=["NQ", "MNQ"],
+        help="Instrument",
+    )
+
+    d_sizing = d_sub.add_parser(
+        "sizing", help="Calculateur de dimensionnement de position"
+    )
+    d_sizing.add_argument(
+        "--account", type=float, default=50000.0, help="Capital compte ($)"
+    )
+    d_sizing.add_argument(
+        "--risk-pct", type=float, default=0.5, help="Risque (pourcentage)"
+    )
+    d_sizing.add_argument(
+        "--stop-pts", type=float, default=30.0, help="Stop loss (points)"
+    )
+    d_sizing.add_argument(
+        "--instrument", type=str, default="MNQ", choices=["NQ", "MNQ"],
+        help="Instrument",
+    )
+    d_sizing.add_argument(
+        "--prop-max-loss", type=float, default=None,
+        help="Perte max journalière prop ($)",
+    )
+    d_sizing.add_argument(
+        "--prop-trailing-dd", type=float, default=None,
+        help="Drawdown glissant prop ($)",
+    )
+
+    d_ui = d_sub.add_parser("ui", help="Lance l'interface Streamlit de discipline")
+    d_ui.add_argument(
+        "--port", type=int, default=8503, help="Port Streamlit (défaut : 8503)"
+    )
+
     return parser
 
 
@@ -1060,6 +1123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _handle_profile(args)
     elif args.subcommand == "journal":
         return _handle_journal(args)
+    elif args.subcommand == "discipline":
+        return _handle_discipline(args)
 
     return 0
 
@@ -1948,6 +2013,154 @@ def _handle_journal(args: Any) -> int:
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
         "Essayez : stats, daily, coaching, ui."
+    )
+    return 1
+
+
+def _handle_discipline(args: Any) -> int:
+    """Porte de discipline live et gestionnaire de risque (P09 réel)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from nqcockpit.config import load_config
+    from nqcockpit.discipline.engine import evaluate_checklist, evaluate_session_state
+    from nqcockpit.discipline.models import PreTradeChecklist
+    from nqcockpit.discipline.risk import compute_position_size
+    from nqcockpit.journal.store import init_journal_db, load_trades
+
+    config = load_config()
+    action = getattr(args, "discipline_action", None)
+
+    if action == "ui":
+        import subprocess  # noqa: S603
+        import sys
+        from pathlib import Path
+
+        port = getattr(args, "port", 8503)
+        page_path = Path(__file__).parent / "ui" / "discipline_page.py"
+        print(f"[nqcockpit] Discipline Streamlit sur http://localhost:{port}")
+        try:
+            subprocess.run(  # noqa: S603
+                [
+                    sys.executable, "-m", "streamlit", "run", str(page_path),
+                    "--server.port", str(port),
+                    "--server.headless", "true",
+                    "--theme.base", "dark",
+                ],
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\n[nqcockpit] Discipline arrêtée.")
+        return 0
+
+    conn = init_journal_db(config.data.db_path)
+    trades = load_trades(conn)
+    now_utc = datetime.now(timezone.utc)
+    state = evaluate_session_state(trades, now_utc, config)
+    sep = "=" * 65
+
+    if action == "status" or action is None:
+        tz_algiers = ZoneInfo(config.timezones.display)
+        time_alg = now_utc.astimezone(tz_algiers).strftime("%H:%M:%S")
+        print(f"\n{sep}")
+        print(f"  ÉTAT VIVANT DE LA SÉANCE — {time_alg} (Alger)")
+        print(sep)
+        stat_color = "PRÊT (GO)" if state.can_trade else f"BLOQUÉ ({state.status.value})"
+        print(f"  Statut global    : {stat_color}")
+        print(f"  Fenêtre active   : {state.current_window_name or 'Aucune'}")
+        print(f"  Trades restants  : {state.trades_remaining} / {state.max_trades_allowed}")
+        print(f"  R réalisé jour   : {state.r_realized_today:+.2f}R")
+        if state.cooldown_remaining_seconds > 0:
+            print(f"  Compte à rebours : {state.cooldown_countdown_str} restantes")
+        if state.lock_reasons:
+            print("\n  Motifs de blocage actifs :")
+            for r in state.lock_reasons:
+                print(f"    - {r}")
+        print(sep + "\n")
+        return 0
+
+    if action == "sizing":
+        acc = getattr(args, "account", 50000.0)
+        risk_pct = getattr(args, "risk_pct", 0.5)
+        stop_pts = getattr(args, "stop_pts", 30.0)
+        inst = getattr(args, "instrument", "MNQ")
+        prop_loss = getattr(args, "prop_max_loss", None)
+        prop_dd = getattr(args, "prop_trailing_dd", None)
+
+        res = compute_position_size(
+            account_size=acc,
+            risk_pct=risk_pct,
+            stop_points=stop_pts,
+            instrument=inst,
+            config=config,
+            prop_max_daily_loss=prop_loss,
+            prop_trailing_dd=prop_dd,
+        )
+        print(f"\n{sep}")
+        print(f"  DIMENSIONNEMENT DE POSITION — {inst}")
+        print(sep)
+        print(f"  Capital compte   : {res.account_size:.2f} $ | Risque max : {res.risk_pct:.2f}%")
+        print(
+            f"  Stop loss        : {res.stop_points:.2f} pts | "
+            f"Valeur pt : {res.point_value:.1f} $/pt"
+        )
+        print(f"  Budget alloué    : {res.risk_budget_dollars:.2f} $")
+        print(f"  Risque / contrat : {res.risk_per_contract_dollars:.2f} $")
+        print(f"  --> CONTRATS     : {res.contracts} contrat(s) (arrondi inférieur)")
+        print(f"  --> Risque réel  : {res.actual_risk_dollars:.2f} $ ({res.actual_risk_pct:.2f}%)")
+        if res.warning:
+            print(f"  ⚠ Avertissement  : {res.warning}")
+        if res.prop_firm_warning:
+            print(f"  🛑 Prop Firm     : {res.prop_firm_warning}")
+        print(sep + "\n")
+        return 0
+
+    if action == "check":
+        plan = getattr(args, "plan", "").strip()
+        p08 = bool(getattr(args, "p08_reviewed", False))
+        acc = getattr(args, "account", None) or (config.risk.account_size or 50000.0)
+        risk_pct = getattr(args, "risk_pct", None) or config.risk.risk_per_trade_pct
+        stop_pts = getattr(args, "stop_pts", 30.0)
+        inst = getattr(args, "instrument", "MNQ")
+
+        sizing_res = compute_position_size(
+            account_size=acc,
+            risk_pct=risk_pct,
+            stop_points=stop_pts,
+            instrument=inst,
+            config=config,
+        )
+
+        chk_data = PreTradeChecklist(
+            p08_reviewed=p08,
+            trading_plan=plan,
+            sizing_result=sizing_res,
+            event_risk_tier1_red=False,
+        )
+        res = evaluate_checklist(chk_data, state, config)
+
+        print(f"\n{sep}")
+        print("  CHECKLIST PRÉ-TRADE INTERACTIVE")
+        print(sep)
+        for item, ok in res.items_status.items():
+            mark = "✅ OK" if ok else "❌ ÉCHEC"
+            print(f"  [{mark}] {item}")
+        print(sep)
+        if res.passed:
+            print("  🟢 VERDICT FINAL : GO — TRADING AUTORISÉ")
+            act_risk = sizing_res.actual_risk_dollars
+            print(f"     Sizing : {sizing_res.contracts}x {inst} ({act_risk:.2f} $)")
+        else:
+            print("  🔴 VERDICT FINAL : STOP — TRADING STRICTEMENT INTERDIT")
+            print("  Motifs de blocage :")
+            for b in res.blocking_reasons:
+                print(f"    - {b}")
+        print(sep + "\n")
+        return 0
+
+    print(
+        f"[nqcockpit discipline] Action inconnue : {action!r}. "
+        "Essayez : status, check, sizing, ui."
     )
     return 1
 
