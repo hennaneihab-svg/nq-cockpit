@@ -158,6 +158,7 @@ def fetch_fed_events(
                 source_age_seconds=0.0,
                 status=DataStatus.OK,
                 all_sources=["fed_html"],
+                time_provenance="table versionnée Fed (14:00 ET)",
             )
         )
 
@@ -182,6 +183,7 @@ def fetch_fed_events(
                 source_age_seconds=0.0,
                 status=DataStatus.OK,
                 all_sources=["fed_html"],
+                time_provenance="table versionnée Fed (14:00 ET)",
             )
         )
 
@@ -224,6 +226,7 @@ def fetch_fed_events(
                 for e in events
             )
             if not duplicate:
+                rss_et_str = pub_dt.astimezone(ET_TZ).strftime("%H:%M")
                 events.append(
                     CalendarEvent(
                         name=name,
@@ -235,6 +238,7 @@ def fetch_fed_events(
                         source_age_seconds=age_s,
                         status=DataStatus.OK,
                         all_sources=["fed_rss"],
+                        time_provenance=f"flux RSS Fed ({rss_et_str} ET)",
                     )
                 )
 

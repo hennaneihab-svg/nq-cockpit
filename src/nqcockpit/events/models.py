@@ -54,6 +54,9 @@ class CalendarEvent:
     all_sources: list[str] = field(default_factory=list)
     """Liste de toutes les sources qui ont confirmé cet événement."""
 
+    time_provenance: str = ""
+    """Origine explicite de l'heure (ex: 'table versionnée BLS (10:00 ET)')."""
+
     @property
     def date_origin(self) -> str:
         """Origine de la date.

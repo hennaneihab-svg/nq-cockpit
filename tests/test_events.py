@@ -494,3 +494,32 @@ def test_cpi_ppi_source_priority_and_holiday_exclusion() -> None:
     assert merged_ppi[0].scheduled_utc.strftime("%Y-%m-%d") == "2026-10-08"
     assert "2026-10-08" in divs_ppi[0] and "2026-10-09" in divs_ppi[0]
 
+
+def test_jolts_time_10_et_and_explicit_time_provenance() -> None:
+    """Cas Point 2 : JOLTS à 10:00 ET, provenance d'heure explicite et suppression heure implicite.
+
+    - JOLTS du 7 oct 2026 est planifié à 10:00 ET (14:00 UTC = 15:00 Alger).
+    - time_provenance = 'table versionnée BLS (10:00 ET)'.
+    - Absence d'heure -> statut DÉGRADÉ visible avec 'non fournie [DÉGRADÉ]'.
+    """
+    from nqcockpit.events.sources.bls import _make_utc, fetch_bls_events
+
+    # 1. Vérification dans fetch_bls_events
+    ref_utc = datetime(2026, 9, 30, 0, 0, tzinfo=UTC)
+    events, _, _ = fetch_bls_events(
+        base_url="https://invalid.example.com", now_utc=ref_utc, horizon_days=14
+    )
+    jolts_evs = [e for e in events if e.name == "JOLTS" and e.scheduled_utc.month == 10]
+    assert len(jolts_evs) == 1
+    jolts = jolts_evs[0]
+    # 10:00 ET en été/EDT (UTC-4) = 14:00 UTC
+    assert jolts.scheduled_utc.hour == 14
+    assert jolts.scheduled_utc.minute == 0
+    assert jolts.time_provenance == "table versionnée BLS (10:00 ET)"
+
+    # 2. Absence d'heure explicite déclenche DÉGRADÉ
+    dt, prov, status = _make_utc("2026-10-07", None)
+    assert status == DataStatus.DEGRADED
+    assert "DÉGRADÉ" in prov
+
+

@@ -71,25 +71,27 @@ def _normalize_name(raw_title: str) -> str | None:
     return None
 
 
-def _parse_ff_date(date_str: str) -> datetime | None:
+def _parse_ff_date(date_str: str) -> tuple[datetime | None, str, DataStatus]:
     """Parse les dates ForexFactory (ISO 8601 avec offset ET)."""
     if not date_str:
-        return None
+        return None, "", DataStatus.DEGRADED
     # Format typique : "2026-10-02T08:30:00-04:00"
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
         try:
             dt = datetime.strptime(date_str[:25], fmt)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=ET_TZ)
-            return dt.astimezone(UTC)
+            et_dt = dt.astimezone(ET_TZ)
+            return dt.astimezone(UTC), f"ForexFactory ({et_dt.strftime('%H:%M')} ET)", DataStatus.OK
         except ValueError:
             continue
-    # Fallback : date seule
+    # Date seule : aucune heure fournie -> statut DÉGRADÉ
     try:
         d = datetime.strptime(date_str[:10], "%Y-%m-%d")
-        return d.replace(hour=12, minute=0, tzinfo=ET_TZ).astimezone(UTC)
+        naive = datetime(d.year, d.month, d.day, 0, 0, tzinfo=ET_TZ)
+        return naive.astimezone(UTC), "non fournie [DÉGRADÉ]", DataStatus.DEGRADED
     except ValueError:
-        return None
+        return None, "", DataStatus.DEGRADED
 
 
 def _fetch_ff_json(url: str, timeout: int = 10) -> list[dict]:
@@ -170,7 +172,7 @@ def fetch_forexfactory_events(
                 continue
 
         date_str = entry.get("date", "")
-        scheduled = _parse_ff_date(date_str)
+        scheduled, time_prov, time_status = _parse_ff_date(date_str)
         if scheduled is None:
             continue
 
@@ -186,6 +188,11 @@ def fetch_forexfactory_events(
         seen_keys.add(key)
 
         tier = _TIER_MAP.get(name, 2 if impact == "medium" else 1)
+        ev_status = (
+            DataStatus.DEGRADED
+            if (status == DataStatus.DEGRADED or time_status == DataStatus.DEGRADED)
+            else DataStatus.OK
+        )
 
         events.append(
             CalendarEvent(
@@ -199,8 +206,9 @@ def fetch_forexfactory_events(
                 actual=entry.get("actual") or None,
                 source_fetched_utc=fetched_utc,
                 source_age_seconds=0.0,
-                status=DataStatus.OK,
+                status=ev_status,
                 all_sources=["forexfactory"],
+                time_provenance=time_prov,
             )
         )
 

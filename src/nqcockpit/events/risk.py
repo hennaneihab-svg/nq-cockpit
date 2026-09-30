@@ -203,10 +203,12 @@ def compute_event_risk(
         src_str = ",".join(ev.all_sources) if ev.all_sources else ev.source
         is_published = ev.scheduled_utc < ref_utc
         pub_tag = " [publié]" if is_published else ""
+        time_prov_str = f" | heure: {ev.time_provenance}" if ev.time_provenance else ""
         line = (
             f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger ({et.strftime('%H:%M')} ET) | "
             f"Tier {ev.tier} | {ev.name}"
-            f"{consensus_str}{previous_str} | date: {ev.date_origin}{pub_tag} | [{src_str}]"
+            f"{consensus_str}{previous_str} | date: {ev.date_origin}{pub_tag}"
+            f"{time_prov_str} | [{src_str}]"
         )
         cal_display.append(line)
 

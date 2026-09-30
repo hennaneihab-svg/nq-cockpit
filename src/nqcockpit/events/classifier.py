@@ -128,6 +128,7 @@ def merge_and_classify(
                     source_age_seconds=ev.source_age_seconds,
                     status=existing.status,
                     all_sources=list(set(existing.all_sources + ev.all_sources)),
+                    time_provenance=ev.time_provenance or existing.time_provenance,
                 )
                 del index[matched_key]
                 index[(merged.name.lower(), merged.scheduled_utc.strftime("%Y-%m-%d"))] = merged
@@ -136,6 +137,8 @@ def merge_and_classify(
                 existing.all_sources = list(
                     set(existing.all_sources + ev.all_sources)
                 )
+                if not existing.time_provenance and ev.time_provenance:
+                    existing.time_provenance = ev.time_provenance
                 if not existing.consensus and ev.consensus:
                     existing.consensus = ev.consensus
                 if not existing.previous and ev.previous:

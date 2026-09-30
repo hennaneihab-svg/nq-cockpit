@@ -230,7 +230,16 @@ def fetch_fred_events(
         if next_date_str is None:
             continue
 
-        hour_et, min_et = RELEASE_HOURS_ET.get(name, (8, 30))
+        time_pair = RELEASE_HOURS_ET.get(name)
+        if time_pair is not None:
+            hour_et, min_et = time_pair
+            time_prov = f"règle FRED ({hour_et:02d}:{min_et:02d} ET)"
+            ev_status = DataStatus.OK
+        else:
+            hour_et, min_et = 0, 0
+            time_prov = "non fournie [DÉGRADÉ]"
+            ev_status = DataStatus.DEGRADED
+
         try:
             scheduled = _make_utc(next_date_str, hour_et, min_et)
         except ValueError:
@@ -253,8 +262,9 @@ def fetch_fred_events(
                 ),
                 source_fetched_utc=fetched_utc,
                 source_age_seconds=age_s,
-                status=DataStatus.OK,
+                status=ev_status,
                 all_sources=["fred"],
+                time_provenance=time_prov,
             )
         )
 

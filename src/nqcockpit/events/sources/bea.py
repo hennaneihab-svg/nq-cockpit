@@ -27,35 +27,52 @@ UTC = timezone.utc
 _BEA_CALENDAR_2026: list[dict] = [
     # PCE (Personal Income and Outlays) — fin de mois
     {"date": "2026-09-30", "name": "PCE", "tier": 1,
-     "desc": "Personal Income & Outlays, PCE Price Index (août 2026) — 08h30 ET"},
+     "desc": "Personal Income & Outlays, PCE Price Index (août 2026) — 08h30 ET",
+     "time_et": (8, 30)},
     {"date": "2026-10-30", "name": "PCE", "tier": 1,
-     "desc": "Personal Income & Outlays, PCE Price Index (sept. 2026) — 08h30 ET"},
+     "desc": "Personal Income & Outlays, PCE Price Index (sept. 2026) — 08h30 ET",
+     "time_et": (8, 30)},
     {"date": "2026-11-25", "name": "PCE", "tier": 1,
-     "desc": "Personal Income & Outlays, PCE Price Index (oct. 2026) — 08h30 ET"},
+     "desc": "Personal Income & Outlays, PCE Price Index (oct. 2026) — 08h30 ET",
+     "time_et": (8, 30)},
     # GDP (Gross Domestic Product)
     {"date": "2026-09-30", "name": "GDP", "tier": 1,
-     "desc": "Gross Domestic Product Q2 2026 (troisième estimation) — 08h30 ET"},
+     "desc": "Gross Domestic Product Q2 2026 (troisième estimation) — 08h30 ET",
+     "time_et": (8, 30)},
     # GDP Advance (1re estimation trimestrielle)
     {"date": "2026-10-29", "name": "GDP", "tier": 1,
-     "desc": "GDP Advance Q3 2026 (1re estimation) — 08h30 ET"},
+     "desc": "GDP Advance Q3 2026 (1re estimation) — 08h30 ET",
+     "time_et": (8, 30)},
     {"date": "2026-11-25", "name": "GDP", "tier": 1,
-     "desc": "GDP Second Estimate Q3 2026 — 08h30 ET"},
+     "desc": "GDP Second Estimate Q3 2026 — 08h30 ET",
+     "time_et": (8, 30)},
 ]
 
-_BEA_RELEASE_HOUR_ET = 8
-_BEA_RELEASE_MINUTE_ET = 30
 
+def _make_utc(
+    date_str: str, time_et: tuple[int, int] | None
+) -> tuple[datetime, str, DataStatus]:
+    if time_et is None:
+        naive = datetime(
+            int(date_str[:4]),
+            int(date_str[5:7]),
+            int(date_str[8:10]),
+            0,
+            0,
+            tzinfo=ET_TZ,
+        )
+        return naive.astimezone(UTC), "non fournie [DÉGRADÉ]", DataStatus.DEGRADED
 
-def _make_utc(date_str: str) -> datetime:
+    h, m = time_et
     naive = datetime(
         int(date_str[:4]),
         int(date_str[5:7]),
         int(date_str[8:10]),
-        _BEA_RELEASE_HOUR_ET,
-        _BEA_RELEASE_MINUTE_ET,
+        h,
+        m,
         tzinfo=ET_TZ,
     )
-    return naive.astimezone(UTC)
+    return naive.astimezone(UTC), f"table versionnée BEA ({h:02d}:{m:02d} ET)", DataStatus.OK
 
 
 def _check_bea_reachable(url: str, timeout: int = 8) -> bool:
@@ -105,12 +122,18 @@ def fetch_bea_events(
     today_et = now_utc.astimezone(ET_TZ).date()
     events: list[CalendarEvent] = []
     for entry in _BEA_CALENDAR_2026:
+        time_et = entry.get("time_et")
         try:
-            scheduled = _make_utc(entry["date"])
+            scheduled, time_prov, time_status = _make_utc(entry["date"], time_et)
         except ValueError:
             continue
         if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end:
             continue
+        ev_status = (
+            DataStatus.DEGRADED
+            if (status == DataStatus.DEGRADED or time_status == DataStatus.DEGRADED)
+            else DataStatus.OK
+        )
         events.append(
             CalendarEvent(
                 name=entry["name"],
@@ -120,8 +143,9 @@ def fetch_bea_events(
                 description=entry["desc"],
                 source_fetched_utc=fetched_utc,
                 source_age_seconds=0.0,
-                status=status,
+                status=ev_status,
                 all_sources=["bea"],
+                time_provenance=time_prov,
             )
         )
 
