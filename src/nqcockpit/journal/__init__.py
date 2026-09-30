@@ -1,4 +1,8 @@
 """Exports publics du module journal (P09)."""
+from nqcockpit.journal.backup import (
+    BackupResult,
+    create_journal_backup,
+)
 from nqcockpit.journal.engine import (
     compute_daily_stats,
     compute_performance_stats,
@@ -50,5 +54,7 @@ __all__ = [
     "segment_performance", "generate_coaching_report",
     # importer
     "CSVImportSummary", "import_trades_from_csv",
+    # backup
+    "BackupResult", "create_journal_backup",
 ]
 

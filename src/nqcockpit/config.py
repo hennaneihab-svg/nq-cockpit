@@ -118,6 +118,8 @@ class MarketSessionsConfig:
 class DataConfig:
     db_path: str = "data/nqcockpit.db"
     cache_dir: str = "data/cache"
+    backup_dir: str = "data/backups"
+    backup_retention_days: int = 30
     intraday_intervals: list[str] = field(default_factory=lambda: ["1m", "5m"])
     basis_max_drift_seconds: float = 60.0
     stale_bar_threshold_minutes: int = 15
@@ -495,10 +497,19 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     db_path_resolved = (
         db_path_env if db_path_env else str(raw_data.get("db_path", "data/nqcockpit.db"))
     )
+    backup_dir_env = os.getenv("NQ_DATA_BACKUP_DIR")
+    backup_dir_resolved = (
+        backup_dir_env if backup_dir_env else str(raw_data.get("backup_dir", "data/backups"))
+    )
+    backup_retention = int(raw_data.get("backup_retention_days", 30))
+    if backup_retention < 1:
+        raise ConfigError("data.backup_retention_days must be >= 1.")
 
     data_cfg = DataConfig(
         db_path=db_path_resolved,
         cache_dir=str(raw_data.get("cache_dir", "data/cache")),
+        backup_dir=backup_dir_resolved,
+        backup_retention_days=backup_retention,
         intraday_intervals=list(raw_data.get("intraday_intervals", ["1m", "5m"])),
         basis_max_drift_seconds=float(raw_data.get("basis_max_drift_seconds", 60.0)),
         stale_bar_threshold_minutes=int(raw_data.get("stale_bar_threshold_minutes", 15)),

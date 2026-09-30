@@ -109,6 +109,8 @@ market_sessions:
 data:
   db_path: "data/nqcockpit.db"
   cache_dir: "data/cache"
+  backup_dir: "data/backups"
+  backup_retention_days: 30
   intraday_intervals: ["1m", "5m"]
   basis_max_drift_seconds: 60
   stale_bar_threshold_minutes: 15

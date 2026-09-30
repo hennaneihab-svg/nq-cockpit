@@ -272,6 +272,17 @@ def create_parser() -> argparse.ArgumentParser:
     )
     j_attach.add_argument("trade_id", type=str, help="ID unique du trade")
     j_attach.add_argument("image_path", type=str, help="Chemin du fichier image")
+    j_backup = j_sub.add_parser(
+        "backup", help="Sauvegarde quotidienne transactionnelle de la base SQLite"
+    )
+    j_backup.add_argument(
+        "--dir", type=str, default=None,
+        help="Dossier de destination (défaut : config.data.backup_dir)"
+    )
+    j_backup.add_argument(
+        "--retention-days", type=int, default=None,
+        help="Nombre de jours de rétention (défaut : config.data.backup_retention_days)"
+    )
 
     # 13. discipline (P09 réel)
     parser_disc = subparsers.add_parser(
@@ -1881,7 +1892,6 @@ def _handle_journal(args: Any) -> int:
 
     config = load_config()
     tz_ny = ZoneInfo(config.timezones.market)
-    conn = init_journal_db(config.data.db_path)
     action = getattr(args, "journal_action", None)
 
     if action == "ui":
@@ -1902,6 +1912,57 @@ def _handle_journal(args: Any) -> int:
         except KeyboardInterrupt:
             print("\n[nqcockpit] Journal arrêté.")
         return 0
+
+    if action == "backup":
+        from nqcockpit.journal.backup import create_journal_backup
+
+        backup_dir = getattr(args, "dir", None)
+        retention = getattr(args, "retention_days", None)
+
+        res = create_journal_backup(
+            backup_dir=backup_dir,
+            retention_days=retention,
+            config=config,
+        )
+
+        sep = "=" * 65
+        print(f"\n{sep}")
+        print("  SAUVEGARDE DU JOURNAL SQLITE")
+        print(sep)
+        if res.is_success:
+            print("  Statut          : ✅ OK (Sauvegarde réussie)")
+            print(f"  Fichier         : {res.backup_path}")
+            size_kb = res.file_size_bytes / 1024.0
+            print(f"  Taille          : {size_kb:.1f} KB ({res.file_size_bytes} octets)")
+            print(f"  Intégrité       : {res.integrity_result} (PRAGMA integrity_check validé)")
+            mode_desc = (
+                "Remplacement idempotent de la sauvegarde du jour"
+                if res.is_idempotent_overwrite
+                else "Nouvelle sauvegarde créée"
+            )
+            print(f"  Mode            : {mode_desc}")
+            eff_retention = (
+                retention if retention is not None else config.data.backup_retention_days
+            )
+            print(f"  Rétention       : {eff_retention} jours")
+            print(
+                f"  Purge ancienne  : {len(res.deleted_old_backups)} sauvegarde(s) supprimée(s)"
+            )
+            for old in res.deleted_old_backups:
+                print(f"    - {old.name}")
+            print(sep + "\n")
+            return 0
+        else:
+            print("  Statut          : ⚠️ DÉGRADÉ (Échec de la sauvegarde)")
+            print(f"  Fichier cible   : {res.backup_path}")
+            print(f"  Intégrité       : {res.integrity_result}")
+            if res.error_message:
+                print(f"  Erreur          : {res.error_message}")
+            print("  Rétention       : Aucune purge effectuée en état dégradé")
+            print(sep + "\n")
+            return 1
+
+    conn = init_journal_db(config.data.db_path)
 
     if action == "daily":
         target = getattr(args, "date", None) or str(datetime.now(tz_ny).date())
@@ -2074,7 +2135,7 @@ def _handle_journal(args: Any) -> int:
 
     print(
         f"[nqcockpit journal] Action inconnue : {action!r}. "
-        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot."
+        "Essayez : stats, daily, coaching, ui, import-csv, attach-screenshot, backup."
     )
     return 1
 
