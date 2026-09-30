@@ -89,9 +89,9 @@ class CalendarEvent:
 
         if self.source == "forexfactory":
             return "ForexFactory"
-        if self.source in ("static", "bls") and self.status == DataStatus.DEGRADED:
+        if self.source in ("static", "bls", "ism") and self.status == DataStatus.DEGRADED:
             return "calendrier statique"
-        if self.source in ("fed_html", "fed_rss", "bea") or (
+        if self.source in ("fed_html", "fed_rss", "bea", "ism") or (
             self.source == "bls" and self.status == DataStatus.OK
         ):
             return "officielle"
@@ -101,7 +101,7 @@ class CalendarEvent:
             return "estimée (règle)"
         if "forexfactory" in self.all_sources:
             return "ForexFactory"
-        if "bls" in self.all_sources or "static" in self.all_sources:
+        if any(s in self.all_sources for s in ("bls", "static", "ism")):
             return "calendrier statique"
         return "calendrier statique"
 

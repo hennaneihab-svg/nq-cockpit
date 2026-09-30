@@ -732,6 +732,39 @@ def test_bls_verified_dates_and_unverified_tier_suspension() -> None:
     assert any("[NON VÉRIFIÉE (DÉGRADÉ)]" in line for line in report.calendar_display_algiers)
 
 
+def test_ism_services_source_and_fallback_degraded() -> None:
+    """Cas P05-b : Source pour ISM Services (5 oct, 10:00 ET), sinon DÉGRADÉ.
+
+    - ISM Services du 5 oct 2026 est extrait à 10:00 ET (14:00 UTC = 15:00 Alger).
+    - Si le site est inaccessible, repli vers calendrier versionné avec statut DÉGRADÉ.
+    - Tier 2 et provenance 'table versionnée ISM (10:00 ET)' bien renseignés.
+    """
+    from nqcockpit.events.sources.ism import fetch_ism_events
+
+    ref_utc = datetime(2026, 9, 30, 0, 0, tzinfo=UTC)
+    # 1. Test avec URL inaccessible -> DÉGRADÉ explicite
+    events, status, err = fetch_ism_events(
+        schedule_url="https://invalid.example.com",
+        now_utc=ref_utc,
+        horizon_days=14,
+    )
+    assert status == DataStatus.DEGRADED
+    assert "DÉGRADÉ" in err or "inaccessible" in err
+
+    services_evs = [e for e in events if e.name == "ISM Services"]
+    assert len(services_evs) == 1
+    ism_srv = services_evs[0]
+    assert ism_srv.scheduled_utc.month == 10
+    assert ism_srv.scheduled_utc.day == 5
+    assert ism_srv.scheduled_utc.hour == 14  # 10:00 EDT = 14:00 UTC
+    assert ism_srv.scheduled_utc.minute == 0
+    assert ism_srv.tier == 2
+    assert ism_srv.time_provenance == "table versionnée ISM (10:00 ET)"
+    assert ism_srv.verified is True
+    assert "ismworld.org" in ism_srv.primary_source_url
+
+
+
 
 
 

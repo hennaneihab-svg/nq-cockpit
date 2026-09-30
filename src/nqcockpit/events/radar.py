@@ -22,6 +22,7 @@ from nqcockpit.events.sources.bls import fetch_bls_events
 from nqcockpit.events.sources.fed import fetch_fed_events
 from nqcockpit.events.sources.forexfactory import fetch_forexfactory_events
 from nqcockpit.events.sources.fred import fetch_fred_events
+from nqcockpit.events.sources.ism import fetch_ism_events
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,10 @@ def fetch_event_radar(
     bea_url = sources_cfg.get(
         "bea_schedule",
         "https://www.bea.gov/news/schedule",
+    )
+    ism_url = sources_cfg.get(
+        "ism_schedule",
+        "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-report-on-business/",
     )
     ff_this = sources_cfg.get(
         "forexfactory_thisweek",
@@ -152,7 +157,29 @@ def fetch_event_radar(
             source="bea", status=DataStatus.BLOCKED, error_msg=str(exc)
         ))
 
-    # 4. FRED (contrôle croisé)
+    # 4. ISM (Services & Manufacturing)
+    try:
+        ism_evs, ism_st, ism_err = fetch_ism_events(
+            schedule_url=ism_url,
+            now_utc=ref_utc,
+            horizon_days=horizon_days,
+        )
+        all_raw_events.extend(ism_evs)
+        source_health.append(SourceHealth(
+            source="ism",
+            status=ism_st,
+            events_count=len(ism_evs),
+            error_msg=ism_err or None,
+            fetched_utc=datetime.now(UTC),
+        ))
+        log.info("ISM: %d événements [%s]", len(ism_evs), ism_st.value)
+    except Exception as exc:  # noqa: BLE001
+        log.error("ISM fetch exception: %s", exc)
+        source_health.append(SourceHealth(
+            source="ism", status=DataStatus.BLOCKED, error_msg=str(exc)
+        ))
+
+    # 5. FRED (contrôle croisé)
     try:
         fred_evs, fred_st, fred_err = fetch_fred_events(
             release_ids=fred_ids,
