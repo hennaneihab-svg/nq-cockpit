@@ -70,38 +70,54 @@ def merge_and_classify(
         if not ev.all_sources and ev.source:
             ev.all_sources = [ev.source]
 
-        key = (ev.name.lower(), ev.scheduled_utc.strftime("%Y-%m-%d"))
+        # Recherche d'un événement correspondant (même nom dans un rayon de ±7 jours)
+        matched_key = None
+        for k, existing in index.items():
+            if existing.name.lower() == ev.name.lower():
+                days_gap = abs((ev.scheduled_utc.date() - existing.scheduled_utc.date()).days)
+                if days_gap <= 7:
+                    matched_key = k
+                    break
 
-        if key not in index:
-            index[key] = ev
+        if matched_key is None:
+            index[(ev.name.lower(), ev.scheduled_utc.strftime("%Y-%m-%d"))] = ev
         else:
-            existing = index[key]
+            existing = index[matched_key]
             if not existing.all_sources and existing.source:
                 existing.all_sources = [existing.source]
 
-            # Détection de divergence horaire
-            diff_s = abs(
-                (ev.scheduled_utc - existing.scheduled_utc).total_seconds()
-            )
-            if diff_s > _DIVERGENCE_THRESHOLD_SECONDS:
+            # 1. Divergence de JOUR
+            if ev.scheduled_utc.date() != existing.scheduled_utc.date():
+                days_gap = abs((ev.scheduled_utc.date() - existing.scheduled_utc.date()).days)
                 div_msg = (
-                    f"[DIVERGENCE] [{ev.name} {ev.scheduled_utc.strftime('%Y-%m-%d')}] "
-                    f"Source '{existing.source}' : "
-                    f"{existing.scheduled_utc.strftime('%H:%MZ')} | "
-                    f"Source '{ev.source}' : "
-                    f"{ev.scheduled_utc.strftime('%H:%MZ')} "
-                    f"(écart {diff_s/60:.1f} min)"
+                    f"[DIVERGENCE DATE] [{ev.name}] "
+                    f"Source '{existing.source}' : {existing.scheduled_utc.strftime('%Y-%m-%d')} | "
+                    f"Source '{ev.source}' : {ev.scheduled_utc.strftime('%Y-%m-%d')} "
+                    f"(écart {days_gap} jour{'s' if days_gap > 1 else ''})"
                 )
                 divergences.append(div_msg)
+            else:
+                # 2. Divergence d'HEURE (> 5 min)
+                diff_s = abs((ev.scheduled_utc - existing.scheduled_utc).total_seconds())
+                if diff_s > _DIVERGENCE_THRESHOLD_SECONDS:
+                    div_msg = (
+                        f"[DIVERGENCE HEURE] [{ev.name} {ev.scheduled_utc.strftime('%Y-%m-%d')}] "
+                        f"Source '{existing.source}' : "
+                        f"{existing.scheduled_utc.strftime('%H:%MZ')} | "
+                        f"Source '{ev.source}' : "
+                        f"{ev.scheduled_utc.strftime('%H:%MZ')} "
+                        f"(écart {diff_s/60:.1f} min)"
+                    )
+                    divergences.append(div_msg)
 
-            # Garder la source de plus haute priorité pour l'heure
+            # Garder la source de plus haute priorité pour la date/heure
             existing_prio = SOURCE_PRIORITY.get(existing.source, 99)
             new_prio = SOURCE_PRIORITY.get(ev.source, 99)
             if new_prio < existing_prio:
-                # Nouvelle source prioritaire : prendre son heure
+                # Nouvelle source prioritaire : prendre sa date/heure
                 merged = CalendarEvent(
                     name=existing.name,
-                    tier=min(existing.tier, ev.tier),  # Prendre le tier le plus élevé
+                    tier=min(existing.tier, ev.tier),
                     scheduled_utc=ev.scheduled_utc,
                     source=ev.source,
                     description=existing.description or ev.description,
@@ -113,7 +129,8 @@ def merge_and_classify(
                     status=existing.status,
                     all_sources=list(set(existing.all_sources + ev.all_sources)),
                 )
-                index[key] = merged
+                del index[matched_key]
+                index[(merged.name.lower(), merged.scheduled_utc.strftime("%Y-%m-%d"))] = merged
             else:
                 # Enrichir avec les données de la nouvelle source
                 existing.all_sources = list(

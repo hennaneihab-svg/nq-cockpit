@@ -54,6 +54,30 @@ class CalendarEvent:
     all_sources: list[str] = field(default_factory=list)
     """Liste de toutes les sources qui ont confirmé cet événement."""
 
+    @property
+    def date_origin(self) -> str:
+        """Origine de la date.
+
+        'officielle', 'ForexFactory', 'estimée (règle)', 'calendrier statique'.
+        """
+        if "static" in self.all_sources or self.source == "static":
+            return "calendrier statique"
+        if self.source in ("fed_html", "fed_rss", "bea") or (
+            self.source == "bls" and self.status == DataStatus.OK
+        ):
+            return "officielle"
+        if self.source == "forexfactory":
+            return "ForexFactory"
+        if self.source == "fred":
+            return "estimée (règle)"
+        if any(s in ("fed_html", "fed_rss", "bea") for s in self.all_sources):
+            return "officielle"
+        if "forexfactory" in self.all_sources:
+            return "ForexFactory"
+        if "fred" in self.all_sources:
+            return "estimée (règle)"
+        return "calendrier statique"
+
 
 @dataclass
 class EarningsEvent:
@@ -128,3 +152,6 @@ class EventRiskReport:
 
     calendar_display_algiers: list[str] = field(default_factory=list)
     """Calendrier des 14 prochains jours formaté pour affichage (heure Alger)."""
+
+    daily_risks: list[dict] = field(default_factory=list)
+    """Évaluation du risque pour chaque jour de l'horizon."""

@@ -32,6 +32,9 @@ _BEA_CALENDAR_2026: list[dict] = [
      "desc": "Personal Income & Outlays, PCE Price Index (sept. 2026) — 08h30 ET"},
     {"date": "2026-11-25", "name": "PCE", "tier": 1,
      "desc": "Personal Income & Outlays, PCE Price Index (oct. 2026) — 08h30 ET"},
+    # GDP (Gross Domestic Product)
+    {"date": "2026-09-30", "name": "GDP", "tier": 1,
+     "desc": "Gross Domestic Product Q2 2026 (troisième estimation) — 08h30 ET"},
     # GDP Advance (1re estimation trimestrielle)
     {"date": "2026-10-29", "name": "GDP", "tier": 1,
      "desc": "GDP Advance Q3 2026 (1re estimation) — 08h30 ET"},
@@ -99,13 +102,14 @@ def fetch_bea_events(
     if not reachable:
         log.warning("BEA schedule: inaccessible depuis ce réseau (DÉGRADÉ)")
 
+    today_et = now_utc.astimezone(ET_TZ).date()
     events: list[CalendarEvent] = []
     for entry in _BEA_CALENDAR_2026:
         try:
             scheduled = _make_utc(entry["date"])
         except ValueError:
             continue
-        if scheduled < now_utc or scheduled > horizon_end:
+        if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end:
             continue
         events.append(
             CalendarEvent(

@@ -25,6 +25,8 @@ UTC = timezone.utc
 
 # Mapping des noms ForexFactory → noms normalisés NQ Cockpit
 _NAME_MAP = {
+    "adp non-farm employment": "ADP",
+    "adp": "ADP",
     "non-farm employment change": "NFP",
     "nonfarm payrolls": "NFP",
     "average hourly earnings m/m": "NFP",
@@ -42,6 +44,10 @@ _NAME_MAP = {
     "pce price index m/m": "PCE",
     "core pce price index m/m": "PCE",
     "jolts job openings": "JOLTS",
+    "ism manufacturing": "ISM",
+    "ism services": "ISM",
+    "ism": "ISM",
+    "unemployment claims": "Jobless Claims",
     "fomc statement": "FOMC",
     "fomc meeting minutes": "FOMC Minutes",
     "fomc minutes": "FOMC Minutes",
@@ -52,7 +58,7 @@ _NAME_MAP = {
 _TIER_MAP = {
     "NFP": 1, "CPI": 1, "FOMC": 1, "FOMC Minutes": 1,
     "Powell": 1, "GDP": 1, "PCE": 1,
-    "PPI": 2, "JOLTS": 2,
+    "PPI": 2, "JOLTS": 2, "ISM": 2, "ADP": 2, "Jobless Claims": 2,
 }
 
 
@@ -168,7 +174,8 @@ def fetch_forexfactory_events(
         if scheduled is None:
             continue
 
-        if scheduled < now_utc or scheduled > horizon_end:
+        today_et = now_utc.astimezone(ET_TZ).date()
+        if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end:
             continue
 
         # Dédoublonner par (name, jour)

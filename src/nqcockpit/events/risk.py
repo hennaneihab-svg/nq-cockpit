@@ -112,6 +112,11 @@ def compute_event_risk(
 
     for ev in all_events_today:
         ev_utc = ev.scheduled_utc
+        # Si l'événement est déjà passé et son tampon post-événement a expiré avant ref_utc :
+        # il est publié et ne compte ni dans le risque à venir ni dans le décompte
+        if ev_utc + post_delta < ref_utc:
+            continue
+
         alg_str = _fmt_algiers(ev_utc)
         countdown = _fmt_countdown(ev_utc - ref_utc)
 
@@ -149,6 +154,8 @@ def compute_event_risk(
         if earn.scheduled_utc is None or earn.scheduled_utc > horizon_end:
             continue
         ev_utc = earn.scheduled_utc
+        if ev_utc + amber_delta < ref_utc:
+            continue
         alg_str = _fmt_algiers(ev_utc)
         countdown = _fmt_countdown(ev_utc - ref_utc)
         for w_name, w_start, w_end in window_bounds:
@@ -165,7 +172,7 @@ def compute_event_risk(
         risk_level = "AMBER"
         reason = " | ".join(amber_reasons)
 
-    # Countdown vers le prochain événement
+    # Countdown vers le prochain événement futur
     future_events = sorted(
         [e for e in events if e.scheduled_utc > ref_utc],
         key=lambda e: e.scheduled_utc,
@@ -179,12 +186,14 @@ def compute_event_risk(
             f"({_fmt_algiers(nxt.scheduled_utc)})"
         )
 
-    # Calendrier Alger des 14 prochains jours
+    # Calendrier Alger des 14 prochains jours (incluant aujourd'hui)
     horizon_14d = ref_utc + timedelta(days=14)
+    ref_alg_date = ref_utc.astimezone(TZ_ALGIERS).date()
     cal_display: list[str] = []
     tier_sym = {1: "[T1]", 2: "[T2]"}
     for ev in sorted(events, key=lambda e: e.scheduled_utc):
-        if ev.scheduled_utc < ref_utc or ev.scheduled_utc > horizon_14d:
+        ev_alg_date = ev.scheduled_utc.astimezone(TZ_ALGIERS).date()
+        if ev_alg_date < ref_alg_date or ev.scheduled_utc > horizon_14d:
             continue
         alg = ev.scheduled_utc.astimezone(TZ_ALGIERS)
         et = ev.scheduled_utc.astimezone(TZ_ET)
@@ -192,12 +201,100 @@ def compute_event_risk(
         consensus_str = f" | fcst={ev.consensus}" if ev.consensus else ""
         previous_str = f" | prec={ev.previous}" if ev.previous else ""
         src_str = ",".join(ev.all_sources) if ev.all_sources else ev.source
+        is_published = ev.scheduled_utc < ref_utc
+        pub_tag = " [publié]" if is_published else ""
         line = (
             f"{sym} {alg.strftime('%a %d %b %H:%M')} Alger ({et.strftime('%H:%M')} ET) | "
             f"Tier {ev.tier} | {ev.name}"
-            f"{consensus_str}{previous_str} | [{src_str}]"
+            f"{consensus_str}{previous_str} | date: {ev.date_origin}{pub_tag} | [{src_str}]"
         )
         cal_display.append(line)
+
+    # Évaluation du risque pour chaque jour de l'horizon (14 jours)
+    daily_risks: list[dict] = []
+    for day_offset in range(14):
+        target_day_ref = ref_utc + timedelta(days=day_offset)
+        target_alg_date = target_day_ref.astimezone(TZ_ALGIERS).date()
+        day_label = target_day_ref.astimezone(TZ_ALGIERS).strftime("%a %d %b")
+
+        day_w_bounds: list[tuple[str, datetime, datetime]] = []
+        for w in trading_windows:
+            w_name = w.get("name", "trade")
+            start_s = w.get("start", "15:30")
+            end_s = w.get("end", "18:30")
+            sh, sm = (int(x) for x in start_s.split(":"))
+            eh, em = (int(x) for x in end_s.split(":"))
+            target_alg_dt = target_day_ref.astimezone(TZ_ALGIERS)
+            d_start = target_alg_dt.replace(
+                hour=sh, minute=sm, second=0, microsecond=0
+            ).astimezone(UTC)
+            d_end = target_alg_dt.replace(
+                hour=eh, minute=em, second=0, microsecond=0
+            ).astimezone(UTC)
+            day_w_bounds.append((w_name, d_start, d_end))
+
+        d_red: list[str] = []
+        d_amber: list[str] = []
+        day_evs = [
+            e for e in events
+            if e.scheduled_utc.astimezone(TZ_ALGIERS).date() == target_alg_date
+        ]
+        for e in day_evs:
+            if day_offset == 0 and e.scheduled_utc + post_delta < ref_utc:
+                continue
+            e_utc = e.scheduled_utc
+            for w_name, w_start, w_end in day_w_bounds:
+                disrupts = (w_start - post_delta) <= e_utc <= (w_end + stand_delta)
+                near = (w_start - amber_delta) <= e_utc <= (w_end + amber_delta)
+                if e.tier == 1:
+                    if disrupts:
+                        d_red.append(
+                            f"Tier 1 [{e.name}] à "
+                            f"{e_utc.astimezone(TZ_ALGIERS).strftime('%H:%M')} couvre {w_name}"
+                        )
+                    elif near:
+                        d_amber.append(
+                            f"Tier 1 [{e.name}] à "
+                            f"{e_utc.astimezone(TZ_ALGIERS).strftime('%H:%M')} proche {w_name}"
+                        )
+                elif e.tier == 2:
+                    if near:
+                        d_amber.append(
+                            f"Tier 2 [{e.name}] à "
+                            f"{e_utc.astimezone(TZ_ALGIERS).strftime('%H:%M')} proche {w_name}"
+                        )
+
+        day_earnings = [
+            earn for earn in earnings
+            if (
+                earn.scheduled_utc
+                and earn.scheduled_utc.astimezone(TZ_ALGIERS).date() == target_alg_date
+            )
+        ]
+        for earn in day_earnings:
+            earn_utc = earn.scheduled_utc
+            if earn_utc:
+                for w_name, w_start, w_end in day_w_bounds:
+                    if (w_start - amber_delta) <= earn_utc <= (w_end + amber_delta):
+                        d_amber.append(f"Résultats {earn.ticker} proche {w_name}")
+
+        if d_red:
+            d_risk = "RED"
+            d_reason = " | ".join(d_red)
+        elif d_amber:
+            d_risk = "AMBER"
+            d_reason = " | ".join(d_amber)
+        else:
+            d_risk = "GREEN"
+            d_reason = "Aucun événement impactant les fenêtres de trading"
+
+        daily_risks.append({
+            "date": target_alg_date.isoformat(),
+            "day_label": day_label,
+            "risk_level": d_risk,
+            "reason": d_reason,
+            "is_today": (day_offset == 0),
+        })
 
     return EventRiskReport(
         as_of_utc=ref_utc,
@@ -207,4 +304,5 @@ def compute_event_risk(
         earnings_14d=earnings,
         next_event_countdown=next_countdown,
         calendar_display_algiers=cal_display,
+        daily_risks=daily_risks,
     )

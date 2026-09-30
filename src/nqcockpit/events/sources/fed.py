@@ -134,13 +134,15 @@ def fetch_fed_events(
     from datetime import timedelta
     horizon_end_dt = now_utc + timedelta(days=horizon_days)
 
+    today_et = now_utc.astimezone(ET_TZ).date()
+
     # 1. Calendrier FOMC statique 2026 (source : federalreserve.gov, vérifiée)
     for mtg in _FOMC_MEETINGS_2026:
         try:
             scheduled = _make_utc(mtg["date"], hour_et=14, minute_et=0)
         except ValueError:
             continue
-        if scheduled < now_utc or scheduled > horizon_end_dt:
+        if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end_dt:
             continue
         desc = "Décision de politique monétaire FOMC"
         if mtg.get("has_presser"):
@@ -164,7 +166,7 @@ def fetch_fed_events(
             scheduled = _make_utc(min_rec["date"], hour_et=14, minute_et=0)
         except ValueError:
             continue
-        if scheduled < now_utc or scheduled > horizon_end_dt:
+        if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end_dt:
             continue
         events.append(
             CalendarEvent(

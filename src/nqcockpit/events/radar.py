@@ -300,6 +300,7 @@ def _export_json(report: EventRiskReport, config: AppConfig) -> None:
                 for e in report.earnings_14d
             ],
             "calendar_display_algiers": report.calendar_display_algiers,
+            "daily_risks": report.daily_risks,
         }
         out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         log.info("Rapport événements exporté : %s", out_path)
@@ -322,6 +323,14 @@ def render_console(report: EventRiskReport) -> str:
     ]
     if report.next_event_countdown:
         lines.append(f"  {report.next_event_countdown}")
+
+    if report.daily_risks:
+        lines.append("-" * 70)
+        lines.append("  RISQUE PAR JOUR (fenêtres de trading sur l'horizon) :")
+        for dr in report.daily_risks:
+            today_tag = " (Aujourd'hui)" if dr.get("is_today") else ""
+            lbl = f"{dr['day_label']}{today_tag}"
+            lines.append(f"    {lbl:<24s} : [{dr['risk_level']}] — {dr['reason']}")
 
     if report.divergences:
         lines.append("-" * 70)
@@ -349,7 +358,11 @@ def render_console(report: EventRiskReport) -> str:
                 dt_str = "date inconnue"
             st = e.status.value
             eps_str = f" | EPS fcst={e.eps_estimate:.2f}" if e.eps_estimate is not None else ""
-            lines.append(f"    {e.ticker}: {dt_str}{eps_str} [{st}]")
+            conf_str = "confirmée" if e.confirmed else "estimée"
+            raw_date = e.scheduled_utc.strftime("%Y-%m-%d") if e.scheduled_utc else "N/A"
+            lines.append(
+                f"    {e.ticker}: {dt_str}{eps_str} [{conf_str}, brut: {raw_date}] [{st}]"
+            )
 
     lines.append("-" * 70)
     lines.append("  STATUT DES SOURCES :")

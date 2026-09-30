@@ -378,3 +378,64 @@ def test_official_dates_fomc_minutes_and_cpi() -> None:
     assert alg_cpi.hour == 13
     assert alg_cpi.minute == 30
 
+
+def test_day_divergence_detected() -> None:
+    """Vérifie que deux sources indiquant des JOURS différents déclenchent DIVERGENCE DATE."""
+    ev_bls = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 14, 12, 30, tzinfo=UTC),
+        source="bls",
+    )
+    # FRED infère le 12 octobre (écart de 2 jours)
+    ev_fred = CalendarEvent(
+        name="CPI",
+        tier=1,
+        scheduled_utc=datetime(2026, 10, 12, 12, 30, tzinfo=UTC),
+        source="fred",
+    )
+
+    merged, divergences = merge_and_classify(
+        [ev_bls, ev_fred],
+        tier1_names=DEFAULT_TIER1,
+        tier2_names=DEFAULT_TIER2,
+    )
+    assert len(merged) == 1
+    assert len(divergences) == 1
+    assert "DIVERGENCE DATE" in divergences[0]
+    assert "2 jours" in divergences[0]
+    # La source prioritaire (bls) est conservée pour la date
+    assert merged[0].scheduled_utc == datetime(2026, 10, 14, 12, 30, tzinfo=UTC)
+    assert set(merged[0].all_sources) == {"bls", "fred"}
+
+
+def test_published_event_today_does_not_affect_future_windows() -> None:
+    """Un événement déjà passé aujourd'hui (tampon expiré) est marqué publié et ne bloque pas."""
+    # Événement à 08h30 ET = 13h30 Alger = 12h30 UTC.
+    # Tampon de 90 min : finit à 15h00 Alger = 14h00 UTC.
+    # Référence actuelle : 15h15 Alger = 14h15 UTC (après l'événement et son tampon).
+    event_dt_utc = datetime(2026, 9, 30, 12, 30, tzinfo=UTC)
+    ref_utc = datetime(2026, 9, 30, 14, 15, tzinfo=UTC)
+    ev = CalendarEvent(name="PCE", tier=1, scheduled_utc=event_dt_utc, source="bea")
+
+    report = compute_event_risk(
+        events=[ev],
+        earnings=[],
+        trading_windows=DEFAULT_WINDOWS,  # trade1 à 15h30 Alger
+        post_buffer_min=90,
+        stand_aside_before_min=5,
+        ref_utc=ref_utc,
+    )
+    # Ne doit pas être RED car son impact s'est achevé à 15h00, avant ref_utc 15h15
+    assert report.risk_level == "GREEN"
+    assert len(report.calendar_display_algiers) == 1
+    assert "[publié]" in report.calendar_display_algiers[0]
+
+
+def test_forexfactory_ism_mapping() -> None:
+    """Vérifie que ISM Manufacturing est correctement normalisé et classifié Tier 2."""
+    from nqcockpit.events.sources.forexfactory import _normalize_name
+    assert _normalize_name("ISM Manufacturing PMI") == "ISM"
+    assert _normalize_name("ISM Services PMI") == "ISM"
+    assert _normalize_name("ADP Non-Farm Employment Change") == "ADP"
+

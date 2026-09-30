@@ -123,7 +123,8 @@ def fetch_bls_events(
             scheduled = _make_utc(entry["date"])
         except ValueError:
             continue
-        if scheduled < now_utc or scheduled > horizon_end:
+        today_et = now_utc.astimezone(ET_TZ).date()
+        if scheduled.astimezone(ET_TZ).date() < today_et or scheduled > horizon_end:
             continue
         events.append(
             CalendarEvent(
