@@ -1,13 +1,11 @@
 """Application Streamlit Consolidée Multipage NQ Cockpit (P13).
 
-Point d'entrée unique regroupant les 5 pages du cockpit :
-1. ⚡ Cockpit Live (Profil de séance P08)
-2. 📓 Journal de Bord (Saisie et suivi P09)
-3. 🛡️ Discipline & Sizing (Porte de discipline et risques P09)
-4. 📊 Coaching & Analytics (Visualisations Plotly et fuites P11)
-5. 📄 Briefing Pré-Séance (Document consolidé P12)
-
-Strictement non-directionnel, thème sombre trading terminal sur le port unique 8501.
+Design System Final : Bloomberg Terminal x TradingView Desk.
+- Fond principal : #0D0D0D (Bloomberg Terminal)
+- Panels & Cartes : #131722 (TradingView Dark Slate)
+- Bordures : #2A2E39 (TradingView 1px)
+- Accents Marque/Navigation : #FA7900 (Orange Signature Bloomberg)
+- Zéro emoji, badges en contour 1px, typographie tabulaire pour données.
 """
 
 from __future__ import annotations
@@ -30,35 +28,43 @@ from nqcockpit.ui.journal_page import render_journal_page
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="NQ Cockpit — Terminal Trading Multipage",
-    page_icon="⚡",
+    page_title="NQ Cockpit — Terminal Multipage",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Injection CSS Thème Sombre & Terminal Typography
+# Injection CSS Thème Final Bloomberg x TradingView
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #0d1117;
-        color: #e6edf3;
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        background-color: #0D0D0D;
+        color: #D1D4DC;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .sidebar-header {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #3fb950;
+        font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #FA7900;
+        letter-spacing: 0.5px;
         margin-bottom: 0.5rem;
     }
     .sidebar-clock {
-        font-size: 0.85rem;
-        color: #8b949e;
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 6px;
-        padding: 6px 10px;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 0.78rem;
+        color: #787B86;
+        background-color: #131722;
+        border: 1px solid #2A2E39;
+        border-radius: 3px;
+        padding: 8px 10px;
         margin-bottom: 12px;
+    }
+    /* Stylisation du menu radio dans la sidebar */
+    .stRadio label {
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important;
+        font-size: 0.82rem !important;
+        color: #D1D4DC !important;
     }
     </style>
     """,
@@ -79,7 +85,7 @@ def main() -> None:
     # Navigation Latérale Consolidée
     # ---------------------------------------------------------------------------
     st.sidebar.markdown(
-        '<div class="sidebar-header">⚡ NQ COCKPIT TERMINAL</div>',
+        '<div class="sidebar-header">NQ COCKPIT // TERMINAL</div>',
         unsafe_allow_html=True,
     )
 
@@ -99,22 +105,22 @@ def main() -> None:
     st.sidebar.markdown("---")
 
     PAGES = {
-        "⚡ Cockpit Live": render_cockpit,
-        "📓 Journal de Bord": render_journal_page,
-        "🛡️ Discipline & Sizing": render_discipline_page,
-        "📊 Coaching & Analytics": render_coaching_app,
-        "📄 Briefing Pré-Séance": render_briefing_page,
+        "[01] COCKPIT LIVE": render_cockpit,
+        "[02] JOURNAL DE BORD": render_journal_page,
+        "[03] DISCIPLINE & SIZING": render_discipline_page,
+        "[04] COACHING & ANALYTICS": render_coaching_app,
+        "[05] BRIEFING PRE-SEANCE": render_briefing_page,
     }
 
     choice = st.sidebar.radio(
-        "Navigation",
+        "Navigation Sections",
         list(PAGES.keys()),
         index=0,
     )
 
     st.sidebar.markdown("---")
     st.sidebar.caption(
-        "NQ Cockpit P13 · Port unique 8501 · "
+        "NQ Cockpit P13 · Bloomberg x TradingView Desk · "
         "Strictement non-directionnel"
     )
 

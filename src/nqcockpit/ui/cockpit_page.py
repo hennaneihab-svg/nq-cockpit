@@ -1,13 +1,10 @@
-"""Page principale Streamlit NQ Cockpit (P08).
+"""Page principale Streamlit NQ Cockpit (P08 / P13).
 
-Caractéristiques :
-- Lisible en 5 secondes (vue globale immédiate)
-- Thème sombre à fort contraste
-- Feux tricolores de STATUT (jamais de direction)
-- Compte à rebours événement Tier 1
-- Bandeau d'état de santé des sources décomposé
-- Tableau des niveaux clés et export CSV
-- Carte de scénarios "Si... Alors..." strictement non-directionnelle
+Design System Bloomberg x TradingView :
+- Vue globale synoptique lisible en 5 secondes
+- Conteneurs Slate #131722, bordures 1px #2A2E39, accents marque #FA7900
+- Statuts sémantiques en contours 1px ([OK], [DÉGRADÉ], [BLOQUÉ], [NO-TRADE])
+- Strictement non-directionnel
 """
 
 from __future__ import annotations
@@ -32,97 +29,109 @@ def render_cockpit():
     try:
         st.set_page_config(
             page_title="NQ Cockpit — Profil de Séance",
-            page_icon="⚡",
             layout="wide",
             initial_sidebar_state="collapsed",
         )
     except StreamlitAPIException:
         pass
 
-    # Injection CSS Thème Sombre & Typographie Professionnelle
+    # CSS Bloomberg x TradingView Desk
     st.markdown(
         """
         <style>
         .stApp {
-            background-color: #0b0f17;
-            color: #e2e8f0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                         Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0D0D0D;
+            color: #D1D4DC;
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         .block-container {
-            padding-top: 1.5rem;
+            padding-top: 1.2rem;
             padding-bottom: 2rem;
-            max-width: 95%;
+            max-width: 96%;
         }
         .status-banner-allowed {
-            background: linear-gradient(
-                90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%
-            );
-            border: 2px solid #10b981;
-            border-radius: 8px;
-            padding: 14px 20px;
-            margin-bottom: 20px;
+            background-color: #131722;
+            border: 1px solid #089981aa;
+            border-radius: 3px;
+            padding: 12px 18px;
+            margin-bottom: 16px;
         }
         .status-banner-notrade {
-            background: linear-gradient(
-                90deg, rgba(239, 68, 68, 0.2) 0%, rgba(239, 68, 68, 0.05) 100%
-            );
-            border: 2px solid #ef4444;
-            border-radius: 8px;
-            padding: 14px 20px;
-            margin-bottom: 20px;
+            background-color: #131722;
+            border: 1px solid #F23645aa;
+            border-radius: 3px;
+            padding: 12px 18px;
+            margin-bottom: 16px;
         }
         .kpi-card {
-            background-color: #141b27;
-            border: 1px solid #222f44;
-            border-radius: 8px;
-            padding: 14px;
-            margin-bottom: 12px;
+            background-color: #131722;
+            border: 1px solid #2A2E39;
+            border-radius: 3px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
         }
         .kpi-title {
-            color: #94a3b8;
-            font-size: 0.8rem;
+            color: #787B86;
+            font-size: 0.72rem;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.5px;
             margin-bottom: 4px;
         }
         .kpi-value {
-            font-size: 1.4rem;
+            font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+            font-size: 1.35rem;
             font-weight: 700;
-            color: #f8fafc;
+            color: #D1D4DC;
         }
         .kpi-sub {
-            font-size: 0.8rem;
-            color: #64748b;
+            font-family: ui-monospace, monospace;
+            font-size: 0.75rem;
+            color: #787B86;
             margin-top: 4px;
         }
         .chip-ok {
-            background-color: #064e3b;
-            color: #34d399;
-            padding: 3px 8px;
-            border-radius: 4px;
+            background-color: #131722;
+            border: 1px solid #089981aa;
+            color: #089981;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-family: ui-monospace, monospace;
             font-size: 0.75rem;
             font-weight: 600;
             display: inline-block;
             margin-right: 6px;
+            margin-bottom: 4px;
         }
         .chip-degraded {
-            background-color: #78350f;
-            color: #fbbf24;
-            padding: 3px 8px;
-            border-radius: 4px;
+            background-color: #131722;
+            border: 1px solid #D29922aa;
+            color: #D29922;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-family: ui-monospace, monospace;
             font-size: 0.75rem;
             font-weight: 600;
             display: inline-block;
             margin-right: 6px;
+            margin-bottom: 4px;
         }
         .scenario-box {
-            background-color: #141b27;
-            border-left: 3px solid #38bdf8;
+            background-color: #131722;
+            border: 1px solid #2A2E39;
+            border-left: 3px solid #FA7900;
             padding: 10px 14px;
             margin-bottom: 10px;
-            border-radius: 0 6px 6px 0;
+            border-radius: 0 3px 3px 0;
+            font-size: 0.82rem;
+        }
+        .section-header {
+            font-family: ui-sans-serif, sans-serif;
+            color: #FA7900;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
         }
         </style>
         """,
@@ -145,13 +154,13 @@ def render_cockpit():
     # En-tête : Titre & Horodatages multi-fuseaux
     col_t1, col_t2 = st.columns([2, 1])
     with col_t1:
-        st.markdown("## ⚡ NQ Cockpit — Profil de Séance")
+        st.markdown('<div class="section-header">NQ COCKPIT // PROFIL DE SÉANCE LIVE</div>', unsafe_allow_html=True)
         st.caption("Aide à la décision non-directionnelle · Discipline & Cadre d'exécution")
     with col_t2:
         now_alg = now_utc.astimezone(TZ_ALGIERS).strftime("%H:%M:%S")
         now_et = now_utc.astimezone(TZ_ET).strftime("%H:%M:%S")
         st.markdown(
-            f"<div style='text-align: right; font-size: 0.85rem; color: #94a3b8;'>"
+            f"<div style='text-align: right; font-family: ui-monospace, monospace; font-size: 0.8rem; color: #787B86;'>"
             f"<b>Alger :</b> {now_alg} | <b>New York :</b> {now_et} ET<br>"
             f"Séance cible : <b>{profile.target_date}</b>"
             f"</div>",
@@ -165,10 +174,10 @@ def render_cockpit():
         st.markdown(
             """
             <div class="status-banner-allowed">
-                <span style="font-size: 1.3rem; font-weight: 800; color: #10b981;">
-                    🟢 TRADING AUTORISÉ (SOUS CONDITIONS)
+                <span style="font-family: ui-monospace, monospace; font-size: 1.1rem; font-weight: 700; color: #089981;">
+                    SYSTEM // TRADING AUTORISÉ (SOUS CONDITIONS)
                 </span><br>
-                <span style="font-size: 0.9rem; color: #d1fae5;">
+                <span style="font-size: 0.82rem; color: #D1D4DC;">
                     Aucun drapeau bloquant actif. Respecter impérativement les Kill Zones d'Alger
                     (15h30–17h00 / 17h00–18h30) et la règle de max 2 trades/jour.
                 </span>
@@ -186,10 +195,10 @@ def render_cockpit():
         st.markdown(
             f"""
             <div class="status-banner-notrade">
-                <span style="font-size: 1.3rem; font-weight: 800; color: #ef4444;">
-                    🛑 DRAPEAU NO-TRADE ACTIF ({cnt})
+                <span style="font-family: ui-monospace, monospace; font-size: 1.1rem; font-weight: 700; color: #F23645;">
+                    SYSTEM // DRAPEAU NO-TRADE ACTIF ({cnt})
                 </span><br>
-                <span style="font-size: 0.9rem; color: #fecaca;">
+                <span style="font-size: 0.82rem; color: #D1D4DC;">
                     <b>Trading strictement suspendu :</b>
                     <ul style="margin: 4px 0 0 0; padding-left: 20px;">{reasons_html}</ul>
                 </span>
@@ -207,11 +216,11 @@ def render_cockpit():
         cd_text = profile.next_tier1_countdown or "Aucun"
         ev_title = profile.next_tier1_event or "Aucun Tier 1 imminent"
         if profile.event_risk_level == "GREEN":
-            color_ev = "#10b981"
+            color_ev = "#089981"
         elif profile.event_risk_level == "AMBER":
-            color_ev = "#f59e0b"
+            color_ev = "#D29922"
         else:
-            color_ev = "#ef4444"
+            color_ev = "#F23645"
         st.markdown(
             f"""
             <div class="kpi-card">
@@ -224,7 +233,7 @@ def render_cockpit():
         )
 
     with k2:
-        g_color = "#38bdf8" if profile.gamma_regime == "POSITIVE_GAMMA" else "#f97316"
+        g_color = "#089981" if profile.gamma_regime == "POSITIVE_GAMMA" else "#F23645"
         dist_f = (
             f"{profile.distance_to_flip_pts:+.1f} pts"
             if profile.distance_to_flip_pts is not None
@@ -267,7 +276,7 @@ def render_cockpit():
             <div class="kpi-card">
                 <div class="kpi-title">Expected Move Journalier</div>
                 <div class="kpi-value">{em_pts}</div>
-                <div class="kpi-sub">Consommé par l'Overnight : <b>{em_cons}</b></div>
+                <div class="kpi-sub">Consommé Overnight : <b>{em_cons}</b></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -276,7 +285,7 @@ def render_cockpit():
     # -----------------------------------------------------------------------
     # 3. BANDEAU DE SANTÉ DÉCOMPOSÉ DES SOURCES (AUCUN MASQUAGE)
     # -----------------------------------------------------------------------
-    st.markdown("##### Santé des Composants Sources")
+    st.markdown("<div style='font-family: ui-sans-serif, sans-serif; font-size: 0.9rem; font-weight: 700; color: #FA7900; margin-top: 10px;'>SANTÉ DES COMPOSANTS SOURCES</div>", unsafe_allow_html=True)
     chips_html = []
     for _c_key, c_val in profile.component_statuses.items():
         is_deg = "DÉGRADÉ" in c_val.status
@@ -291,7 +300,7 @@ def render_cockpit():
     c_left, c_right = st.columns([1, 1], gap="medium")
 
     with c_left:
-        st.markdown("### 🎯 Niveaux Clés en Points NQ")
+        st.markdown('<div class="section-header">NIVEAUX CLÉS EN POINTS NQ</div>', unsafe_allow_html=True)
         st.caption(
             f"Spot NQ de référence : <b>{profile.spot_nq:.2f} pts</b>",
             unsafe_allow_html=True,
@@ -314,7 +323,7 @@ def render_cockpit():
             # Export CSV
             csv_str = export_levels_to_csv(profile.key_levels)
             st.download_button(
-                label="📥 Exporter les Niveaux (CSV TradingView / ATAS)",
+                label="Exporter les Niveaux (CSV TradingView / ATAS)",
                 data=csv_str,
                 file_name=f"nq_levels_{profile.target_date}.csv",
                 mime="text/csv",
@@ -324,19 +333,19 @@ def render_cockpit():
             st.warning("Aucun niveau clé disponible.")
 
     with c_right:
-        st.markdown("### 🗺️ Carte de Scénarios « Si… Alors… »")
+        st.markdown('<div class="section-header">CARTE DE SCÉNARIOS « SI… ALORS… »</div>', unsafe_allow_html=True)
         st.caption("Conditions objectives de structure de carnet sans prédiction de direction.")
 
         if profile.scenarios:
             for sc in profile.scenarios:
-                header = f"📍 {sc.level_name} ({sc.level_price:.1f}) — {sc.level_type}"
+                header = f"{sc.level_name} ({sc.level_price:.1f}) — {sc.level_type}"
                 with st.expander(header, expanded=True):
                     st.markdown(
                         f"""
                         <div class="scenario-box">
                             <b>Condition :</b> {sc.if_condition}<br>
                             <b>Plan / Action :</b> {sc.then_plan}<br>
-                            <small style="color: #94a3b8;">
+                            <small style="color: #787B86;">
                                 <b>Contexte :</b> {sc.context_notes}
                             </small>
                         </div>
@@ -348,8 +357,8 @@ def render_cockpit():
 
     st.divider()
     st.caption(
-        "NQ Cockpit P08 · Strict respect des principes nq-principles : "
-        "zéro biais directionnel, probabilités objectives."
+        "NQ Cockpit P08 / P13 · Bloomberg x TradingView Desk · "
+        "Strictement non-directionnel."
     )
 
 

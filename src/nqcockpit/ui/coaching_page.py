@@ -51,9 +51,9 @@ from nqcockpit.ui.db import get_ui_db
 
 PLOTLY_LAYOUT_DEFAULTS: dict[str, Any] = {
     "template": "plotly_dark",
-    "paper_bgcolor": "#161b22",
-    "plot_bgcolor": "#0d1117",
-    "font": {"color": "#e6edf3", "family": "system-ui, -apple-system, sans-serif"},
+    "paper_bgcolor": "#131722",
+    "plot_bgcolor": "#0D0D0D",
+    "font": {"color": "#D1D4DC", "family": "JetBrains Mono, SFMono-Regular, Consolas, monospace"},
     "margin": {"l": 45, "r": 30, "t": 45, "b": 40},
 }
 
@@ -76,7 +76,7 @@ def build_equity_curve_figure(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font={"size": 14, "color": "#8b949e"},
+            font={"size": 14, "color": "#787B86"},
         )
         fig.update_layout(**PLOTLY_LAYOUT_DEFAULTS, title="Courbe d'équité (R cumulé)")
         return fig
@@ -119,8 +119,8 @@ def build_equity_curve_figure(
             y=cum_r,
             mode="lines+markers",
             name="R Cumulé",
-            line={"color": "#58a6ff", "width": 2.5},
-            marker={"size": 5, "color": "#58a6ff"},
+            line={"color": "#FA7900", "width": 2.5},
+            marker={"size": 5, "color": "#FA7900"},
             hovertext=hover_texts,
             hoverinfo="text",
         )
@@ -130,11 +130,11 @@ def build_equity_curve_figure(
     fig.add_hline(
         y=0.0,
         line_dash="dash",
-        line_color="#8b949e",
+        line_color="#787B86",
         line_width=1.5,
         annotation_text="0.0 R",
         annotation_position="bottom right",
-        annotation_font_color="#8b949e",
+        annotation_font_color="#787B86",
     )
 
     # Superposition des alertes de tilt
@@ -150,7 +150,7 @@ def build_equity_curve_figure(
                     tilt_x.append(pt_x)
                     tilt_y.append(pt_y)
                     tilt_texts.append(
-                        f"🚨 <b>Alerte Tilt : {alert.pattern_type}</b><br>"
+                        f"<b>Alerte Tilt : {alert.pattern_type}</b><br>"
                         f"Date : {alert.session_date}<br>"
                         f"Motif : {alert.reason}"
                     )
@@ -165,8 +165,8 @@ def build_equity_curve_figure(
                     marker={
                         "symbol": "triangle-up",
                         "size": 13,
-                        "color": "#f85149",
-                        "line": {"color": "#ffffff", "width": 1},
+                        "color": "#F23645",
+                        "line": {"color": "#D1D4DC", "width": 1},
                     },
                     hovertext=tilt_texts,
                     hoverinfo="text",
@@ -200,7 +200,7 @@ def build_segmentation_figure(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font={"size": 14, "color": "#8b949e"},
+            font={"size": 14, "color": "#787B86"},
         )
         fig.update_layout(**PLOTLY_LAYOUT_DEFAULTS, title=title)
         return fig
@@ -217,7 +217,7 @@ def build_segmentation_figure(
         sig_tag = "" if stats.sample_sufficient else " (n < seuil)"
         labels.append(f"{name}{sig_tag}")
 
-        colors.append("#3fb950" if val >= 0 else "#f85149")
+        colors.append("#089981" if val >= 0 else "#F23645")
 
         wr_str = f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—"
         ci_str = (
@@ -251,7 +251,7 @@ def build_segmentation_figure(
         )
     )
 
-    fig.add_vline(x=0.0, line_dash="dash", line_color="#8b949e", line_width=1)
+    fig.add_vline(x=0.0, line_dash="dash", line_color="#787B86", line_width=1)
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
@@ -278,7 +278,7 @@ def build_compliance_timeline_figure(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font={"size": 14, "color": "#8b949e"},
+            font={"size": 14, "color": "#787B86"},
         )
         fig.update_layout(**PLOTLY_LAYOUT_DEFAULTS, title="Conformité aux règles dans le temps")
         return fig
@@ -305,11 +305,11 @@ def build_compliance_timeline_figure(
         comp_rates.append(round(rate, 1))
 
         if rate >= 100.0:
-            bar_colors.append("#3fb950")  # Vert
+            bar_colors.append("#089981")
         elif rate >= 80.0:
-            bar_colors.append("#d29922")  # Jaune / Orange
+            bar_colors.append("#D29922")
         else:
-            bar_colors.append("#f85149")  # Rouge
+            bar_colors.append("#F23645")
 
         hover_texts.append(
             f"<b>Séance : {s_date}</b><br>"
@@ -333,11 +333,11 @@ def build_compliance_timeline_figure(
     fig.add_hline(
         y=100.0,
         line_dash="dash",
-        line_color="#3fb950",
+        line_color="#089981",
         line_width=1.5,
         annotation_text="Objectif 100%",
         annotation_position="top right",
-        annotation_font_color="#3fb950",
+        annotation_font_color="#089981",
     )
 
     fig.update_layout(
@@ -360,28 +360,27 @@ def render_coaching_app() -> None:
     try:
         st.set_page_config(
             page_title="NQ Cockpit · Coaching & Analytics",
-            page_icon="🎯",
             layout="wide",
         )
     except StreamlitAPIException:
         pass
 
-    # Thème sombre CSS personnalisé
+    # Thème sombre CSS Bloomberg x TradingView
     st.markdown(
         """
     <style>
-    body, .main { background-color: #0d1117; color: #e6edf3; }
+    body, .main { background-color: #0D0D0D; color: #D1D4DC; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .metric-card {
-        background-color: #161b22; border: 1px solid #30363d;
-        border-radius: 8px; padding: 12px 16px; margin: 4px 0;
+        background-color: #131722; border: 1px solid #2A2E39;
+        border-radius: 2px; padding: 12px 16px; margin: 4px 0;
     }
-    .metric-label { font-size: 0.85rem; color: #8b949e; text-transform: uppercase; }
-    .metric-val { font-size: 1.5rem; font-weight: bold; color: #e6edf3; }
-    .metric-sub { font-size: 0.85rem; color: #8b949e; }
-    .ok { color: #3fb950; font-weight: bold; }
-    .warn { color: #d29922; font-weight: bold; }
-    .err { color: #f85149; font-weight: bold; }
-    .insuf { color: #8b949e; font-style: italic; }
+    .metric-label { font-size: 0.75rem; color: #787B86; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .metric-val { font-size: 1.4rem; font-weight: 700; color: #D1D4DC; font-family: "JetBrains Mono", Consolas, monospace; }
+    .metric-sub { font-size: 0.8rem; color: #787B86; font-family: "JetBrains Mono", Consolas, monospace; }
+    .ok { color: #089981; font-weight: 700; }
+    .warn { color: #D29922; font-weight: 700; }
+    .err { color: #F23645; font-weight: 700; }
+    .insuf { color: #787B86; font-style: italic; }
     </style>
     """,
         unsafe_allow_html=True,
@@ -400,8 +399,8 @@ def render_coaching_app() -> None:
     # -----------------------------------------------------------------------
     # Sidebar : Contrôles & Filtres temporels
     # -----------------------------------------------------------------------
-    st.sidebar.title("🎯 Coaching & Analytics")
-    st.sidebar.markdown(f"**Heure Alger** : {now_algiers.strftime('%Y-%m-%d %H:%M')}")
+    st.sidebar.title("[04] COACHING & ANALYTICS")
+    st.sidebar.markdown(f"**Heure Alger** : `{now_algiers.strftime('%Y-%m-%d %H:%M')}`")
     st.sidebar.markdown(f"**Base** : `{Path(db_path_str).name}` ({len(all_trades)} trades)")
     st.sidebar.markdown("---")
 
@@ -475,17 +474,17 @@ def render_coaching_app() -> None:
     # -----------------------------------------------------------------------
     # En-tête & Bannière de significativité statistique
     # -----------------------------------------------------------------------
-    st.header(f"📊 {period_title}")
+    st.header(f"ANALYSIS // {period_title.upper()}")
 
     if not stats.sample_sufficient:
         st.warning(
-            f"⚠️ **Échantillon insuffisant** : {stats.n_trades} / {stats.min_trades_required} "
+            f"**Échantillon insuffisant** : {stats.n_trades} / {stats.min_trades_required} "
             "trades requis pour la validité statistique. Les métriques ci-dessous sont purement "
             "descriptives et n'ont pas de significativité statistique confirmée."
         )
     else:
         st.success(
-            f"✅ **Échantillon statistiquement représentatif** : {stats.n_trades} trades "
+            f"**Échantillon statistiquement représentatif** : {stats.n_trades} trades "
             f"(seuil minimal {stats.min_trades_required} atteint)."
         )
 
@@ -590,14 +589,14 @@ def render_coaching_app() -> None:
     # -----------------------------------------------------------------------
     # Visualisation 1 : Courbe d'équité & Timeline des alertes de tilt
     # -----------------------------------------------------------------------
-    st.subheader("📈 Courbe d'équité en R cumulé & Alertes de tilt")
+    st.subheader("EQUITY // Courbe d'équité en R cumulé & Alertes tilt")
     fig_equity = build_equity_curve_figure(filtered_trades, tilt_alerts)
     st.plotly_chart(fig_equity, use_container_width=True)
 
     # -----------------------------------------------------------------------
     # Visualisation 2 : Segmentation (Setup Tags & Régime Gamma)
     # -----------------------------------------------------------------------
-    st.subheader("🔍 Performance par segment")
+    st.subheader("SEGMENTATION // Performance par segment")
     col_seg1, col_seg2 = st.columns(2)
 
     with col_seg1:
@@ -621,7 +620,7 @@ def render_coaching_app() -> None:
     # -----------------------------------------------------------------------
     # Visualisation 3 : Évolution temporelle de la conformité
     # -----------------------------------------------------------------------
-    st.subheader("🛡️ Taux de conformité aux règles dans le temps")
+    st.subheader("COMPLIANCE // Taux de conformité par séance")
     fig_compliance = build_compliance_timeline_figure(filtered_trades, config)
     st.plotly_chart(fig_compliance, use_container_width=True)
 
@@ -629,7 +628,7 @@ def render_coaching_app() -> None:
     # Section Coaching : Fuites chiffrées, forces & règles
     # -----------------------------------------------------------------------
     st.markdown("---")
-    st.subheader("🎯 Rapport de coaching & Analyse qualitative")
+    st.subheader("COACHING // Rapport & Analyse qualitative")
 
     coaching = generate_coaching_report(
         trades=filtered_trades,
@@ -641,21 +640,21 @@ def render_coaching_app() -> None:
     col_coach1, col_coach2 = st.columns(2)
 
     with col_coach1:
-        st.markdown("#### 🚨 Top Fuites identifiées")
+        st.markdown("#### TOP FUITES IDENTIFIÉES")
         if coaching.top_leaks:
             for i, leak in enumerate(coaching.top_leaks, 1):
                 st.markdown(f"**{i}.** {leak}")
         else:
             st.info("Aucune fuite majeure identifiée sur cette sélection.")
 
-        st.markdown("#### 📌 Règle prioritaire à renforcer")
+        st.markdown("#### RÈGLE PRIORITAIRE À RENFORCER")
         st.warning(f"**{coaching.rule_to_reinforce}**")
 
     with col_coach2:
-        st.markdown("#### 💎 Force à conserver")
+        st.markdown("#### FORCE À CONSERVER")
         st.success(f"**{coaching.strength_to_keep}**")
 
-        st.markdown("#### 🎯 Objectifs mesurables pour la suite")
+        st.markdown("#### OBJECTIFS MESURABLES")
         if coaching.measurable_goals:
             for goal in coaching.measurable_goals:
                 st.markdown(f"- {goal}")
@@ -667,7 +666,7 @@ def render_coaching_app() -> None:
     # -----------------------------------------------------------------------
     if tilt_alerts:
         st.markdown("---")
-        st.subheader(f"🚨 Détail des alertes de tilt ({len(tilt_alerts)})")
+        st.subheader(f"TILT // Détail des alertes ({len(tilt_alerts)})")
         alert_rows = []
         for a in tilt_alerts:
             alert_rows.append(
@@ -679,6 +678,7 @@ def render_coaching_app() -> None:
                 }
             )
         st.table(alert_rows)
+
 
 
 if __name__ == "__main__":

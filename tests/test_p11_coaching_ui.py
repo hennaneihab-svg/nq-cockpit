@@ -202,8 +202,8 @@ def test_build_compliance_timeline_populated(mock_config: AppConfig):
     bar_trace = fig.data[0]
     assert list(bar_trace.x) == ["2026-09-01", "2026-09-02"]
     assert list(bar_trace.y) == [100.0, 50.0]
-    # Vert pour 100%, Rouge pour 50%
-    assert list(bar_trace.marker.color) == ["#3fb950", "#f85149"]
+    # Vert (teal) pour 100%, Rouge pour 50%
+    assert list(bar_trace.marker.color) == ["#089981", "#F23645"]
 
 
 # ---------------------------------------------------------------------------

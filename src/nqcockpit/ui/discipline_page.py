@@ -1,9 +1,9 @@
-"""Porte de discipline et gestionnaire de risque live (P09 réel UI Streamlit).
+"""Porte de discipline et gestionnaire de risque live (P09 / P13).
 
-Page dédiée distincte du journal.
-Interrogable à tout instant.
-AUCUN bouton pour forcer GO.
-AUCUNE exécution d'ordre.
+Design System Bloomberg x TradingView :
+- Interrogable à tout instant
+- AUCUN bouton pour forcer GO, AUCUNE exécution d'ordre
+- Badges en contour 1px, typographie tabulaire pour métriques
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from nqcockpit.discipline.models import (
 )
 from nqcockpit.discipline.risk import compute_position_size
 from nqcockpit.journal.store import load_trades
+from nqcockpit.ui.components import render_status_badge, render_terminal_metric
 from nqcockpit.ui.db import get_ui_db
 
 
@@ -34,35 +35,42 @@ def render_discipline_page() -> None:
     try:
         st.set_page_config(
             page_title="NQ Cockpit — Porte de Discipline",
-            page_icon="🛡️",
             layout="wide",
         )
     except StreamlitAPIException:
         pass
 
-    # Thème sombre
+    # Thème Bloomberg x TradingView Desk
     st.markdown(
         """
         <style>
-        .stApp { background-color: #0d1117; color: #c9d1d9; }
+        .stApp { background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif; }
         .badge-go {
-            background-color: #1f6feb22; border: 2px solid #238636;
-            color: #3fb950; padding: 12px; border-radius: 8px;
-            font-weight: bold; font-size: 1.2rem; text-align: center;
+            background-color: #131722; border: 1px solid #089981aa;
+            color: #089981; padding: 12px; border-radius: 3px;
+            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .badge-stop {
-            background-color: #da363322; border: 2px solid #da3633;
-            color: #f85149; padding: 12px; border-radius: 8px;
-            font-weight: bold; font-size: 1.2rem; text-align: center;
+            background-color: #131722; border: 1px solid #F23645aa;
+            color: #F23645; padding: 12px; border-radius: 3px;
+            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .badge-warn {
-            background-color: #d2992222; border: 2px solid #d29922;
-            color: #e3b341; padding: 12px; border-radius: 8px;
-            font-weight: bold; font-size: 1.2rem; text-align: center;
+            background-color: #131722; border: 1px solid #D29922aa;
+            color: #D29922; padding: 12px; border-radius: 3px;
+            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .card {
-            background-color: #161b22; border: 1px solid #30363d;
-            border-radius: 8px; padding: 16px; margin-bottom: 16px;
+            background-color: #131722; border: 1px solid #2A2E39;
+            border-radius: 3px; padding: 14px; margin-bottom: 14px;
+        }
+        .section-header {
+            font-family: ui-sans-serif, sans-serif;
+            color: #FA7900;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
         }
         </style>
         """,
@@ -76,12 +84,12 @@ def render_discipline_page() -> None:
     now_utc = datetime.now(timezone.utc)
     state = evaluate_session_state(trades, now_utc, config)
 
-    st.title("🛡️ NQ Cockpit — Porte de Discipline Live")
+    st.markdown('<div class="section-header">PORTE DE DISCIPLINE & GESTION DU RISQUE LIVE</div>', unsafe_allow_html=True)
 
     # ---------------------------------------------------------------------------
     # Section 1 : État vivant de la séance
     # ---------------------------------------------------------------------------
-    st.subheader("1. État Vivant de la Séance")
+    st.markdown("### 1. État Vivant de la Séance")
 
     tz_algiers = ZoneInfo(config.timezones.display)
     time_algiers_str = now_utc.astimezone(tz_algiers).strftime("%H:%M:%S")
@@ -91,36 +99,38 @@ def render_discipline_page() -> None:
     with col_state:
         if state.status == SessionDisciplineStatus.READY:
             st.markdown(
-                '<div class="badge-go">✅ MACHINE À ÉTATS : PRÊT (TRADING PERMIS)</div>',
+                '<div class="badge-go">MACHINE A ETATS : PRÊT (TRADING PERMIS)</div>',
                 unsafe_allow_html=True,
             )
         elif state.status == SessionDisciplineStatus.COOLDOWN_ACTIVE:
             st.markdown(
-                f'<div class="badge-warn">⏳ PAUSE OBLIGATOIRE POST-SL : '
+                f'<div class="badge-warn">PAUSE OBLIGATOIRE POST-SL : '
                 f'{state.cooldown_countdown_str} restante</div>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                f'<div class="badge-stop">🛑 SÉANCE VERROUILLÉE ({state.status.value})</div>',
+                f'<div class="badge-stop">SÉANCE VERROUILLÉE ({state.status.value})</div>',
                 unsafe_allow_html=True,
             )
 
     with col_info:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Heure Alger", time_algiers_str)
-        c2.metric("Fenêtre active", state.current_window_name or "Aucune")
-        c3.metric(
-            "Trades restants",
-            f"{state.trades_remaining} / {state.max_trades_allowed}",
-        )
-        c4.metric("R cumulé aujourd'hui", f"{state.r_realized_today:+.2f}R")
+        with c1:
+            render_terminal_metric("Heure Alger", time_algiers_str)
+        with c2:
+            render_terminal_metric("Fenêtre active", state.current_window_name or "Aucune")
+        with c3:
+            render_terminal_metric("Trades restants", f"{state.trades_remaining} / {state.max_trades_allowed}")
+        with c4:
+            r_kind = "pos" if state.r_realized_today >= 0 else "neg"
+            render_terminal_metric("R cumulé jour", f"{state.r_realized_today:+.2f}R", status_kind=r_kind)
 
     if state.lock_reasons:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.write("**Motifs de verrouillage actifs :**")
         for r in state.lock_reasons:
-            st.markdown(f"- ⚠️ {r}")
+            st.markdown(f"- **[VERROU]** {r}")
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
@@ -128,7 +138,7 @@ def render_discipline_page() -> None:
     # ---------------------------------------------------------------------------
     # Section 2 : Calculateur de taille de position
     # ---------------------------------------------------------------------------
-    st.subheader("2. Gestionnaire de Risque & Dimensionnement")
+    st.markdown("### 2. Gestionnaire de Risque & Dimensionnement")
 
     c_inst, c_acc, c_risk, c_stop = st.columns(4)
     with c_inst:
@@ -176,22 +186,19 @@ def render_discipline_page() -> None:
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric(
-        "Contrats autorisés (floor)",
-        f"{sizing_res.contracts} contrat(s)",
-        help="Arrondi inférieur math.floor pour ne jamais dépasser le risque alloué.",
-    )
-    s2.metric("Risque budget", f"{sizing_res.risk_budget_dollars:.2f} $")
-    s3.metric(
-        "Risque réel résultant",
-        f"{sizing_res.actual_risk_dollars:.2f} $ ({sizing_res.actual_risk_pct:.2f}%)",
-    )
-    s4.metric("Valeur du point", f"{sizing_res.point_value:.1f} $/pt")
+    with s1:
+        render_terminal_metric("Contrats autorisés", f"{sizing_res.contracts}x {inst}", subtext="Math.floor floor", status_kind="ok")
+    with s2:
+        render_terminal_metric("Budget risque", f"{sizing_res.risk_budget_dollars:.2f} $")
+    with s3:
+        render_terminal_metric("Risque réel", f"{sizing_res.actual_risk_dollars:.2f} $", subtext=f"{sizing_res.actual_risk_pct:.2f}% capital")
+    with s4:
+        render_terminal_metric("Valeur du point", f"{sizing_res.point_value:.1f} $/pt")
 
     if sizing_res.warning:
-        st.warning(f"⚠️ {sizing_res.warning}")
+        st.warning(f"[AVERTISSEMENT] {sizing_res.warning}")
     if sizing_res.prop_firm_warning:
-        st.error(f"🛑 {sizing_res.prop_firm_warning}")
+        st.error(f"[PROP FIRM VERROU] {sizing_res.prop_firm_warning}")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
@@ -199,7 +206,7 @@ def render_discipline_page() -> None:
     # ---------------------------------------------------------------------------
     # Section 3 : Checklist Pré-Trade Interactive
     # ---------------------------------------------------------------------------
-    st.subheader("3. Checklist Pré-Trade Interactive (Verdict GO / STOP)")
+    st.markdown("### 3. Checklist Pré-Trade Interactive (Verdict GO / STOP)")
 
     chk_p08 = st.checkbox(
         "1. J'ai consulté et validé le profil P08 de la séance (niveaux, scénarios, EM).",
@@ -224,13 +231,13 @@ def render_discipline_page() -> None:
 
     chk_verdict = evaluate_checklist(checklist_data, state, config)
 
-    st.markdown("### Verdict Pré-Trade")
+    st.markdown("#### Verdict Pré-Trade")
     if chk_verdict.verdict == ChecklistVerdict.GO:
         st.markdown(
             """
             <div class="badge-go">
-                🟢 VERDICT : GO — TRADING AUTORISÉ<br>
-                <span style="font-size: 0.9rem; font-weight: normal;">
+                VERDICT : GO — TRADING AUTORISÉ<br>
+                <span style="font-size: 0.82rem; font-weight: normal; color: #D1D4DC;">
                     Toutes les conditions de discipline et de risque sont satisfaites.
                 </span>
             </div>
@@ -241,8 +248,8 @@ def render_discipline_page() -> None:
         st.markdown(
             """
             <div class="badge-stop">
-                🔴 VERDICT : STOP — TRADING STRICTEMENT INTERDIT<br>
-                <span style="font-size: 0.9rem; font-weight: normal;">
+                VERDICT : STOP — TRADING STRICTEMENT INTERDIT<br>
+                <span style="font-size: 0.82rem; font-weight: normal; color: #D1D4DC;">
                     Ne prenez aucun ordre. Consultez les motifs bloquants ci-dessous.
                 </span>
             </div>
@@ -253,7 +260,7 @@ def render_discipline_page() -> None:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.write("**Motifs bloquants :**")
         for b in chk_verdict.blocking_reasons:
-            st.markdown(f"- ❌ {b}")
+            st.markdown(f"- **[MOTIF BLOQUANT]** {b}")
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.caption(

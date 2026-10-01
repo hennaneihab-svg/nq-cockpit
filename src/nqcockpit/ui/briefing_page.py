@@ -20,19 +20,19 @@ def render_briefing_page() -> None:
     try:
         st.set_page_config(
             page_title="NQ Cockpit · Briefing Pré-Séance",
-            page_icon="📄",
             layout="wide",
         )
     except StreamlitAPIException:
         pass
 
-    st.title("📄 Briefing Pré-Séance Consolidé")
+    st.title("BRIEFING PRÉ-SÉANCE CONSOLIDÉ")
     st.caption("Données agrégées sans prédiction ni biais directionnel — P02-P08 + P12")
 
     # ---------------------------------------------------------------------------
     # Sidebar / Options de génération
     # ---------------------------------------------------------------------------
-    st.sidebar.markdown("### ⚙️ Génération du Briefing")
+    st.sidebar.title("[05] BRIEFING PRE-SEANCE")
+    st.sidebar.markdown("### GÉNÉRATION DU BRIEFING")
     use_gemini = st.sidebar.checkbox("Générer résumé IA (Gemini)", value=False)
     use_telegram = st.sidebar.checkbox("Diffuser notification Telegram", value=False)
     dry_run = st.sidebar.checkbox("Mode Dry-run", value=True)
@@ -41,7 +41,7 @@ def render_briefing_page() -> None:
     briefing_files = list(briefing_dir.glob("briefing_*.md")) if briefing_dir.exists() else []
     briefing_files.sort(reverse=True)
 
-    if st.sidebar.button("🔄 Générer un nouveau briefing", type="primary"):
+    if st.sidebar.button("Générer un nouveau briefing", type="primary"):
         with st.spinner("Génération du briefing en cours..."):
             briefing = generate_briefing(
                 use_gemini=use_gemini,
@@ -56,7 +56,7 @@ def render_briefing_page() -> None:
 
     if not briefing and briefing_files:
         st.info(f"Dernier briefing archivé détecté : `{briefing_files[0].name}`")
-        if st.button("📖 Charger le dernier briefing archivé"):
+        if st.button("Charger le dernier briefing archivé"):
             content = briefing_files[0].read_text(encoding="utf-8")
             st.markdown(content)
             return

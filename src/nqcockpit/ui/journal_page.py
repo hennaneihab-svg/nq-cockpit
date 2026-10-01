@@ -1,8 +1,9 @@
 """Page Streamlit P09 — Journal de bord et métriques de performance.
 
-Thème sombre cohérent avec cockpit_page.py.
-Toutes les valeurs affichées incluent leur horodatage / échantillon.
-Sous les seuils : "échantillon insuffisant" visible, jamais masqué.
+Design System Bloomberg x TradingView :
+- Thème Slate #131722, bordures 1px #2A2E39, accents marque #FA7900
+- Nombres et résultats au format tabulaire
+- Statut "échantillon insuffisant" visible et non masqué
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from nqcockpit.journal.models import (
     VolRegime,
 )
 from nqcockpit.journal.store import delete_trade, load_trades, save_trade
+from nqcockpit.ui.components import render_terminal_metric
 from nqcockpit.ui.db import get_ui_db
 
 
@@ -43,25 +45,25 @@ def render_journal_page() -> None:
     try:
         st.set_page_config(
             page_title="NQ Cockpit · Journal",
-            page_icon="📓",
             layout="wide",
         )
     except StreamlitAPIException:
         pass
 
-    # Thème sombre inline
+    # CSS Bloomberg x TradingView
     st.markdown("""
     <style>
-    body, .main { background-color: #0d1117; color: #e6edf3; }
-    .stDataFrame, .stTable { background-color: #161b22; }
-    .metric-card {
-        background-color: #161b22; border: 1px solid #30363d;
-        border-radius: 8px; padding: 12px 16px; margin: 4px 0;
+    .stApp { background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif; }
+    .stDataFrame, .stTable { background-color: #131722; border: 1px solid #2A2E39; }
+    .insuf { color: #787B86; font-style: italic; font-family: ui-monospace, monospace; }
+    .section-header {
+        font-family: ui-sans-serif, sans-serif;
+        color: #FA7900;
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
     }
-    .ok { color: #3fb950; font-weight: bold; }
-    .warn { color: #d29922; font-weight: bold; }
-    .err { color: #f85149; font-weight: bold; }
-    .insuf { color: #8b949e; font-style: italic; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -77,22 +79,22 @@ def render_journal_page() -> None:
     # Sidebar — navigation
     # ---------------------------------------------------------------------------
 
-    st.sidebar.title("📓 Journal P09")
+    st.sidebar.markdown('<div class="section-header">JOURNAL SECTIONS</div>', unsafe_allow_html=True)
     page = st.sidebar.radio(
-        "Section",
+        "Section Journal",
         ["Enregistrer un trade", "Journal du jour", "Performance globale", "Coaching"],
         index=0,
     )
 
     now_display = datetime.now(tz_display)
-    st.sidebar.markdown(f"**Heure Alger** : {now_display.strftime('%Y-%m-%d %H:%M')}")
+    st.sidebar.markdown(f"**Heure Alger** : `{now_display.strftime('%Y-%m-%d %H:%M')}`")
 
     # ---------------------------------------------------------------------------
     # Page 1 — Enregistrer un trade
     # ---------------------------------------------------------------------------
 
     if page == "Enregistrer un trade":
-        st.header("➕ Nouveau trade")
+        st.markdown('<div class="section-header">SAISIE D\'UN NOUVEAU TRADE</div>', unsafe_allow_html=True)
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -136,11 +138,11 @@ def render_journal_page() -> None:
             notes = st.text_area("Notes", height=80)
             screenshot_path = st.text_input("Chemin capture (optionnel)")
 
-        if st.button("💾 Enregistrer le trade", type="primary"):
+        if st.button("Enregistrer le trade", type="primary"):
             if entry_price == 0 or stop_price == 0 or exit_price == 0:
-                st.error("❌ Prix d'entrée, stop et sortie obligatoires.")
+                st.error("[ERREUR] Prix d'entrée, stop et sortie obligatoires.")
             elif abs(entry_price - stop_price) < 0.01:
-                st.error("❌ Entrée et Stop identiques — risque initial nul.")
+                st.error("[ERREUR] Entrée et Stop identiques — risque initial nul.")
             else:
                 last_sl_mins = (
                     minutes_after_last_sl if minutes_after_last_sl > 0 else None
@@ -175,7 +177,7 @@ def render_journal_page() -> None:
 
                 r_str = f"{trade.r_realized:+.3f}R"
                 st.success(
-                    f"✅ Trade enregistré · "
+                    f"[CONFIRMATION] Trade enregistré · "
                     f"R réalisé : **{r_str}** · Résultat : **{trade.outcome.value}**"
                 )
                 st.rerun()
@@ -185,7 +187,7 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Journal du jour":
-        st.header("📅 Journal du jour")
+        st.markdown('<div class="section-header">JOURNAL DE SÉANCE DÉTAILLÉ</div>', unsafe_allow_html=True)
 
         today_ny = datetime.now(tz_market).date()
         selected_date = st.date_input("Date séance", value=today_ny)
@@ -200,22 +202,25 @@ def render_journal_page() -> None:
 
             # KPI cards
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Trades", stats.n_trades)
-            c2.metric("Wins / Losses", f"{stats.n_wins} / {stats.n_losses}")
-
-            r_color = "normal" if stats.r_total >= 0 else "inverse"
-            c3.metric("R total", f"{stats.r_total:+.3f}R", delta_color=r_color)
-            c4.metric("Conformité", f"{stats.compliance_rate:.0%}")
+            with c1:
+                render_terminal_metric("Trades", str(stats.n_trades))
+            with c2:
+                render_terminal_metric("Wins / Losses", f"{stats.n_wins} / {stats.n_losses}")
+            with c3:
+                r_kind = "pos" if stats.r_total >= 0 else "neg"
+                render_terminal_metric("R total", f"{stats.r_total:+.3f}R", status_kind=r_kind)
+            with c4:
+                render_terminal_metric("Conformité", f"{stats.compliance_rate:.0%}")
 
             if stats.limit_hit:
                 limit_r = config.rules.daily_loss_limit_r
                 st.error(
-                    f"🔴 LIMITE JOURNALIÈRE ATTEINTE — "
+                    f"[VERROU] LIMITE JOURNALIÈRE ATTEINTE — "
                     f"{stats.r_total:+.3f}R (limite : -{limit_r}R)"
                 )
 
             # Tableau des trades
-            st.subheader("Trades")
+            st.markdown("#### Liste des Trades")
             rows = []
             for t in sorted(trades, key=lambda x: x.recorded_at):
                 rows.append({
@@ -237,7 +242,7 @@ def render_journal_page() -> None:
                 t for t in trades if t.screenshot_path and t.screenshot_path.strip()
             ]
             if screenshot_trades:
-                st.subheader("🖼️ Captures d'écran associées")
+                st.markdown("#### Captures d'écran associées")
                 for t in screenshot_trades:
                     p_img = Path(t.screenshot_path)
                     st.write(
@@ -254,27 +259,26 @@ def render_journal_page() -> None:
                         )
                     else:
                         st.warning(
-                            f"⚠️ Image introuvable : `{t.screenshot_path}` "
-                            "(fichier déplacé, renommé ou supprimé sur le disque)."
+                            f"[AVERTISSEMENT] Image introuvable : `{t.screenshot_path}`"
                         )
 
             # Violations
             if stats.violations:
-                st.subheader(f"⚠️ Violations ({len(stats.violations)})")
+                st.markdown(f"#### Violations de Règles ({len(stats.violations)})")
                 for v in stats.violations:
                     st.warning(f"**[{v.violation.value}]** {v.detail}")
 
             # Tilt alerts
             if stats.tilt_alerts:
-                st.subheader(f"🔔 Alertes Tilt ({len(stats.tilt_alerts)})")
+                st.markdown(f"#### Alertes de Tilt ({len(stats.tilt_alerts)})")
                 for a in stats.tilt_alerts:
-                    st.error(f"**Tilt** : {a.reason}")
+                    st.error(f"**[TILT]** {a.reason}")
 
             # Suppression
-            st.subheader("🗑 Supprimer un trade")
+            st.markdown("#### Supprimer un trade")
             trade_ids = [t.trade_id for t in trades]
             to_delete = st.selectbox("Trade ID à supprimer", ["—"] + trade_ids)
-            if to_delete != "—" and st.button("Supprimer", type="secondary"):
+            if to_delete != "—" and st.button("Supprimer le trade sélectionné"):
                 n = delete_trade(conn, to_delete)
                 if n:
                     st.success(f"Trade {to_delete[:8]}… supprimé.")
@@ -285,7 +289,7 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Performance globale":
-        st.header("📊 Performance globale")
+        st.markdown('<div class="section-header">PERFORMANCE GLOBALE AGREGÉE</div>', unsafe_allow_html=True)
 
         all_trades = load_trades(conn)
         if not all_trades:
@@ -300,53 +304,45 @@ def render_journal_page() -> None:
 
             if not stats.sample_sufficient:
                 msg = (
-                    f'<p class="insuf">⚠️ Échantillon insuffisant : '
+                    f'<p class="insuf">[STATUT ÉCHANTILLON] Échantillon insuffisant : '
                     f'{stats.n_trades}/{MIN_TRADES} trades. '
-                    "Les statistiques avancées (espérance, drawdown, profit factor) "
-                    "ne sont pas encore calculées.</p>"
+                    "Les statistiques avancées ne sont pas encore calculées.</p>"
                 )
                 st.markdown(msg, unsafe_allow_html=True)
 
             # Métriques de base (disponibles même sans seuil)
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Trades totaux", stats.n_trades)
-            c2.metric(
-                "Win rate",
-                f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—",
-                help=f"IC 95% Wilson : [{stats.win_rate_ci_low:.1%}, {stats.win_rate_ci_high:.1%}]"
-                if stats.win_rate_ci_low is not None else None,
-            )
-            compl_val = f"{stats.compliance_rate:.0%}" if stats.compliance_rate else "—"
-            c3.metric("Conformité", compl_val)
-            c4.metric(
-                "Max loss streak",
-                stats.max_loss_streak if stats.sample_sufficient else "—",
-            )
+            with c1:
+                render_terminal_metric("Trades totaux", str(stats.n_trades))
+            with c2:
+                wr_str = f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—"
+                render_terminal_metric("Win Rate", wr_str)
+            with c3:
+                compl_val = f"{stats.compliance_rate:.0%}" if stats.compliance_rate else "—"
+                render_terminal_metric("Conformité", compl_val)
+            with c4:
+                streak_val = str(stats.max_loss_streak) if stats.sample_sufficient else "—"
+                render_terminal_metric("Max Loss Streak", streak_val)
 
             if stats.sample_sufficient:
                 st.divider()
                 c5, c6, c7, c8 = st.columns(4)
-                exp_help = (
-                    f"IC 95% : [{stats.expectancy_ci_low:+.3f}, {stats.expectancy_ci_high:+.3f}]"
-                    if stats.expectancy_ci_low is not None else None
-                )
-                c5.metric(
-                    "Espérance (R)",
-                    f"{stats.expectancy_r:+.3f}R" if stats.expectancy_r is not None else "—",
-                    help=exp_help,
-                )
-                pf_val = f"{stats.profit_factor:.2f}" if stats.profit_factor else "—"
-                c6.metric("Profit factor", pf_val)
-                c7.metric("Max DD (R)", f"-{stats.max_drawdown_r:.3f}R")
-                c8.metric(
-                    "Espérance conformes",
-                    f"{stats.expectancy_r_compliant:+.3f}R"
-                    if stats.expectancy_r_compliant is not None else "insuffisant",
-                )
+                with c5:
+                    exp_r_str = f"{stats.expectancy_r:+.3f}R" if stats.expectancy_r is not None else "—"
+                    exp_kind = "pos" if stats.expectancy_r and stats.expectancy_r >= 0 else "neg"
+                    render_terminal_metric("Espérance (R)", exp_r_str, status_kind=exp_kind)
+                with c6:
+                    pf_val = f"{stats.profit_factor:.2f}" if stats.profit_factor else "—"
+                    render_terminal_metric("Profit Factor", pf_val)
+                with c7:
+                    render_terminal_metric("Max DD (R)", f"-{stats.max_drawdown_r:.3f}R", status_kind="neg")
+                with c8:
+                    exp_c_str = f"{stats.expectancy_r_compliant:+.3f}R" if stats.expectancy_r_compliant is not None else "insuffisant"
+                    render_terminal_metric("Espérance Conformes", exp_c_str)
 
             # Segmentation
             st.divider()
-            st.subheader("Performance par segment")
+            st.markdown("#### Performance par Segment")
             seg_by = st.selectbox(
                 "Segmenter par",
                 ["setup_tag", "gamma_regime", "vol_regime", "day_of_week", "event_risk"],
@@ -356,19 +352,19 @@ def render_journal_page() -> None:
             seg_rows = []
             for label, s in seg.items():
                 suf = (
-                    "✅" if s.sample_sufficient
-                    else f"❌ ({s.n_trades}/{s.min_trades_required})"
+                    "OK" if s.sample_sufficient
+                    else f"INSUFFISANT ({s.n_trades}/{s.min_trades_required})"
                 )
                 seg_rows.append({
                     "Segment": label,
                     "n": s.n_trades,
-                    "Win rate": f"{s.win_rate:.1%}" if s.win_rate is not None else "—",
+                    "Win Rate": f"{s.win_rate:.1%}" if s.win_rate is not None else "—",
                     "Espérance (R)": (
                         f"{s.expectancy_r:+.3f}" if s.expectancy_r is not None
                         else "insuf."
                     ),
-                    "Profit factor": f"{s.profit_factor:.2f}" if s.profit_factor else "—",
-                    "Suffisant": suf,
+                    "Profit Factor": f"{s.profit_factor:.2f}" if s.profit_factor else "—",
+                    "Échantillon": suf,
                 })
 
             st.dataframe(seg_rows, use_container_width=True)
@@ -378,7 +374,7 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Coaching":
-        st.header("🎯 Rapport de coaching")
+        st.markdown('<div class="section-header">RAPPORT DE COACHING ET ANALYTICS</div>', unsafe_allow_html=True)
 
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -393,37 +389,37 @@ def render_journal_page() -> None:
 
             if report.insufficient_data:
                 st.warning(
-                    f"⚠️ Données insuffisantes pour {period_label} : "
+                    f"[DONNÉES INSUFFISANTES] {period_label} : "
                     f"{report.stats.n_trades if report.stats else 0}/{MIN_TRADES} trades. "
                     "Rapport partiel."
                 )
 
-            st.subheader(f"Rapport {period_type} · {period_label}")
+            st.markdown(f"#### Rapport {period_type.upper()} · {period_label}")
             st.caption(f"Généré à {report.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
 
             # Top fuites
-            st.markdown("#### 🔍 Top 3 fuites chiffrées")
+            st.markdown("#### Top 3 Fuites Chiffrées")
             for i, leak in enumerate(report.top_leaks, 1):
                 st.markdown(f"**{i}.** {leak}")
 
             # Règle & force
             col3, col4 = st.columns(2)
             with col3:
-                st.markdown("#### 📌 Règle à renforcer")
+                st.markdown("#### Règle à Renforcer")
                 st.info(report.rule_to_reinforce or "—")
             with col4:
-                st.markdown("#### 💪 Force à conserver")
+                st.markdown("#### Force à Conserver")
                 st.success(report.strength_to_keep or "—")
 
             # Objectifs
-            st.markdown("#### 🎯 Objectifs mesurables")
+            st.markdown("#### Objectifs Mesurables")
             for goal in report.measurable_goals:
                 st.markdown(f"- {goal}")
 
             # Stats résumé
             if report.stats and report.stats.sample_sufficient:
                 st.divider()
-                st.markdown("#### Statistiques de la période")
+                st.markdown("#### Statistiques de la Période")
                 d = report.stats.to_dict()
                 st.json(d)
 
