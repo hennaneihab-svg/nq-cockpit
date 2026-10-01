@@ -143,6 +143,9 @@ def generate_period_report(
     curr_trades = filter_trades_by_date_range(trades, curr_start, curr_end)
     prev_trades = filter_trades_by_date_range(trades, prev_start, prev_end)
 
+    # Trades hors période courante (présents en base mais exclus du filtrage)
+    excluded_count = len(trades) - len(curr_trades)
+
     curr_stats: PerformanceStats = compute_performance_stats(
         curr_trades, config=config
     )
@@ -202,6 +205,16 @@ def generate_period_report(
             "> [!NOTE]",
             f"> **Échantillon suffisant :** {len(curr_trades)} trades enregistrés "
             f"(>= seuil de validation {min_required}).",
+            "",
+        ])
+
+    # Mention explicite des trades hors période pour éviter toute confusion
+    if excluded_count > 0:
+        excl_noun = "trade" if excluded_count == 1 else "trades"
+        md_lines.extend([
+            f"> ℹ️ **{excluded_count} {excl_noun} hors période exclus** : "
+            f"présent(s) en base mais antérieur(s) au {curr_start} ou postérieur(s) "
+            f"au {curr_end}, donc non comptabilisé(s) dans ce rapport.",
             "",
         ])
 

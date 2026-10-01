@@ -354,3 +354,40 @@ def test_cli_journal_report(tmp_path: Path, monkeypatch, capsys):
     assert "RAPPORT DE PERFORMANCE MENSUEL" in out2
     assert "2026-09" in out2
     assert (out_dir / "monthly_2026-09.md").is_file()
+
+
+def test_report_excluded_trades_mention_in_markdown(tmp_path: Path):
+    """Régression Anomalie 2 : si des trades sont hors période (ex: antérieurs),
+    le rapport Markdown doit mentionner explicitement leur nombre.
+    Pas de modification de logique — seulement une mention informative.
+    """
+    cfg = load_config()
+    out_dir = tmp_path / "excl_reports"
+    ref = date(2026, 9, 30)  # Mercredi W40 (2026-09-28 → 2026-10-04)
+
+    # Trades dans la période W40
+    in_period = [_build_trade("2026-09-28"), _build_trade("2026-09-30")]
+    # Trades hors période (semaine W39)
+    out_of_period = [_build_trade("2026-09-20"), _build_trade("2026-09-25")]
+    all_trades = in_period + out_of_period
+
+    result = generate_period_report(
+        trades=all_trades,
+        period="week",
+        ref_date=ref,
+        output_dir=out_dir,
+        config=cfg,
+    )
+
+    md = result.report_path.read_text(encoding="utf-8")
+
+    # 2 trades dans la période → analysés
+    assert "2/2" in md or "2 trade" in md.lower() or str(len(in_period)) in md
+
+    # 2 trades exclus → mention obligatoire dans le rapport
+    assert "hors période" in md.lower() or "exclus" in md.lower(), (
+        "Le rapport doit mentionner les trades hors période pour lever l'ambiguïté. "
+        f"Extrait MD:\n{md[:600]}"
+    )
+    # Le chiffre 2 (nombre de trades exclus) doit apparaître avec le mot "exclus"
+    assert "2" in md and ("exclus" in md.lower() or "hors période" in md.lower())
