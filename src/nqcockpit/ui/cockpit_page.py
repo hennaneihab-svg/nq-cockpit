@@ -28,12 +28,15 @@ TZ_ET = ZoneInfo("America/New_York")
 
 def render_cockpit():
     """Rendu complet de la page Cockpit."""
-    st.set_page_config(
-        page_title="NQ Cockpit — Profil de Séance",
-        page_icon="⚡",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
+    try:
+        st.set_page_config(
+            page_title="NQ Cockpit — Profil de Séance",
+            page_icon="⚡",
+            layout="wide",
+            initial_sidebar_state="collapsed",
+        )
+    except Exception:
+        pass
 
     # Injection CSS Thème Sombre & Typographie Professionnelle
     st.markdown(

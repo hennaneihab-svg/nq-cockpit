@@ -355,11 +355,14 @@ def build_compliance_timeline_figure(
 
 def render_coaching_app() -> None:
     """Point d'entrée principal de l'interface Streamlit de coaching."""
-    st.set_page_config(
-        page_title="NQ Cockpit · Coaching & Analytics",
-        page_icon="🎯",
-        layout="wide",
-    )
+    try:
+        st.set_page_config(
+            page_title="NQ Cockpit · Coaching & Analytics",
+            page_icon="🎯",
+            layout="wide",
+        )
+    except Exception:
+        pass
 
     # Thème sombre CSS personnalisé
     st.markdown(

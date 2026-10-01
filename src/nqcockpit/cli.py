@@ -1967,9 +1967,9 @@ def _handle_journal(args: Any) -> int:
         import subprocess  # noqa: S603
         import sys
         from pathlib import Path
-        port = getattr(args, "port", 8502)
-        page_path = Path(__file__).parent / "ui" / "journal_page.py"
-        print(f"[nqcockpit] Journal Streamlit sur http://localhost:{port}")
+        port = getattr(args, "port", 8501)
+        page_path = Path(__file__).parent / "ui" / "app.py"
+        print(f"[nqcockpit] Terminal Multipage Streamlit sur http://localhost:{port}")
         try:
             subprocess.run(  # noqa: S603
                 [sys.executable, "-m", "streamlit", "run", str(page_path),
@@ -1979,7 +1979,7 @@ def _handle_journal(args: Any) -> int:
                 check=True,
             )
         except KeyboardInterrupt:
-            print("\n[nqcockpit] Journal arrêté.")
+            print("\n[nqcockpit] Interface arrêtée.")
         return 0
 
     if action == "coaching-ui":
@@ -1987,9 +1987,9 @@ def _handle_journal(args: Any) -> int:
         import sys
         from pathlib import Path
 
-        port = getattr(args, "port", 8504)
-        page_path = Path(__file__).parent / "ui" / "coaching_page.py"
-        print(f"[nqcockpit] Coaching & Analytics Streamlit sur http://localhost:{port}")
+        port = getattr(args, "port", 8501)
+        page_path = Path(__file__).parent / "ui" / "app.py"
+        print(f"[nqcockpit] Terminal Multipage Streamlit sur http://localhost:{port}")
         try:
             subprocess.run(  # noqa: S603
                 [
@@ -2001,7 +2001,7 @@ def _handle_journal(args: Any) -> int:
                 check=True,
             )
         except KeyboardInterrupt:
-            print("\n[nqcockpit] Coaching UI arrêté.")
+            print("\n[nqcockpit] Interface arrêtée.")
         return 0
 
     if action == "backup":
@@ -2290,9 +2290,9 @@ def _handle_discipline(args: Any) -> int:
         import sys
         from pathlib import Path
 
-        port = getattr(args, "port", 8503)
-        page_path = Path(__file__).parent / "ui" / "discipline_page.py"
-        print(f"[nqcockpit] Discipline Streamlit sur http://localhost:{port}")
+        port = getattr(args, "port", 8501)
+        page_path = Path(__file__).parent / "ui" / "app.py"
+        print(f"[nqcockpit] Terminal Multipage Streamlit sur http://localhost:{port}")
         try:
             subprocess.run(  # noqa: S603
                 [
@@ -2304,7 +2304,7 @@ def _handle_discipline(args: Any) -> int:
                 check=True,
             )
         except KeyboardInterrupt:
-            print("\n[nqcockpit] Discipline arrêtée.")
+            print("\n[nqcockpit] Interface arrêtée.")
         return 0
 
     conn = init_journal_db(config.data.db_path)
@@ -2420,24 +2420,33 @@ def _handle_discipline(args: Any) -> int:
 
 
 def _handle_ui(args: Any) -> int:
-    """Lance l'interface Streamlit Cockpit (P08)."""
+    """Lance l'interface Streamlit consolidée multipage (P13)."""
     import subprocess  # noqa: S603
     import sys
     from pathlib import Path
 
     port = getattr(args, "port", 8501)
-    page_path = Path(__file__).parent / "ui" / "cockpit_page.py"
+    page_path = Path(__file__).parent / "ui" / "app.py"
 
-    print(f"[nqcockpit] Lancement de l'interface Streamlit sur http://localhost:{port}")
-    print(f"[nqcockpit] Page : {page_path}")
+    print(f"[nqcockpit] Lancement du terminal multipage Streamlit sur http://localhost:{port}")
+    print(f"[nqcockpit] Application : {page_path}")
     print("[nqcockpit] Ctrl+C pour arrêter.")
 
     try:
         subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "streamlit", "run", str(page_path),
-             "--server.port", str(port),
-             "--server.headless", "true",
-             "--theme.base", "dark"],
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(page_path),
+                "--server.port",
+                str(port),
+                "--server.headless",
+                "true",
+                "--theme.base",
+                "dark",
+            ],
             check=True,
         )
     except KeyboardInterrupt:
