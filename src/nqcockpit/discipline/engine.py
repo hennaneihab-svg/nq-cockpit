@@ -66,7 +66,16 @@ def evaluate_session_state(
 
     trades_taken = len(session_trades)
     max_trades = config.rules.max_trades_per_day
-    trades_remaining = max(0, max_trades - trades_taken)
+
+    # Si la règle d'annulation du trade 2 après perte du trade 1 est active et que trade 1 est en perte,
+    # le nombre maximal de trades autorisés pour cette séance est ramené à 1.
+    trade1_loss = (
+        config.rules.cancel_trade2_if_trade1_loss
+        and len(session_trades) >= 1
+        and (session_trades[0].outcome == TradeOutcome.LOSS or session_trades[0].r_realized < 0)
+    )
+    effective_max_trades = 1 if trade1_loss else max_trades
+    trades_remaining = max(0, effective_max_trades - trades_taken)
     r_today = round(sum(t.r_realized for t in session_trades), 4)
 
     # 3. Calcul du Cooldown post-SL
@@ -103,27 +112,29 @@ def evaluate_session_state(
             f"<= -{config.rules.daily_loss_limit_r:.1f}R). Séance verrouillée."
         )
 
-    # Verrou B : Nombre maximal de trades atteint
-    elif trades_taken >= max_trades:
-        status = SessionDisciplineStatus.LOCKED_MAX_TRADES
-        can_trade = False
-        reasons.append(
-            f"Nombre maximal de trades atteint ({trades_taken}/{max_trades}). "
-            "Séance terminée."
-        )
-
-    # Verrou C : Annulation trade 2 si trade 1 en perte
-    elif (
-        config.rules.cancel_trade2_if_trade1_loss
-        and trades_taken >= 1
-        and (session_trades[0].outcome == TradeOutcome.LOSS or session_trades[0].r_realized < 0)
-    ):
+    # Verrou B : Annulation trade 2 si trade 1 en perte (priorité sur max trades)
+    elif trade1_loss:
         status = SessionDisciplineStatus.LOCKED_TRADE1_LOSS
         can_trade = False
         reasons.append(
             "Trade 2 annulé : le premier trade de la séance a terminé en perte "
             "(règle stricte anti-revenge trading)."
         )
+
+    # Verrou C : Nombre maximal de trades atteint ou dépassé
+    elif trades_taken >= max_trades:
+        status = SessionDisciplineStatus.LOCKED_MAX_TRADES
+        can_trade = False
+        if trades_taken > max_trades:
+            reasons.append(
+                f"Nombre maximal de trades dépassé ({trades_taken}/{max_trades} trades enregistrés). "
+                "Séance terminée."
+            )
+        else:
+            reasons.append(
+                f"Nombre maximal de trades atteint ({max_trades}/{max_trades}). "
+                "Séance terminée."
+            )
 
     # Verrou D : Cooldown post-SL actif
     elif cooldown_remaining_sec > 0.0:
@@ -152,7 +163,7 @@ def evaluate_session_state(
         can_trade=can_trade,
         current_window_name=active_window,
         trades_taken_today=trades_taken,
-        max_trades_allowed=max_trades,
+        max_trades_allowed=effective_max_trades,
         trades_remaining=trades_remaining,
         r_realized_today=r_today,
         daily_loss_limit_r=config.rules.daily_loss_limit_r,

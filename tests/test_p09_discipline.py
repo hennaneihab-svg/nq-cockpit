@@ -171,6 +171,48 @@ def test_state_machine_max_trades_lockout(config):
     assert any("maximal" in r.lower() for r in state.lock_reasons)
 
 
+def test_state_machine_max_trades_exceeded_shows_over_quota_message(config):
+    """Régression Anomalie 1 : 3 trades WIN enregistrés alors que max=2
+    → LOCKED_MAX_TRADES avec message '3/2' (dépassé, pas 'atteint').
+    """
+    dt_16h = datetime(2026, 9, 30, 15, 0, tzinfo=timezone.utc)
+    t1 = _make_trade(session_date="2026-09-30", outcome=TradeOutcome.WIN, r_realized=1.5)
+    t2 = _make_trade(session_date="2026-09-30", outcome=TradeOutcome.WIN, r_realized=1.0)
+    t3 = _make_trade(session_date="2026-09-30", outcome=TradeOutcome.WIN, r_realized=0.5)
+
+    state = evaluate_session_state([t1, t2, t3], dt_16h, config)
+
+    assert state.can_trade is False
+    assert state.status == SessionDisciplineStatus.LOCKED_MAX_TRADES
+    assert state.trades_remaining == 0
+    # Le message doit mentionner "3/2" (dépassé) et non "2/2" (atteint)
+    combined = " ".join(state.lock_reasons)
+    assert "3/2" in combined, f"Message attendu '3/2', obtenu : {combined}"
+    assert "dépassé" in combined.lower(), f"Mot 'dépassé' attendu dans : {combined}"
+
+
+def test_state_machine_trade1_loss_locks_with_effective_max_one(config):
+    """Régression Anomalie 1 : trade 1 LOSS → LOCKED_TRADE1_LOSS prioritaire.
+    Avec trade1 en perte, effective_max_trades=1 (réduit par la règle),
+    trades_taken=1 → trades_remaining=0, verrou B actif (pas verrou C).
+    """
+    dt_16h = datetime(2026, 9, 30, 15, 0, tzinfo=timezone.utc)
+    t1 = _make_trade(
+        session_date="2026-09-30",
+        outcome=TradeOutcome.LOSS,
+        r_realized=-1.0,
+        recorded_at=datetime(2026, 9, 30, 14, 30, tzinfo=timezone.utc),
+    )
+
+    state = evaluate_session_state([t1], dt_16h, config)
+
+    assert state.can_trade is False
+    assert state.status == SessionDisciplineStatus.LOCKED_TRADE1_LOSS
+    assert state.max_trades_allowed == 1
+    assert state.trades_remaining == 0
+    assert any("anti-revenge" in r.lower() for r in state.lock_reasons)
+
+
 def test_state_machine_daily_loss_limit(config):
     """Perte cumulée <= -2R -> LOCKED_DAILY_LOSS."""
     dt_16h = datetime(2026, 9, 30, 15, 0, tzinfo=timezone.utc)
