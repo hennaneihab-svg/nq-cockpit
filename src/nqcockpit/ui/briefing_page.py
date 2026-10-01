@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.briefing.engine import generate_briefing
 from nqcockpit.ui.components import render_degraded_banner, render_status_badge
@@ -22,7 +23,7 @@ def render_briefing_page() -> None:
             page_icon="📄",
             layout="wide",
         )
-    except Exception:
+    except StreamlitAPIException:
         pass
 
     st.title("📄 Briefing Pré-Séance Consolidé")

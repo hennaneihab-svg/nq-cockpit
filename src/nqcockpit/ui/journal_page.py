@@ -7,13 +7,13 @@ Sous les seuils : "échantillon insuffisant" visible, jamais masqué.
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.journal.engine import (
@@ -29,17 +29,13 @@ from nqcockpit.journal.models import (
     TradeEntry,
     VolRegime,
 )
-from nqcockpit.journal.store import delete_trade, init_journal_db, load_trades, save_trade
+from nqcockpit.journal.store import delete_trade, load_trades, save_trade
+from nqcockpit.ui.db import get_ui_db
 
 
 @st.cache_resource
 def _get_config():
     return load_config()
-
-
-@st.cache_resource
-def _get_db(db_path: str) -> sqlite3.Connection:
-    return init_journal_db(db_path)
 
 
 def render_journal_page() -> None:
@@ -50,7 +46,7 @@ def render_journal_page() -> None:
             page_icon="📓",
             layout="wide",
         )
-    except Exception:
+    except StreamlitAPIException:
         pass
 
     # Thème sombre inline
@@ -73,7 +69,7 @@ def render_journal_page() -> None:
     tz_display = ZoneInfo(config.timezones.display)
     tz_market = ZoneInfo(config.timezones.market)
     db_path = Path(config.data.db_path)
-    conn = _get_db(str(db_path))
+    conn = get_ui_db(str(db_path))
 
     MIN_TRADES = config.validation.min_sessions
 

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.discipline.engine import (
@@ -24,7 +25,8 @@ from nqcockpit.discipline.models import (
     SessionDisciplineStatus,
 )
 from nqcockpit.discipline.risk import compute_position_size
-from nqcockpit.journal.store import init_journal_db, load_trades
+from nqcockpit.journal.store import load_trades
+from nqcockpit.ui.db import get_ui_db
 
 
 def render_discipline_page() -> None:
@@ -35,7 +37,7 @@ def render_discipline_page() -> None:
             page_icon="🛡️",
             layout="wide",
         )
-    except Exception:
+    except StreamlitAPIException:
         pass
 
     # Thème sombre
@@ -68,7 +70,7 @@ def render_discipline_page() -> None:
     )
 
     config = load_config()
-    conn = init_journal_db(config.data.db_path)
+    conn = get_ui_db(config.data.db_path)
     trades = load_trades(conn)
 
     now_utc = datetime.now(timezone.utc)

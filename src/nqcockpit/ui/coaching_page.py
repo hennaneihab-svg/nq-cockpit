@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import AppConfig, load_config
 from nqcockpit.journal.engine import (
@@ -41,7 +42,8 @@ from nqcockpit.journal.reports import (
     filter_trades_by_date_range,
     get_period_bounds,
 )
-from nqcockpit.journal.store import init_journal_db, load_trades
+from nqcockpit.journal.store import load_trades
+from nqcockpit.ui.db import get_ui_db
 
 # ---------------------------------------------------------------------------
 # Thème et Configuration Plotly
@@ -361,7 +363,7 @@ def render_coaching_app() -> None:
             page_icon="🎯",
             layout="wide",
         )
-    except Exception:
+    except StreamlitAPIException:
         pass
 
     # Thème sombre CSS personnalisé
@@ -392,7 +394,7 @@ def render_coaching_app() -> None:
     today_ny = datetime.now(tz_market).date()
 
     db_path_str = os.getenv("NQ_DATA_DB_PATH", config.data.db_path)
-    conn = init_journal_db(db_path_str)
+    conn = get_ui_db(db_path_str)
     all_trades = load_trades(conn)
 
     # -----------------------------------------------------------------------

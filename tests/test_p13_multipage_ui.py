@@ -1,14 +1,18 @@
 """Tests unitaires P13 — UI Finale Consolidée Multipage et Design System.
 
-Vérifie l'importabilité des pages, la structure de l'application multipage,
-les composants du design system et la non-directionnalité des libellés UI.
+Vérifie l'importabilité des pages, l'exécution réelle des composants et renderers UI,
+la structure de l'application multipage, et la non-directionnalité des libellés UI.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
+import streamlit as st
+
+from nqcockpit.briefing.models import PreSessionBriefing
 from nqcockpit.ui.app import main as app_main
 from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_app
@@ -18,6 +22,7 @@ from nqcockpit.ui.components import (
     render_status_badge,
     render_terminal_metric,
 )
+from nqcockpit.ui.db import get_ui_db
 from nqcockpit.ui.discipline_page import render_discipline_page
 from nqcockpit.ui.journal_page import render_journal_page
 
@@ -44,7 +49,6 @@ def test_streamlit_config_exists():
 
 def test_ui_components_export():
     """Vérifie l'exécution des fonctions de rendu de composants UI."""
-    # Les fonctions utilisent streamlit, vérifions qu'elles ne lèvent pas d'erreur d'importation
     assert callable(render_status_badge)
     assert callable(render_degraded_banner)
     assert callable(render_terminal_metric)
@@ -63,3 +67,40 @@ def test_non_directional_ui_labels():
         assert not matches, (
             f"Fichier UI {py_file.name} contient des termes directionnels interdits : {matches}"
         )
+
+
+def test_render_briefing_page_execution():
+    """Exécute réellement render_briefing_page avec un objet PreSessionBriefing actif."""
+    briefing = PreSessionBriefing(
+        timestamp_utc=datetime.now(timezone.utc),
+        session_date_ny="2026-10-01",
+        timestamp_algiers_str="2026-10-01 04:00:00",
+        status="OK",
+        status_warnings=[],
+        markdown_briefing="# Briefing Test Multipage P13",
+    )
+    st.session_state["current_briefing"] = briefing
+
+    # Valide l'accès aux deux propriétés d'horodatage sans AttributeError
+    assert briefing.timestamp_algiers_str == "2026-10-01 04:00:00"
+    assert briefing.timestamp_alg == "2026-10-01 04:00:00"
+
+    # L'exécution réelle de la page ne doit pas lever d'exception
+    render_briefing_page()
+
+
+def test_render_discipline_page_execution():
+    """Exécute réellement render_discipline_page."""
+    render_discipline_page()
+
+
+def test_render_cockpit_execution():
+    """Exécute réellement render_cockpit."""
+    render_cockpit()
+
+
+def test_ui_db_connection_cached():
+    """Vérifie la centralisation et la mise en cache de la connexion SQLite UI."""
+    conn1 = get_ui_db()
+    conn2 = get_ui_db()
+    assert conn1 is conn2, "get_ui_db() doit retourner une instance unique mise en cache"

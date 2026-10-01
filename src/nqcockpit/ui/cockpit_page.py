@@ -18,6 +18,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
@@ -35,7 +36,7 @@ def render_cockpit():
             layout="wide",
             initial_sidebar_state="collapsed",
         )
-    except Exception:
+    except StreamlitAPIException:
         pass
 
     # Injection CSS Thème Sombre & Typographie Professionnelle

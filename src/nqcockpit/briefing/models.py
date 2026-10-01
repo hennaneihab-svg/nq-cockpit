@@ -56,3 +56,8 @@ class PreSessionBriefing:
     gemini_result: Optional[GeminiResult] = None
     telegram_result: Optional[TelegramResult] = None
     output_path: Optional[Path] = None
+
+    @property
+    def timestamp_alg(self) -> str:
+        """Alias de compatibilité pour l'horodatage Alger."""
+        return self.timestamp_algiers_str
