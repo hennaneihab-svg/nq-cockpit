@@ -1,4 +1,13 @@
-"""Morning briefing module for NQ Cockpit.
+"""Package Briefing du Matin & Alertes (P12)."""
 
-Generates morning brief text strictly validated against computed JSON figures.
-"""
+from __future__ import annotations
+
+from nqcockpit.briefing.engine import generate_briefing
+from nqcockpit.briefing.models import GeminiResult, PreSessionBriefing, TelegramResult
+
+__all__ = [
+    "GeminiResult",
+    "PreSessionBriefing",
+    "TelegramResult",
+    "generate_briefing",
+]

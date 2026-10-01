@@ -378,6 +378,42 @@ def create_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8503, help="Port Streamlit (défaut : 8503)"
     )
 
+    # 14. briefing (P12)
+    parser_briefing = subparsers.add_parser(
+        "briefing",
+        help="Génération du briefing pré-séance et diffusion optionnelle (P12)",
+    )
+    b_sub = parser_briefing.add_subparsers(
+        title="actions briefing",
+        dest="briefing_action",
+        help="Action spécifique",
+    )
+    b_gen = b_sub.add_parser(
+        "generate",
+        help="Agrège les données des modules P02-P08 et génère le briefing",
+    )
+    b_gen.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simule l'envoi Telegram sans appel réseau",
+    )
+    b_gen.add_argument(
+        "--no-gemini",
+        action="store_true",
+        help="Désactive l'agent rédactionnel Gemini (fallback Markdown)",
+    )
+    b_gen.add_argument(
+        "--no-telegram",
+        action="store_true",
+        help="Désactive l'envoi Telegram",
+    )
+    b_gen.add_argument(
+        "--output-dir",
+        type=str,
+        default="reports/briefings",
+        help="Dossier de destination (défaut : reports/briefings)",
+    )
+
     return parser
 
 
@@ -408,6 +444,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         report_path = report.save_json("reports/source_check.json")
         print(f"[nqcockpit] Rapport complet enregistré dans {report_path}")
         return 0
+    elif args.subcommand == "briefing":
+        return _handle_briefing(args)
     elif args.subcommand == "snapshot":
 
         from nqcockpit.data.cboe import fetch_cboe_options_chain
@@ -2405,6 +2443,47 @@ def _handle_ui(args: Any) -> int:
     except KeyboardInterrupt:
         print("\n[nqcockpit] Interface arrêtée.")
     return 0
+
+
+def _handle_briefing(args: Any) -> int:
+    """Génère le briefing pré-séance et le diffuse optionnellement (P12)."""
+    from nqcockpit.briefing.engine import generate_briefing
+
+    action = getattr(args, "briefing_action", None)
+    if action == "generate" or action is None:
+        dry_run = getattr(args, "dry_run", False)
+        no_gemini = getattr(args, "no_gemini", False)
+        no_telegram = getattr(args, "no_telegram", False)
+        out_dir = getattr(args, "output_dir", "reports/briefings")
+
+        briefing = generate_briefing(
+            use_gemini=not no_gemini,
+            use_telegram=not no_telegram,
+            dry_run=dry_run,
+            output_dir=out_dir,
+        )
+
+        sep = "=" * 75
+        print("\n" + sep)
+        print(f"  NQ COCKPIT — BRIEFING PRÉ-SÉANCE ({briefing.session_date_ny})")
+        print(f"  Horodatage (Alger) : {briefing.timestamp_algiers_str}")
+        print(f"  Statut Intégrité   : {briefing.status}")
+        if briefing.status_warnings:
+            print("  Avertissements :")
+            for w in briefing.status_warnings:
+                print(f"    - {w}")
+        if briefing.output_path:
+            print(f"  Fichier généré     : {briefing.output_path}")
+        print(sep + "\n")
+        print(briefing.markdown_briefing)
+        print("\n" + sep + "\n")
+        return 0
+
+    print(
+        f"[nqcockpit briefing] Action inconnue : {action!r}. "
+        "Essayez : generate."
+    )
+    return 1
 
 
 if __name__ == "__main__":
