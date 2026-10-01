@@ -163,6 +163,11 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
+class BriefingConfig:
+    gemini_model: str = "gemini-2.5-flash"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -178,6 +183,7 @@ class AppConfig:
     snapshots_ny: list[str] = field(default_factory=lambda: ["08:00", "09:45", "15:45"])
     macro: MacroConfig = field(default_factory=MacroConfig)
     forecast: ForecastConfig = field(default_factory=ForecastConfig)
+    briefing: BriefingConfig = field(default_factory=BriefingConfig)
 
 
 
@@ -580,6 +586,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         day_types=day_types_cfg,
     )
 
+    # 14. Briefing (P12)
+    raw_briefing = data.get("briefing", {})
+    if not isinstance(raw_briefing, dict):
+        raw_briefing = {}
+    briefing_cfg = BriefingConfig(
+        gemini_model=str(raw_briefing.get("gemini_model", "gemini-2.5-flash")),
+    )
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -595,5 +609,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         snapshots_ny=snapshots_ny,
         macro=macro_cfg,
         forecast=forecast_cfg,
+        briefing=briefing_cfg,
     )
 

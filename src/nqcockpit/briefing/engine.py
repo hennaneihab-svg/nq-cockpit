@@ -20,13 +20,6 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from nqcockpit.config import AppConfig, load_config
-from nqcockpit.events.models import EventRiskReport
-from nqcockpit.events.risk import compute_event_risk
-from nqcockpit.forecast.engine import AmplitudeForecast, compute_amplitude_forecast
-from nqcockpit.levels.engine import LevelsEngine, LevelsSnapshot
-from nqcockpit.playbook.card import EventPlaybookCard, generate_card
-from nqcockpit.profile.engine import DayProfile, build_day_profile
 from nqcockpit.briefing.gemini_client import generate_gemini_summary
 from nqcockpit.briefing.models import (
     GeminiResult,
@@ -34,6 +27,12 @@ from nqcockpit.briefing.models import (
     TelegramResult,
 )
 from nqcockpit.briefing.telegram_client import send_telegram_message
+from nqcockpit.config import AppConfig, load_config
+from nqcockpit.events.models import EventRiskReport
+from nqcockpit.forecast.engine import AmplitudeForecast
+from nqcockpit.levels.engine import LevelsSnapshot
+from nqcockpit.playbook.card import EventPlaybookCard
+from nqcockpit.profile.engine import DayProfile, build_day_profile
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +91,6 @@ def extract_source_numbers(sources: dict[str, Any]) -> set[float | int | str]:
     """Extrait l'ensemble des nombres présents dans l'ensemble des objets sources."""
     num_set: set[float | int | str] = set()
 
-    # Nombres standards autorisés (structure, indices, pourcentages d'en-tête)
-    for n in range(0, 101):
-        num_set.add(n)
-        num_set.add(float(n))
-        num_set.add(str(n))
-        num_set.add(f"{n}.0")
-        num_set.add(f"{n}%")
-
     _extract_numbers_from_obj(sources, num_set)
 
     return num_set
@@ -113,8 +104,13 @@ def validate_anti_hallucination(
     Returns:
         (True, None) si valide, (False, warning_msg) en cas d'hallucination.
     """
+    # Nettoyage pré-validation des éléments de structure Markdown purs
+    # (Titres ## 1., ## 2. et terme technique 1-Sigma)
+    cleaned_text = re.sub(r"^\s*#+\s*\d+\.?\s*", "", generated_text, flags=re.MULTILINE)
+    cleaned_text = re.sub(r"\b1-[Ss]igma\b", "", cleaned_text)
+
     # Regex d'extraction des nombres (ex: 20850.5, 68.3%, 1.5, 100)
-    raw_matches = re.findall(r"\b\d+(?:\.\d+)?%?\b", generated_text)
+    raw_matches = re.findall(r"\b\d+(?:\.\d+)?%?\b", cleaned_text)
 
     for match in raw_matches:
         clean_num = match.rstrip("%")
@@ -154,7 +150,7 @@ def build_fallback_briefing_markdown(
     now_utc: datetime,
     config: AppConfig,
 ) -> str:
-    """Génère le briefing de pré-séance en Markdown déterministe (fallback texte brut sans Gemini)."""
+    """Génère le briefing de pré-séance en Markdown déterministe (fallback texte brut)."""
     tz_alg = ZoneInfo(config.timezones.display)
     tz_ny = ZoneInfo(config.timezones.market)
 
@@ -211,17 +207,21 @@ def build_fallback_briefing_markdown(
     ])
 
     if levels_snap:
-        g_flip = f"{levels_snap.gamma_flip_nq:.2f}" if levels_snap.gamma_flip_nq is not None else "Inconnu"
-        c_wall = f"{levels_snap.call_wall_nq:.2f}" if levels_snap.call_wall_nq is not None else "Inconnu"
-        p_wall = f"{levels_snap.put_wall_nq:.2f}" if levels_snap.put_wall_nq is not None else "Inconnu"
+        has_g = levels_snap.gamma_flip_nq is not None
+        g_flip = f"{levels_snap.gamma_flip_nq:.2f}" if has_g else "Inconnu"
+        has_c = levels_snap.call_wall_nq is not None
+        c_wall = f"{levels_snap.call_wall_nq:.2f}" if has_c else "Inconnu"
+        has_p = levels_snap.put_wall_nq is not None
+        p_wall = f"{levels_snap.put_wall_nq:.2f}" if has_p else "Inconnu"
 
         em_val = None
         em_lower = None
         em_upper = None
         if levels_snap.expected_move:
-            em_val = levels_snap.expected_move.straddle_move_nq or levels_snap.expected_move.formula_move
-            em_lower = levels_snap.expected_move.lower_bound_nq
-            em_upper = levels_snap.expected_move.upper_bound_nq
+            em_obj = levels_snap.expected_move
+            em_val = em_obj.straddle_move_nq or em_obj.formula_move
+            em_lower = em_obj.lower_bound_nq
+            em_upper = em_obj.upper_bound_nq
 
         em_pts = f"{em_val:.2f}" if em_val is not None else "N/A"
 
@@ -271,7 +271,7 @@ def build_fallback_briefing_markdown(
             for p_sc in playbook_card.scenarios:
                 lines.append(f"  - `{p_sc.name}` : {p_sc.if_condition} -> {p_sc.then_outcome}")
     else:
-        lines.append("Aucun événement majeur nécessitant une fiche de playbook spécifique sur la séance.")
+        lines.append("Aucun événement majeur nécessitant une fiche de playbook sur la séance.")
 
     lines.extend([
         "",
@@ -284,9 +284,8 @@ def build_fallback_briefing_markdown(
     if forecast:
         lines.append(f"- **État de Calibration :** `{forecast.calibration_status}`")
         if forecast.range_low is not None and forecast.range_high is not None:
-            lines.append(
-                f"- **Amplitude Prévue (1-Sigma) :** `[{forecast.range_low:.1f}, {forecast.range_high:.1f}] points`"
-            )
+            r_str = f"[{forecast.range_low:.1f}, {forecast.range_high:.1f}] points"
+            lines.append(f"- **Amplitude Prévue (1-Sigma) :** `{r_str}`")
         if forecast.day_type_probabilities:
             lines.append("- **Probabilités par Type de Journée :**")
             for dtp in forecast.day_type_probabilities:
@@ -303,6 +302,11 @@ def build_fallback_briefing_markdown(
         "",
     ])
 
+    no_trade_ok_msg = (
+        "✅ **Aucun drapeau No-Trade actif.** "
+        "Trading autorisé sous réserve de validation P09."
+    )
+
     if profile and profile.no_trade and profile.no_trade.all_flags:
         active_flags = [f for f in profile.no_trade.all_flags if f.triggered]
         if active_flags:
@@ -311,9 +315,9 @@ def build_fallback_briefing_markdown(
                 code_str = flag.code.value if hasattr(flag.code, "value") else str(flag.code)
                 lines.append(f"- `{code_str}` (Sévérité : {flag.severity}) : {flag.reason}")
         else:
-            lines.append("✅ **Aucun drapeau No-Trade actif.** Trading autorisé sous réserve de validation de la checklist pré-trade P09.")
+            lines.append(no_trade_ok_msg)
     else:
-        lines.append("✅ **Aucun drapeau No-Trade actif.** Trading autorisé sous réserve de validation de la checklist pré-trade P09.")
+        lines.append(no_trade_ok_msg)
 
     lines.extend([
         "",
@@ -322,9 +326,9 @@ def build_fallback_briefing_markdown(
         "## 7. Anti-Biais & Responsabilité",
         "",
         "> [!IMPORTANT]",
-        "> Ce briefing est un outil d'aide à la décision factuel, déterministe et non directionnel.",
+        "> Ce briefing est un outil d'aide à la décision factuel et non directionnel.",
         "> Il ne constitue en aucun cas un conseil en investissement ou un signal de trading.",
-        "> L'exécution des trades reste sous la responsabilité exclusive de l'opérateur et doit respecter la checklist pré-trade P09.",
+        "> L'exécution des trades reste sous la responsabilité exclusive de l'opérateur.",
         "",
     ])
 

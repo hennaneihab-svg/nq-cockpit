@@ -125,4 +125,8 @@ data:
   parity_basis_tolerance_points: 50.0
   target_tolerance_minutes: 15.0
 
+briefing:
+  gemini_model: "gemini-2.5-flash"
+
+
 

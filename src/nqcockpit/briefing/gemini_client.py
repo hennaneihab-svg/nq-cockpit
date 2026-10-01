@@ -17,8 +17,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable
 
-from nqcockpit.config import AppConfig, load_config
 from nqcockpit.briefing.models import GeminiResult
+from nqcockpit.config import AppConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +62,16 @@ def generate_gemini_summary(
         return GeminiResult(
             status="DISABLED",
             content=None,
-            warning="Gemini non configuré (clé GEMINI_API_KEY absente dans .env) — fallback texte brut",
+            warning="GEMINI_API_KEY absente dans .env — fallback texte brut",
         )
 
-    model_name = getattr(config, "briefing_gemini_model", "gemini-2.5-flash")
+    model_name = config.briefing.gemini_model
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
     json_str = json.dumps(structured_data, default=_json_default, ensure_ascii=False, indent=2)
     prompt = (
         "Tu es un assistant de trading discipliné et neutre. "
-        "Voici les données d'analyse pré-séance pour l'indice NQ (Nasdaq-100 Futures) au format JSON.\n"
+        "Voici les données pré-séance pour NQ (Futures) au format JSON.\n"
         "INSTRUCTIONS STRICTES :\n"
         "1. Rédige un briefing synthétique en Markdown structuré en français.\n"
         "2. N'invente AUCUN chiffre, prix, niveau, pourcentage ou statistique. "
@@ -132,7 +132,7 @@ def generate_gemini_summary(
             return GeminiResult(
                 status="REJECTED_HALLUCINATION",
                 content=None,
-                warning=f"Hallucination Gemini détectée et rejetée ({validation_warn}) — fallback texte brut",
+                warning=f"Hallucination détectée ({validation_warn}) — fallback texte brut",
             )
 
         return GeminiResult(status="OK", content=generated_text, warning=None)

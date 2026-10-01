@@ -24,14 +24,12 @@ from nqcockpit.briefing.engine import (
     generate_briefing,
     validate_anti_hallucination,
 )
-from nqcockpit.briefing.gemini_client import generate_gemini_summary
-from nqcockpit.briefing.models import GeminiResult
 from nqcockpit.briefing.telegram_client import send_telegram_message
 from nqcockpit.cli import main
 from nqcockpit.config import load_config
 from nqcockpit.events.models import EventRiskReport
+from nqcockpit.forecast.models import AmplitudeForecast, DayTypeProbability
 from nqcockpit.levels.models import DataStatus, ExpectedMoveInfo, LevelsSnapshot
-from nqcockpit.profile.engine import DayProfile
 
 
 @pytest.fixture()
@@ -80,9 +78,6 @@ def sample_risk() -> EventRiskReport:
         reason="Aucun événement Tier 1 dans les 90 minutes.",
         next_event_countdown="Aucun événement Tier 1 imminent.",
     )
-
-
-from nqcockpit.forecast.models import AmplitudeForecast, DayTypeProbability
 
 
 @pytest.fixture()
@@ -344,7 +339,9 @@ def test_no_directional_vocabulary_in_generated_briefing(
         r"tendance haussière|tendance baissière|signal d\'achat|signal de vente)\b"
     )
     match = re.search(banned_regex, briefing.markdown_briefing, re.IGNORECASE)
-    assert match is None, f"Terme directionnel interdit détecté dans le briefing : '{match.group(0)}'"
+    assert match is None, (
+        f"Terme directionnel interdit détecté dans le briefing : '{match.group(0)}'"
+    )
 
 
 def test_cli_briefing_generate(tmp_path: Path, monkeypatch, capsys):
@@ -363,3 +360,17 @@ def test_cli_briefing_generate(tmp_path: Path, monkeypatch, capsys):
     assert "NQ COCKPIT — BRIEFING PRÉ-SÉANCE" in captured
     assert "Briefing Pré-Séance NQ" in captured
     assert len(list(out_dir.glob("briefing_*.md"))) == 1
+
+
+def test_anti_hallucination_validator_hallucinated_percentage_in_0_100_range():
+    """Faille de sécurité : un pourcentage halluciné entre 0 et 100 (ex: 62%) doit être REJETÉ."""
+    source_nums = {20850.0, 21000.0, 45.0, 35.0, 20.0}
+    extracted_set = extract_source_numbers(source_nums)
+
+    # 62% n'est pas présent dans source_nums (qui contient 45%, 35%, 20%)
+    hallucinated_text = "Il y a 62% de chance de range day selon l'analyse."
+    is_valid, warn = validate_anti_hallucination(hallucinated_text, extracted_set)
+
+    assert is_valid is False, "Le pourcentage halluciné 62% aurait dû être rejeté !"
+    assert warn is not None
+    assert "62" in warn

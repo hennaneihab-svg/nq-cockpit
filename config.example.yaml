@@ -80,4 +80,8 @@ data:
   delay_margin_minutes: 10
   parity_basis_tolerance_points: 50.0
 
+briefing:
+  gemini_model: "gemini-2.5-flash"
+
+
 
