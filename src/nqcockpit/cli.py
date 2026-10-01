@@ -306,7 +306,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--date",
         type=str,
         default=None,
-        help="Date de référence YYYY-MM-DD (défaut : date du jour en Africa/Algiers)",
+        help="Date de référence YYYY-MM-DD (défaut : date du jour en America/New_York)",
     )
     j_report.add_argument(
         "--output-dir",

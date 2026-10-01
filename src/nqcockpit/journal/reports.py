@@ -133,7 +133,7 @@ def generate_period_report(
         config = load_config()
 
     if ref_date is None:
-        tz = ZoneInfo(config.timezones.display)
+        tz = ZoneInfo(config.timezones.market)
         ref_date = datetime.now(tz).date()
 
     curr_start, curr_end, curr_label, prev_start, prev_end, prev_label = get_period_bounds(

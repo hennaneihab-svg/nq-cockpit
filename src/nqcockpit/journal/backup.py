@@ -80,7 +80,7 @@ def create_journal_backup(
         raise ValueError("retention_days doit être supérieur ou égal à 1.")
 
     if target_date is None:
-        tz = ZoneInfo(config.timezones.display)
+        tz = ZoneInfo(config.timezones.market)
         target_date = datetime.now(tz).date()
 
     filename = f"nqcockpit_{target_date.isoformat()}.db"

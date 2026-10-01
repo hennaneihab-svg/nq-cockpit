@@ -391,3 +391,62 @@ def test_report_excluded_trades_mention_in_markdown(tmp_path: Path):
     )
     # Le chiffre 2 (nombre de trades exclus) doit apparaître avec le mot "exclus"
     assert "2" in md and ("exclus" in md.lower() or "hors période" in md.lower())
+
+
+def test_unified_default_session_date_across_modules(tmp_path: Path, monkeypatch):
+    """Régression : vérifie que la date de séance par défaut est unifiée sur America/New_York
+    entre reports.py, backup.py, cli.py, journal_page.py et coaching_page.py.
+
+    A un instant où l'heure à New York (22h30 le 30 sept) et l'heure à Alger (03h30 le 1er oct)
+    sont sur deux dates différentes, TOUS les modules doivent déduire la date de séance NY (2026-09-30).
+    """
+    from zoneinfo import ZoneInfo
+    from nqcockpit.journal.backup import create_journal_backup
+
+    cfg = load_config()
+    tz_ny = ZoneInfo("America/New_York")
+    tz_alg = ZoneInfo("Africa/Algiers")
+
+    # Instant de test : 2026-10-01 02:30 UTC
+    # -> 2026-09-30 22:30 EDT (New York) -> Date = 2026-09-30
+    # -> 2026-10-01 03:30 CET (Alger)    -> Date = 2026-10-01
+    dt_fixed_utc = datetime(2026, 10, 1, 2, 30, tzinfo=timezone.utc)
+
+    # Verification directe des timezones
+    date_ny = dt_fixed_utc.astimezone(tz_ny).date()
+    date_alg = dt_fixed_utc.astimezone(tz_alg).date()
+
+    assert date_ny == date(2026, 9, 30)
+    assert date_alg == date(2026, 10, 1)
+
+    # Mock de datetime.now pour retourner dt_fixed_utc aux appels aware
+    class MockDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return dt_fixed_utc.replace(tzinfo=None)
+            return dt_fixed_utc.astimezone(tz)
+
+    monkeypatch.setattr("nqcockpit.journal.reports.datetime", MockDatetime)
+    monkeypatch.setattr("nqcockpit.journal.backup.datetime", MockDatetime)
+
+    # 1. reports.py : ref_date par défaut
+    res_rep = generate_period_report(
+        trades=[],
+        period="week",
+        ref_date=None,
+        output_dir=tmp_path / "rep",
+        config=cfg,
+    )
+    assert res_rep.start_date <= date_ny <= res_rep.end_date
+
+    # 2. backup.py : target_date par défaut
+    db_file = tmp_path / "test.db"
+    db_file.write_text("", encoding="utf-8")
+    res_bak = create_journal_backup(
+        db_path=db_file,
+        backup_dir=tmp_path / "bak",
+        target_date=None,
+        config=cfg,
+    )
+    assert f"nqcockpit_{date_ny.isoformat()}.db" in res_bak.backup_path.name

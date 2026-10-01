@@ -384,8 +384,9 @@ def render_coaching_app() -> None:
 
     config = load_config()
     tz_display = ZoneInfo(config.timezones.display)
+    tz_market = ZoneInfo(config.timezones.market)
     now_algiers = datetime.now(tz_display)
-    today_algiers = now_algiers.date()
+    today_ny = datetime.now(tz_market).date()
 
     db_path_str = os.getenv("NQ_DATA_DB_PATH", config.data.db_path)
     conn = init_journal_db(db_path_str)
@@ -422,34 +423,34 @@ def render_coaching_app() -> None:
         period_title = f"Historique complet ({len(all_trades)} trades)"
         period_label = "complet"
     elif period_choice == "Cette semaine":
-        c_start, c_end, c_lbl, _, _, _ = get_period_bounds("week", today_algiers)
+        c_start, c_end, c_lbl, _, _, _ = get_period_bounds("week", today_ny)
         filtered_trades = filter_trades_by_date_range(all_trades, c_start, c_end)
         period_title = f"Semaine en cours : {c_lbl} ({c_start} au {c_end})"
         period_type = "hebdo"
         period_label = c_lbl
     elif period_choice == "Semaine précédente":
-        _, _, _, p_start, p_end, p_lbl = get_period_bounds("week", today_algiers)
+        _, _, _, p_start, p_end, p_lbl = get_period_bounds("week", today_ny)
         filtered_trades = filter_trades_by_date_range(all_trades, p_start, p_end)
         period_title = f"Semaine précédente : {p_lbl} ({p_start} au {p_end})"
         period_type = "hebdo"
         period_label = p_lbl
     elif period_choice == "Ce mois":
-        c_start, c_end, c_lbl, _, _, _ = get_period_bounds("month", today_algiers)
+        c_start, c_end, c_lbl, _, _, _ = get_period_bounds("month", today_ny)
         filtered_trades = filter_trades_by_date_range(all_trades, c_start, c_end)
         period_title = f"Mois en cours : {c_lbl} ({c_start} au {c_end})"
         period_type = "mensuel"
         period_label = c_lbl
     elif period_choice == "Mois précédent":
-        _, _, _, p_start, p_end, p_lbl = get_period_bounds("month", today_algiers)
+        _, _, _, p_start, p_end, p_lbl = get_period_bounds("month", today_ny)
         filtered_trades = filter_trades_by_date_range(all_trades, p_start, p_end)
         period_title = f"Mois précédent : {p_lbl} ({p_start} au {p_end})"
         period_type = "mensuel"
         period_label = p_lbl
     elif period_choice == "Plage personnalisée":
         col_d1, col_d2 = st.sidebar.columns(2)
-        default_start = today_algiers - timedelta(days=30)
+        default_start = today_ny - timedelta(days=30)
         start_input = col_d1.date_input("Début", default_start)
-        end_input = col_d2.date_input("Fin", today_algiers)
+        end_input = col_d2.date_input("Fin", today_ny)
         if isinstance(start_input, date) and isinstance(end_input, date):
             filtered_trades = filter_trades_by_date_range(all_trades, start_input, end_input)
             period_title = f"Plage personnalisée ({start_input} au {end_input})"
