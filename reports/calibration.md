@@ -1,18 +1,18 @@
 # Rapport de Calibration des Prévisions d'Amplitude (P07)
 
-**Date du rapport :** 2026-09-30 14:42 ET | 2026-09-30 19:42 Alger  
-**État global de calibration :** `non calibré (n=0 < 60)`  
+**Date du rapport :** 2026-10-03 19:11 ET | 2026-10-04 00:11 Alger  
+**État global de calibration :** `non calibré (n=1 < 60)`  
 
 ---
 
 ## 1. Métriques de Couverture 1-Sigma
 
-- **Séances évaluées (n) :** 0 (seuil de validation requis : 60)
-- **Séances couvertes dans la bande :** 0
-- **Taux de couverture observé :** 0.00 %
+- **Séances évaluées (n) :** 1 (seuil de validation requis : 60)
+- **Séances couvertes dans la bande :** 1
+- **Taux de couverture observé :** 100.00 %
 - **Taux théorique 1-sigma attendu :** 68.27 %
-- **Écart à la cible :** -68.27 %
-- **Brier score :** N/A
+- **Écart à la cible :** +31.73 %
+- **Brier score :** 0.1007
 
 ---
 
@@ -26,4 +26,4 @@
 
 | Date cible | Prévu Bas | Prévu Haut | Réel Bas | Réel Haut | Couvert ? | Statut |
 | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| 2026-09-30 | 30507.8 | 30589.3 | N/A | N/A | en attente | `OK` |
+| 2026-09-28 | 19900.0 | 20100.0 | 19920.0 | 20080.0 | OUI | `OK` |

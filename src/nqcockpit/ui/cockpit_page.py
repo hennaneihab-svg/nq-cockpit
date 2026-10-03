@@ -371,6 +371,125 @@ def render_cockpit():
         else:
             st.info("Aucun scénario généré pour la séance.")
 
+    # -----------------------------------------------------------------------
+    # 5. FIL DE PRESSE MACRO & ACTUALITÉS FONDAMENTALES (EN DIRECT)
+    # -----------------------------------------------------------------------
+    st.divider()
+    st.markdown(
+        '<div class="section-header">FIL D\'ACTUALITÉS FONDAMENTALES & MACRO (LIVE WIRE)</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Veille d'information macroéconomique & déclarations officielles en direct "
+        "(Fed Press Releases, Google News Macro/Nasdaq). Données factuelles sans biais."
+    )
+
+    try:
+        import urllib.request
+        import xml.etree.ElementTree as ET
+
+        @st.cache_data(ttl=300)
+        def _get_live_news() -> list[dict[str, str]]:
+            items: list[dict[str, str]] = []
+            # 1. Federal Reserve Press Releases
+            url_fed = "https://www.federalreserve.gov/feeds/press_all.xml"
+            try:
+                req = urllib.request.Request(
+                    url_fed,
+                    headers={"User-Agent": "NQCockpit/1.0 (contact@nqcockpit.local)"},
+                )
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    root = ET.fromstring(r.read())
+                    for it in list(root.iter("item"))[:5]:
+                        items.append({
+                            "title": it.findtext("title") or "",
+                            "date": it.findtext("pubDate") or "",
+                            "source": "Federal Reserve (Officiel)",
+                            "link": it.findtext("link") or "",
+                            "tag": "FED / TAUX",
+                            "tag_color": "#818CF8",
+                        })
+            except Exception:
+                pass
+
+            # 2. Google News US Macro & Nasdaq
+            url_gnews = (
+                "https://news.google.com/rss/search?"
+                "q=(Nasdaq+OR+FOMC+OR+\"Federal+Reserve\"+OR+CPI+OR+inflation)+when:2d"
+                "&hl=en-US&gl=US&ceid=US:en"
+            )
+            try:
+                req = urllib.request.Request(url_gnews, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    root = ET.fromstring(r.read())
+                    for it in list(root.iter("item"))[:12]:
+                        s_elem = it.find("source")
+                        s_name = s_elem.text if s_elem is not None else "Presse financière"
+                        items.append({
+                            "title": it.findtext("title") or "",
+                            "date": it.findtext("pubDate") or "",
+                            "source": s_name,
+                            "link": it.findtext("link") or "",
+                            "tag": "ACTU MARCHÉ",
+                            "tag_color": "#38BDF8",
+                        })
+            except Exception:
+                pass
+
+            return items
+
+        wire_items = _get_live_news()
+        if wire_items:
+            wire_cols = st.columns(2)
+            for idx, n in enumerate(wire_items[:8]):
+                with wire_cols[idx % 2]:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background-color: #0F172A;
+                            border: 1px solid rgba(51, 65, 85, 0.6);
+                            border-radius: 8px;
+                            padding: 12px 14px;
+                            margin-bottom: 8px;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 4px;
+                        ">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span style="
+                                    font-size: 0.68rem;
+                                    font-weight: 700;
+                                    color: {n['tag_color']};
+                                    background: rgba(51, 65, 85, 0.4);
+                                    padding: 2px 6px;
+                                    border-radius: 4px;
+                                    font-family: ui-monospace, monospace;
+                                ">
+                                    {n['tag']}
+                                </span>
+                                <span style="font-size: 0.72rem; color: #64748B;">
+                                    {n['source']}
+                                </span>
+                            </div>
+                            <div style="font-size: 0.85rem; font-weight: 600; line-height: 1.35;">
+                                <a href="{n['link']}" target="_blank"
+                                   rel="noopener noreferrer"
+                                   style="color: #F8FAFC; text-decoration: none;">
+                                    {n['title']}
+                                </a>
+                            </div>
+                            <div style="font-size: 0.68rem; color: #94A3B8;">
+                                {n['date']}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.info("[DÉGRADÉ] Flux d'actualités temporairement inaccessible depuis ce réseau.")
+    except Exception as exc:
+        st.caption(f"Flux d'actualités indisponible : {exc}")
+
     st.divider()
     st.caption(
         "NQ Cockpit P08 / P13 · Design System Swetrix · "

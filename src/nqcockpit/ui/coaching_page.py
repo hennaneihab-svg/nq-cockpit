@@ -98,6 +98,7 @@ def build_equity_curve_figure(
     """Construit la figure Plotly de la courbe d'équité en R cumulé.
 
     Superpose les marqueurs d'alerte tilt sur les trades concernés.
+    Design desk haute performance avec halo dynamique.
     """
     fig = go.Figure()
 
@@ -135,45 +136,52 @@ def build_equity_curve_figure(
 
         contracts_str = f"{t.contracts}" if t.contracts is not None else "N/A"
         conforme_str = "Oui" if not (t.sl_moved or t.early_exit) else "Non"
+        color_res = "#10B981" if t.r_realized >= 0 else "#EF4444"
         txt = (
             f"<b>Trade #{i} [{t.trade_id[:8]}]</b><br>"
             f"Date : {t.session_date} {t.entry_time_ny or ''}<br>"
             f"Direction : {t.direction.value} | Contrats : {contracts_str}<br>"
             f"Setup : {t.setup_tag or 'N/A'}<br>"
-            f"Résultat : <b>{t.r_realized:+.3f}R</b> ({t.outcome.value})<br>"
+            f"Résultat : <b style='color:{color_res}'>{t.r_realized:+.3f}R</b> "
+            f"({t.outcome.value})<br>"
             f"R cumulé : <b>{current_r:+.3f}R</b><br>"
             f"Conforme aux règles : {conforme_str}"
         )
         hover_texts.append(txt)
 
-    # Courbe d'équité avec aire translucide et transitions fluides
+    # Courbe d'équité principale (Bleu laser Swetrix avec zone de remplissage dégradée)
     fig.add_trace(
         go.Scatter(
             x=x_labels,
             y=cum_r,
             mode="lines+markers",
             name="R Cumulé",
-            line={"color": "#6366F1", "width": 2.5, "shape": "spline"},
-            marker={"size": 6, "color": "#6366F1", "line": {"color": "#F8FAFC", "width": 1}},
+            line={"color": "#6366F1", "width": 3, "shape": "spline"},
+            marker={
+                "size": 7,
+                "color": "#818CF8",
+                "line": {"color": "#FFFFFF", "width": 1.5},
+            },
             fill="tozeroy",
-            fillcolor="rgba(99, 102, 241, 0.08)",
+            fillcolor="rgba(99, 102, 241, 0.12)",
             hovertext=hover_texts,
             hoverinfo="text",
         )
     )
 
-    # Ligne de référence à 0 R
+    # Ligne de référence à 0 R (neutre et discrète)
     fig.add_hline(
         y=0.0,
-        line_dash="dash",
-        line_color="#787B86",
+        line_dash="dot",
+        line_color="rgba(148, 163, 184, 0.4)",
         line_width=1.5,
-        annotation_text="0.0 R",
+        annotation_text="Point d'équilibre (0.0 R)",
         annotation_position="bottom right",
-        annotation_font_color="#787B86",
+        annotation_font_color="#94A3B8",
+        annotation_font_size=11,
     )
 
-    # Superposition des alertes de tilt
+    # Superposition des alertes de tilt (Triangles rouges d'avertissement)
     if tilt_alerts:
         tilt_x: list[str] = []
         tilt_y: list[float] = []
@@ -187,7 +195,7 @@ def build_equity_curve_figure(
                     tilt_y.append(pt_y)
                     tilt_texts.append(
                         f"<b>Alerte Tilt : {alert.pattern_type}</b><br>"
-                        f"Date : {alert.session_date}<br>"
+                        f"Séance : {alert.session_date}<br>"
                         f"Motif : {alert.reason}"
                     )
 
@@ -200,9 +208,9 @@ def build_equity_curve_figure(
                     name="Alertes de Tilt",
                     marker={
                         "symbol": "triangle-up",
-                        "size": 13,
-                        "color": "#F23645",
-                        "line": {"color": "#D1D4DC", "width": 1},
+                        "size": 14,
+                        "color": "#EF4444",
+                        "line": {"color": "#FFFFFF", "width": 1.5},
                     },
                     hovertext=tilt_texts,
                     hoverinfo="text",
@@ -212,10 +220,17 @@ def build_equity_curve_figure(
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
         title="Courbe d'équité en R cumulé chronologique & Alertes de tilt",
-        xaxis_title="Trades",
-        yaxis_title="R cumulé",
+        xaxis_title="Séquence des Trades",
+        yaxis_title="Performance R Cumulée",
         hovermode="closest",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+            "font": {"size": 11, "color": "#94A3B8"},
+        },
     )
     return fig
 
@@ -253,7 +268,7 @@ def build_segmentation_figure(
         sig_tag = "" if stats.sample_sufficient else " (n < seuil)"
         labels.append(f"{name}{sig_tag}")
 
-        colors.append("#089981" if val >= 0 else "#F23645")
+        colors.append("#10B981" if val >= 0 else "#EF4444")
 
         wr_str = f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—"
         ci_str = (
@@ -283,14 +298,19 @@ def build_segmentation_figure(
             orientation="h",
             marker={
                 "color": colors,
-                "line": {"color": "rgba(255, 255, 255, 0.15)", "width": 1},
+                "line": {"color": "rgba(255, 255, 255, 0.2)", "width": 1.2},
             },
             hovertext=hover_texts,
             hoverinfo="text",
         )
     )
 
-    fig.add_vline(x=0.0, line_dash="dash", line_color="#787B86", line_width=1)
+    fig.add_vline(
+        x=0.0,
+        line_dash="dot",
+        line_color="rgba(148, 163, 184, 0.5)",
+        line_width=1.5,
+    )
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
@@ -363,7 +383,7 @@ def build_compliance_timeline_figure(
             y=comp_rates,
             marker={
                 "color": bar_colors,
-                "line": {"color": "rgba(255, 255, 255, 0.15)", "width": 1},
+                "line": {"color": "rgba(255, 255, 255, 0.2)", "width": 1.2},
             },
             hovertext=hover_texts,
             hoverinfo="text",
@@ -374,19 +394,19 @@ def build_compliance_timeline_figure(
     # Ligne cible 100%
     fig.add_hline(
         y=100.0,
-        line_dash="dash",
-        line_color="#089981",
+        line_dash="dot",
+        line_color="#10B981",
         line_width=1.5,
-        annotation_text="Objectif 100%",
+        annotation_text="Objectif Discipline 100%",
         annotation_position="top right",
-        annotation_font_color="#089981",
+        annotation_font_color="#10B981",
     )
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
         title="Taux de conformité aux règles par séance (%)",
-        xaxis_title="Séance",
-        yaxis_title="Conformité (%)",
+        xaxis_title="Séance de Trading",
+        yaxis_title="Discipline (%)",
         yaxis={"range": [0, 105]},
     )
     return fig
@@ -407,7 +427,7 @@ def render_coaching_app() -> None:
     except StreamlitAPIException:
         pass
 
-    # Thème sombre CSS Swetrix
+    # Thème sombre CSS Swetrix avec animations interactives fluides
     st.markdown(
         """
     <style>
@@ -417,34 +437,45 @@ def render_coaching_app() -> None:
         font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .metric-card {
-        background-color: #0F172A;
-        border: 1px solid rgba(51, 65, 85, 0.6);
-        border-radius: 8px;
-        padding: 14px 16px;
+        background: linear-gradient(145deg, #0F172A 0%, #090D16 100%);
+        border: 1px solid rgba(51, 65, 85, 0.7);
+        border-radius: 10px;
+        padding: 16px 18px;
         margin: 4px 0;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        box-shadow: 0 4px 14px 0 rgba(0, 0, 0, 0.25);
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                    border-color 0.2s ease,
+                    box-shadow 0.2s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(99, 102, 241, 0.5);
+        box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.15);
     }
     .metric-label {
         font-size: 0.72rem;
         color: #94A3B8;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: 600;
+        letter-spacing: 0.06em;
+        font-weight: 700;
+        margin-bottom: 4px;
     }
     .metric-val {
-        font-size: 1.45rem;
+        font-size: 1.55rem;
         font-weight: 700;
         color: #F8FAFC;
         font-family: ui-monospace, SFMono-Regular, monospace;
+        letter-spacing: -0.02em;
     }
     .metric-sub {
         font-size: 0.75rem;
         color: #94A3B8;
+        margin-top: 4px;
         font-family: -apple-system, sans-serif;
     }
-    .ok { color: #6EE7B7; font-weight: 700; }
-    .warn { color: #FCD34D; font-weight: 700; }
-    .err { color: #FCA5A5; font-weight: 700; }
+    .ok { color: #10B981; font-weight: 700; }
+    .warn { color: #F59E0B; font-weight: 700; }
+    .err { color: #EF4444; font-weight: 700; }
     .insuf { color: #94A3B8; font-style: italic; }
     </style>
     """,
