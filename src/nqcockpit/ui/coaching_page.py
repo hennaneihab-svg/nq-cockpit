@@ -51,9 +51,12 @@ from nqcockpit.ui.db import get_ui_db
 
 PLOTLY_LAYOUT_DEFAULTS: dict[str, Any] = {
     "template": "plotly_dark",
-    "paper_bgcolor": "#131722",
-    "plot_bgcolor": "#0D0D0D",
-    "font": {"color": "#D1D4DC", "family": "JetBrains Mono, SFMono-Regular, Consolas, monospace"},
+    "paper_bgcolor": "#0F172A",
+    "plot_bgcolor": "#020617",
+    "font": {
+        "color": "#F8FAFC",
+        "family": "-apple-system, system-ui, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+    },
     "margin": {"l": 45, "r": 30, "t": 45, "b": 40},
 }
 
@@ -365,32 +368,45 @@ def render_coaching_app() -> None:
     except StreamlitAPIException:
         pass
 
-    # Thème sombre CSS Bloomberg x TradingView
+    # Thème sombre CSS Swetrix
     st.markdown(
         """
     <style>
     body, .main {
-        background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif;
+        background-color: #020617;
+        color: #F8FAFC;
+        font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .metric-card {
-        background-color: #131722; border: 1px solid #2A2E39;
-        border-radius: 2px; padding: 12px 16px; margin: 4px 0;
+        background-color: #0F172A;
+        border: 1px solid rgba(51, 65, 85, 0.6);
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin: 4px 0;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     }
     .metric-label {
-        font-size: 0.75rem; color: #787B86; text-transform: uppercase;
-        letter-spacing: 0.5px; font-weight: 600;
+        font-size: 0.72rem;
+        color: #94A3B8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
     }
     .metric-val {
-        font-size: 1.4rem; font-weight: 700; color: #D1D4DC;
-        font-family: monospace;
+        font-size: 1.45rem;
+        font-weight: 700;
+        color: #F8FAFC;
+        font-family: ui-monospace, SFMono-Regular, monospace;
     }
     .metric-sub {
-        font-size: 0.8rem; color: #787B86; font-family: monospace;
+        font-size: 0.75rem;
+        color: #94A3B8;
+        font-family: -apple-system, sans-serif;
     }
-    .ok { color: #089981; font-weight: 700; }
-    .warn { color: #D29922; font-weight: 700; }
-    .err { color: #F23645; font-weight: 700; }
-    .insuf { color: #787B86; font-style: italic; }
+    .ok { color: #6EE7B7; font-weight: 700; }
+    .warn { color: #FCD34D; font-weight: 700; }
+    .err { color: #FCA5A5; font-weight: 700; }
+    .insuf { color: #94A3B8; font-style: italic; }
     </style>
     """,
         unsafe_allow_html=True,

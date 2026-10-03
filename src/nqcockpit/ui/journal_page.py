@@ -50,25 +50,36 @@ def render_journal_page() -> None:
     except StreamlitAPIException:
         pass
 
-    # CSS Bloomberg x TradingView
+    # CSS Swetrix
     st.markdown("""
     <style>
-    .stApp { background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif; }
-    .stDataFrame, .stTable { background-color: #131722; border: 1px solid #2A2E39; }
-    .insuf { color: #787B86; font-style: italic; font-family: ui-monospace, monospace; }
+    .stApp {
+        background-color: #020617;
+        color: #F8FAFC;
+        font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .stDataFrame, .stTable {
+        background-color: #0F172A;
+        border: 1px solid rgba(51, 65, 85, 0.6);
+        border-radius: 8px;
+    }
+    .insuf {
+        color: #94A3B8;
+        font-style: italic;
+        font-family: ui-monospace, monospace;
+    }
     .section-header {
-        font-family: ui-sans-serif, sans-serif;
-        color: #FA7900;
-        font-size: 1.1rem;
-        font-weight: 700;
-        letter-spacing: 0.5px;
+        font-family: -apple-system, system-ui, sans-serif;
+        color: #F8FAFC;
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
         margin-bottom: 8px;
     }
     </style>
     """, unsafe_allow_html=True)
 
     config = _get_config()
-    tz_display = ZoneInfo(config.timezones.display)
     tz_market = ZoneInfo(config.timezones.market)
     db_path = Path(config.data.db_path)
     conn = get_ui_db(str(db_path))
@@ -76,21 +87,20 @@ def render_journal_page() -> None:
     MIN_TRADES = config.validation.min_sessions
 
     # ---------------------------------------------------------------------------
-    # Sidebar — navigation
+    # Navigation interne du Journal (Onglets horizontaux)
     # ---------------------------------------------------------------------------
 
-    st.sidebar.markdown(
-        '<div class="section-header">JOURNAL SECTIONS</div>',
+    st.markdown(
+        '<div class="section-header">JOURNAL DE BORD // SECTIONS</div>',
         unsafe_allow_html=True,
     )
-    page = st.sidebar.radio(
+    page = st.radio(
         "Section Journal",
         ["Enregistrer un trade", "Journal du jour", "Performance globale", "Coaching"],
         index=0,
+        horizontal=True,
+        label_visibility="collapsed",
     )
-
-    now_display = datetime.now(tz_display)
-    st.sidebar.markdown(f"**Heure Alger** : `{now_display.strftime('%Y-%m-%d %H:%M')}`")
 
     # ---------------------------------------------------------------------------
     # Page 1 — Enregistrer un trade

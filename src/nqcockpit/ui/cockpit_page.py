@@ -41,62 +41,65 @@ def render_cockpit():
         """
         <style>
         .stApp {
-            background-color: #0D0D0D;
-            color: #D1D4DC;
-            font-family: ui-sans-serif, -apple-system, sans-serif;
+            background-color: #020617;
+            color: #F8FAFC;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont,
+                "Segoe UI", Roboto, sans-serif;
         }
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 1rem;
             padding-bottom: 2rem;
-            max-width: 96%;
+            max-width: 98%;
         }
         .status-banner-allowed {
-            background-color: #131722;
-            border: 1px solid #089981aa;
-            border-radius: 3px;
-            padding: 12px 18px;
+            background-color: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            border-radius: 8px;
+            padding: 14px 18px;
             margin-bottom: 16px;
+            color: #6EE7B7;
         }
         .status-banner-notrade {
-            background-color: #131722;
-            border: 1px solid #F23645aa;
-            border-radius: 3px;
-            padding: 12px 18px;
+            background-color: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, 0.25);
+            border-radius: 8px;
+            padding: 14px 18px;
             margin-bottom: 16px;
+            color: #FCA5A5;
         }
         .kpi-card {
-            background-color: #131722;
-            border: 1px solid #2A2E39;
-            border-radius: 3px;
-            padding: 12px 14px;
+            background-color: #0F172A;
+            border: 1px solid rgba(51, 65, 85, 0.6);
+            border-radius: 8px;
+            padding: 14px 16px;
             margin-bottom: 10px;
         }
         .kpi-title {
-            color: #787B86;
+            color: #94A3B8;
             font-size: 0.72rem;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.05em;
             margin-bottom: 4px;
         }
         .kpi-value {
             font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
-            font-size: 1.35rem;
+            font-size: 1.45rem;
             font-weight: 700;
-            color: #D1D4DC;
+            color: #F8FAFC;
         }
         .kpi-sub {
-            font-family: ui-monospace, monospace;
+            font-family: -apple-system, sans-serif;
             font-size: 0.75rem;
-            color: #787B86;
+            color: #94A3B8;
             margin-top: 4px;
         }
         .chip-ok {
-            background-color: #131722;
-            border: 1px solid #089981aa;
-            color: #089981;
+            background-color: rgba(16, 185, 129, 0.10);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            color: #6EE7B7;
             padding: 2px 8px;
-            border-radius: 3px;
+            border-radius: 6px;
             font-family: ui-monospace, monospace;
             font-size: 0.75rem;
             font-weight: 600;
@@ -105,11 +108,11 @@ def render_cockpit():
             margin-bottom: 4px;
         }
         .chip-degraded {
-            background-color: #131722;
-            border: 1px solid #D29922aa;
-            color: #D29922;
+            background-color: rgba(251, 191, 36, 0.10);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            color: #FCD34D;
             padding: 2px 8px;
-            border-radius: 3px;
+            border-radius: 6px;
             font-family: ui-monospace, monospace;
             font-size: 0.75rem;
             font-weight: 600;
@@ -118,21 +121,21 @@ def render_cockpit():
             margin-bottom: 4px;
         }
         .scenario-box {
-            background-color: #131722;
-            border: 1px solid #2A2E39;
-            border-left: 3px solid #FA7900;
-            padding: 10px 14px;
+            background-color: #0F172A;
+            border: 1px solid rgba(51, 65, 85, 0.6);
+            border-left: 3px solid #818CF8;
+            padding: 12px 16px;
             margin-bottom: 10px;
-            border-radius: 0 3px 3px 0;
+            border-radius: 0 8px 8px 0;
             font-size: 0.82rem;
         }
         .section-header {
-            font-family: ui-sans-serif, sans-serif;
-            color: #FA7900;
-            font-size: 1.1rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            font-family: -apple-system, system-ui, sans-serif;
+            color: #F8FAFC;
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin-bottom: 6px;
         }
         </style>
         """,
@@ -383,11 +386,11 @@ def render_cockpit():
         "Flux visuel de confort · Aucun impact sur la logique métier.",
         unsafe_allow_html=True,
     )
-    render_tradingview_chart(symbol=tv_symbol, height=750)
+    render_tradingview_chart(symbol=tv_symbol, height=880)
 
     st.divider()
     st.caption(
-        "NQ Cockpit P08 / P13 · Bloomberg x TradingView Desk · "
+        "NQ Cockpit P08 / P13 · Design System Swetrix · "
         "Strictement non-directionnel."
     )
 

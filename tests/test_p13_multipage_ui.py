@@ -43,8 +43,8 @@ def test_streamlit_config_exists():
     assert config_path.exists(), ".streamlit/config.toml doit exister"
     content = config_path.read_text(encoding="utf-8")
     assert '[theme]' in content
-    assert 'backgroundColor = "#0D0D0D"' in content
-    assert 'font = "monospace"' in content
+    assert 'backgroundColor = "#020617"' in content
+    assert 'font = "sans serif"' in content
 
 
 def test_ui_components_export():

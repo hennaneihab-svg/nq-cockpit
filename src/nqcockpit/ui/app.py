@@ -1,11 +1,13 @@
-"""Application Streamlit Consolidée Multipage NQ Cockpit (P13).
+"""Application Streamlit Consolidée Multipage NQ Cockpit (Design System Swetrix).
 
-Design System Final : Bloomberg Terminal x TradingView Desk.
-- Fond principal : #0D0D0D (Bloomberg Terminal)
-- Panels & Cartes : #131722 (TradingView Dark Slate)
-- Bordures : #2A2E39 (TradingView 1px)
-- Accents Marque/Navigation : #FA7900 (Orange Signature Bloomberg)
-- Zéro emoji, badges en contour 1px, typographie tabulaire pour données.
+Design System extrait de Swetrix (Analytics Dashboard) :
+- Fond principal : #020617 (Tailwind Slate-950)
+- Cartes & Panneaux : #0F172A (Tailwind Slate-900 / 0.6)
+- Bordures : rgba(51, 65, 85, 0.6) (Tailwind Slate-800/60)
+- Texte principal : #F8FAFC (Gray-50), Secondaire : #CBD5E1 (Slate-300), Muted : #94A3B8 (Slate-400)
+- Accents : Indigo #6366F1 / #818CF8
+- Rayons de bordure : rounded-lg (8px) pour cartes, rounded-md (6px) pour badges
+- Typographie soignée, alignement net, zéro emoji, conformité totale aux règles.
 """
 
 from __future__ import annotations
@@ -28,43 +30,77 @@ from nqcockpit.ui.journal_page import render_journal_page
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="NQ Cockpit — Terminal Multipage",
+    page_title="NQ Cockpit — Desk de Trading",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Injection CSS Thème Final Bloomberg x TradingView
+# Injection CSS Thème Swetrix
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #0D0D0D;
-        color: #D1D4DC;
-        font-family: ui-sans-serif, -apple-system, sans-serif;
+        background-color: #020617;
+        color: #F8FAFC;
+        font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    .sidebar-header {
-        font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
-        font-size: 1.1rem;
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 98% !important;
+    }
+    /* En-tête de barre latérale Swetrix */
+    .sidebar-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .sidebar-brand-title {
+        font-size: 1.15rem;
         font-weight: 700;
-        color: #FA7900;
-        letter-spacing: 0.5px;
-        margin-bottom: 0.5rem;
+        letter-spacing: -0.02em;
+        color: #F8FAFC;
+    }
+    .sidebar-brand-badge {
+        background-color: rgba(99, 102, 241, 0.15);
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        color: #A5B4FC;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        font-family: ui-monospace, monospace;
     }
     .sidebar-clock {
-        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-        font-size: 0.78rem;
-        color: #787B86;
-        background-color: #131722;
-        border: 1px solid #2A2E39;
-        border-radius: 3px;
-        padding: 8px 10px;
-        margin-bottom: 12px;
+        background-color: #0F172A;
+        border: 1px solid rgba(51, 65, 85, 0.6);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 14px;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 0.76rem;
+        color: #94A3B8;
+        line-height: 1.5;
     }
-    /* Stylisation du menu radio dans la sidebar */
+    .sidebar-clock b {
+        color: #F8FAFC;
+    }
+    /* Force l'élargissement complet des composants HTML personnalisés */
+    [data-testid="stCustomComponentV1"] {
+        width: 100% !important;
+    }
+    [data-testid="stCustomComponentV1"] iframe {
+        width: 100% !important;
+        min-width: 100% !important;
+        border-radius: 8px !important;
+        border: 1px solid rgba(51, 65, 85, 0.6) !important;
+    }
+    /* Stylisation du menu de navigation */
     .stRadio label {
-        font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important;
-        font-size: 0.82rem !important;
-        color: #D1D4DC !important;
+        font-size: 0.85rem !important;
+        font-weight: 500 !important;
+        color: #CBD5E1 !important;
     }
     </style>
     """,
@@ -82,18 +118,23 @@ def main() -> None:
     now_ny = datetime.now(tz_ny)
 
     # ---------------------------------------------------------------------------
-    # Navigation Latérale Consolidée
+    # En-tête & Navigation Latérale Swetrix
     # ---------------------------------------------------------------------------
     st.sidebar.markdown(
-        '<div class="sidebar-header">NQ COCKPIT // TERMINAL</div>',
+        """
+        <div class="sidebar-brand">
+            <span class="sidebar-brand-title">NQ COCKPIT</span>
+            <span class="sidebar-brand-badge">DESK</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
     st.sidebar.markdown(
         f"""
         <div class="sidebar-clock">
-            <b>Alger</b> : {now_algiers.strftime('%Y-%m-%d %H:%M:%S')}<br>
-            <b>New York</b> : {now_ny.strftime('%Y-%m-%d %H:%M:%S')} (ET)
+            <b>Alger :</b> {now_algiers.strftime('%Y-%m-%d %H:%M:%S')}<br>
+            <b>New York :</b> {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ET
         </div>
         """,
         unsafe_allow_html=True,
@@ -120,7 +161,7 @@ def main() -> None:
 
     st.sidebar.markdown("---")
     st.sidebar.caption(
-        "NQ Cockpit P13 · Bloomberg x TradingView Desk · "
+        "NQ Cockpit P13 · Design System Swetrix · "
         "Strictement non-directionnel"
     )
 

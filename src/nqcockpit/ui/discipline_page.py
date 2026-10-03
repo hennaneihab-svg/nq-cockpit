@@ -45,33 +45,58 @@ def render_discipline_page() -> None:
         """
         <style>
         .stApp {
-            background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif;
+            background-color: #020617;
+            color: #F8FAFC;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont,
+                "Segoe UI", Roboto, sans-serif;
         }
         .badge-go {
-            background-color: #131722; border: 1px solid #089981aa;
-            color: #089981; padding: 12px; border-radius: 3px;
-            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            background-color: rgba(16, 185, 129, 0.10);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            color: #6EE7B7;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-align: center;
         }
         .badge-stop {
-            background-color: #131722; border: 1px solid #F23645aa;
-            color: #F23645; padding: 12px; border-radius: 3px;
-            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            background-color: rgba(248, 113, 113, 0.10);
+            border: 1px solid rgba(248, 113, 113, 0.25);
+            color: #FCA5A5;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-align: center;
         }
         .badge-warn {
-            background-color: #131722; border: 1px solid #D29922aa;
-            color: #D29922; padding: 12px; border-radius: 3px;
-            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            background-color: rgba(251, 191, 36, 0.10);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            color: #FCD34D;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-align: center;
         }
         .card {
-            background-color: #131722; border: 1px solid #2A2E39;
-            border-radius: 3px; padding: 14px; margin-bottom: 14px;
+            background-color: #0F172A;
+            border: 1px solid rgba(51, 65, 85, 0.6);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 14px;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         }
         .section-header {
-            font-family: ui-sans-serif, sans-serif;
-            color: #FA7900;
-            font-size: 1.1rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+            font-family: -apple-system, system-ui, sans-serif;
+            color: #F8FAFC;
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
             margin-bottom: 8px;
         }
         </style>
