@@ -218,7 +218,7 @@ def is_tradingview_reachable(
 
 
 def render_tradingview_chart(
-    symbol: str = "CME:NQ1!",
+    symbol: str = "CME_MINI:NQ1!",
     height: int = 880,
     force_offline: bool = False,
 ) -> None:
@@ -230,6 +230,8 @@ def render_tradingview_chart(
     - Dégradation gracieuse offline visible.
     - Strictement visuel : aucune donnée du widget n'alimente la logique métier.
     """
+    import json
+
     import streamlit.components.v1 as components
 
     if force_offline or not is_tradingview_reachable():
@@ -252,6 +254,20 @@ def render_tradingview_chart(
             unsafe_allow_html=True,
         )
         return
+
+    widget_config = {
+        "autosize": True,
+        "symbol": symbol,
+        "interval": "5",
+        "timezone": "America/New_York",
+        "theme": "dark",
+        "style": "1",
+        "locale": "fr",
+        "allow_symbol_change": True,
+        "calendar": False,
+        "support_host": "https://www.tradingview.com",
+    }
+    config_json = json.dumps(widget_config, indent=2)
 
     widget_html = f"""
     <!DOCTYPE html>
@@ -276,7 +292,7 @@ def render_tradingview_chart(
           border-radius: 8px;
           overflow: hidden;
         }}
-        #tradingview_advanced_chart {{
+        .tradingview-widget-container__widget {{
           width: 100% !important;
           height: calc(100% - 28px) !important;
           flex: 1 1 auto !important;
@@ -294,33 +310,17 @@ def render_tradingview_chart(
     </head>
     <body>
       <div class="tradingview-widget-container">
-        <div id="tradingview_advanced_chart"></div>
+        <div class="tradingview-widget-container__widget"></div>
         <div class="tradingview-widget-copyright">
           <a href="https://fr.tradingview.com/" rel="noopener nofollow" target="_blank"
              style="color: #6366F1; text-decoration: none; font-weight: 500;">
             <span class="blue-text">Powered by TradingView</span>
           </a>
         </div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget(
-        {{
-          "autosize": true,
-          "width": "100%",
-          "height": "100%",
-          "symbol": "{symbol}",
-          "interval": "5",
-          "timezone": "America/New_York",
-          "theme": "dark",
-          "style": "1",
-          "locale": "fr",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "container_id": "tradingview_advanced_chart",
-          "backgroundColor": "#0F172A",
-          "gridColor": "rgba(51, 65, 85, 0.3)"
-        }}
-        );
+        <script type="text/javascript"
+          src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+          async>
+{config_json}
         </script>
       </div>
     </body>

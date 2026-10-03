@@ -94,7 +94,7 @@ class SourcesConfig:
     bls_contact_email: str = "contact@nqcockpit.local"
     stale_data_threshold_minutes: int = 60
     cboe_ndx_url: str = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
-    tradingview_symbol: str = "CME:NQ1!"
+    tradingview_symbol: str = "CME_MINI:NQ1!"
 
 
 @dataclass(frozen=True)

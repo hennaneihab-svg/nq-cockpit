@@ -376,7 +376,7 @@ def render_cockpit():
     # 5. GRAPHIQUE TRADINGVIEW LIVE (CONFORT VISUEL SANS IMPACT MÉTIER)
     # -----------------------------------------------------------------------
     st.divider()
-    tv_symbol = getattr(cfg.sources, "tradingview_symbol", "CME:NQ1!")
+    tv_symbol = getattr(cfg.sources, "tradingview_symbol", "CME_MINI:NQ1!")
     st.markdown(
         f'<div class="section-header">GRAPHIQUE TRADINGVIEW LIVE // {tv_symbol}</div>',
         unsafe_allow_html=True,

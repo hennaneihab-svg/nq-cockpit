@@ -57,7 +57,16 @@ PLOTLY_LAYOUT_DEFAULTS: dict[str, Any] = {
         "color": "#F8FAFC",
         "family": "-apple-system, system-ui, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
     },
-    "margin": {"l": 45, "r": 30, "t": 45, "b": 40},
+    "title_font": {
+        "size": 15,
+        "color": "#F8FAFC",
+        "family": "ui-monospace, SFMono-Regular, monospace",
+    },
+    "title_x": 0.02,
+    "title_xanchor": "left",
+    "title_y": 0.94,
+    "title_yanchor": "top",
+    "margin": {"l": 55, "r": 35, "t": 65, "b": 45},
 }
 
 
@@ -674,18 +683,37 @@ def render_coaching_app() -> None:
             st.info("Aucune fuite majeure identifiée sur cette sélection.")
 
         st.markdown("#### RÈGLE PRIORITAIRE À RENFORCER")
-        st.warning(f"**{coaching.rule_to_reinforce}**")
+        if coaching.rule_to_reinforce:
+            st.warning(f"**{coaching.rule_to_reinforce}**")
+        else:
+            n_flt = len(filtered_trades)
+            min_s = config.validation.min_sessions
+            st.info(
+                f"Échantillon insuffisant ({n_flt}/{min_s} trades) "
+                "— aucune violation récurrente confirmée statistiquement."
+            )
 
     with col_coach2:
         st.markdown("#### FORCE À CONSERVER")
-        st.success(f"**{coaching.strength_to_keep}**")
+        if coaching.strength_to_keep:
+            st.success(f"**{coaching.strength_to_keep}**")
+        else:
+            n_flt = len(filtered_trades)
+            min_s = config.validation.min_sessions
+            st.info(
+                f"Échantillon en cours de constitution ({n_flt}/{min_s} trades) "
+                "— maintenir la documentation rigoureuse de chaque trade."
+            )
 
         st.markdown("#### OBJECTIFS MESURABLES")
         if coaching.measurable_goals:
             for goal in coaching.measurable_goals:
                 st.markdown(f"- {goal}")
         else:
-            st.info("Poursuivre la collecte de données conformes.")
+            st.info(
+                f"Atteindre le seuil de {config.validation.min_sessions} trades documentés "
+                "avant d'établir des cibles quantitatives d'amélioration."
+            )
 
     # -----------------------------------------------------------------------
     # Détail des Alertes de Tilt Détectées
