@@ -106,36 +106,4 @@ def test_ui_db_connection_cached():
     assert conn1 is conn2, "get_ui_db() doit retourner une instance unique mise en cache"
 
 
-def test_tradingview_widget_config_loading():
-    """Vérifie le chargement du symbole TradingView depuis config.yaml."""
-    from nqcockpit.config import load_config
-    cfg = load_config()
-    assert hasattr(cfg.sources, "tradingview_symbol")
-    assert cfg.sources.tradingview_symbol == "CME_MINI:NQ1!"
-
-
-def test_tradingview_widget_render():
-    """Vérifie l'exécution du composant graphique TradingView."""
-    from nqcockpit.ui.components import render_tradingview_chart
-    assert callable(render_tradingview_chart)
-    # L'exécution du composant ne doit lever aucune exception
-    render_tradingview_chart(symbol="CME_MINI:NQ1!", height=750)
-
-
-def test_tradingview_widget_offline_degradation():
-    """Vérifie le repli en mode DÉGRADÉ visible lors d'une absence de connexion internet."""
-    from nqcockpit.ui.components import render_tradingview_chart
-    # En forçant le mode offline, le bandeau DÉGRADÉ doit être rendu de façon propre
-    render_tradingview_chart(symbol="CME_MINI:NQ1!", force_offline=True)
-
-
-def test_tradingview_widget_socket_failure_simulation():
-    """Simule concrètement une panne réseau au niveau socket via unittest.mock.patch."""
-    from unittest.mock import patch
-
-    from nqcockpit.ui.components import render_tradingview_chart
-
-    with patch("socket.create_connection", side_effect=OSError("Network unreachable")):
-        render_tradingview_chart(symbol="CME:NQ1!")
-
 

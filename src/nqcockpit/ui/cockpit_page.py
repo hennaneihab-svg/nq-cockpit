@@ -19,7 +19,6 @@ from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
-from nqcockpit.ui.components import render_tradingview_chart
 
 TZ_ALGIERS = ZoneInfo("Africa/Algiers")
 TZ_ET = ZoneInfo("America/New_York")
@@ -371,22 +370,6 @@ def render_cockpit():
                     )
         else:
             st.info("Aucun scénario généré pour la séance.")
-
-    # -----------------------------------------------------------------------
-    # 5. GRAPHIQUE TRADINGVIEW LIVE (CONFORT VISUEL SANS IMPACT MÉTIER)
-    # -----------------------------------------------------------------------
-    st.divider()
-    tv_symbol = getattr(cfg.sources, "tradingview_symbol", "CME_MINI:NQ1!")
-    st.markdown(
-        f'<div class="section-header">GRAPHIQUE TRADINGVIEW LIVE // {tv_symbol}</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        f"Symbole : <b>{tv_symbol}</b> (Source : <code>config.yaml</code>) · "
-        "Flux visuel de confort · Aucun impact sur la logique métier.",
-        unsafe_allow_html=True,
-    )
-    render_tradingview_chart(symbol=tv_symbol, height=880)
 
     st.divider()
     st.caption(
