@@ -128,3 +128,14 @@ def test_tradingview_widget_offline_degradation():
     # En forçant le mode offline, le bandeau DÉGRADÉ doit être rendu de façon propre
     render_tradingview_chart(symbol="CME_MINI:NQ1!", force_offline=True)
 
+
+def test_tradingview_widget_socket_failure_simulation():
+    """Simule concrètement une panne réseau au niveau socket via unittest.mock.patch."""
+    from unittest.mock import patch
+
+    from nqcockpit.ui.components import render_tradingview_chart
+
+    with patch("socket.create_connection", side_effect=OSError("Network unreachable")):
+        render_tradingview_chart(symbol="CME_MINI:NQ1!")
+
+
