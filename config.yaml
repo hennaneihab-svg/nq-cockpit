@@ -91,7 +91,7 @@ sources:
   bls_contact_email: "contact@nqcockpit.local"
   stale_data_threshold_minutes: 60
   cboe_ndx_url: "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
-  tradingview_symbol: "CME_MINI:NQ1!"
+  tradingview_symbol: "CME:NQ1!"
 market_sessions:
   us_equities:
     timezone: America/New_York

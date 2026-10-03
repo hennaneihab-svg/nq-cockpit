@@ -156,8 +156,8 @@ def is_tradingview_reachable(
 
 
 def render_tradingview_chart(
-    symbol: str = "CME_MINI:NQ1!",
-    height: int = 500,
+    symbol: str = "CME:NQ1!",
+    height: int = 750,
     force_offline: bool = False,
 ) -> None:
     """Rendu du widget TradingView Advanced Chart avec dégradation gracieuse offline.
@@ -191,34 +191,73 @@ def render_tradingview_chart(
         return
 
     widget_html = f"""
-    <div class="tradingview-widget-container" style="height:100%;width:100%;">
-      <div id="tradingview_advanced_chart" style="height:calc(100% - 32px);width:100%;"></div>
-      <div class="tradingview-widget-copyright" style="font-family: monospace; font-size: 11px;">
-        <a href="https://fr.tradingview.com/" rel="noopener nofollow" target="_blank"
-           style="color: #FA7900; text-decoration: none;">
-          <span class="blue-text">Powered by TradingView</span>
-        </a>
+    <!DOCTYPE html>
+    <html style="height: 100%; margin: 0; padding: 0;">
+    <head>
+      <meta charset="utf-8">
+      <style>
+        html, body {{
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+          background-color: #131722;
+          overflow: hidden;
+        }}
+        .tradingview-widget-container {{
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }}
+        #tradingview_advanced_chart {{
+          width: 100%;
+          height: calc(100% - 30px);
+          flex: 1 1 auto;
+        }}
+        .tradingview-widget-copyright {{
+          height: 24px;
+          line-height: 24px;
+          padding: 0 8px;
+          font-family: monospace;
+          font-size: 11px;
+          background-color: #131722;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="tradingview-widget-container">
+        <div id="tradingview_advanced_chart"></div>
+        <div class="tradingview-widget-copyright">
+          <a href="https://fr.tradingview.com/" rel="noopener nofollow" target="_blank"
+             style="color: #FA7900; text-decoration: none;">
+            <span class="blue-text">Powered by TradingView</span>
+          </a>
+        </div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget(
+        {{
+          "autosize": true,
+          "width": "100%",
+          "height": "100%",
+          "symbol": "{symbol}",
+          "interval": "5",
+          "timezone": "America/New_York",
+          "theme": "dark",
+          "style": "1",
+          "locale": "fr",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "container_id": "tradingview_advanced_chart",
+          "backgroundColor": "#131722",
+          "gridColor": "#2A2E39"
+        }}
+        );
+        </script>
       </div>
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget(
-      {{
-        "autosize": true,
-        "symbol": "{symbol}",
-        "interval": "5",
-        "timezone": "America/New_York",
-        "theme": "dark",
-        "style": "1",
-        "locale": "fr",
-        "enable_publishing": false,
-        "allow_symbol_change": true,
-        "container_id": "tradingview_advanced_chart",
-        "backgroundColor": "#131722",
-        "gridColor": "#2A2E39"
-      }}
-      );
-      </script>
-    </div>
+    </body>
+    </html>
     """
     components.html(widget_html, height=height)
 
