@@ -198,6 +198,7 @@ class PerformanceStats:
 
     # Espérance
     expectancy_r: Optional[float] = None          # None si n < seuil
+    raw_mean_r: Optional[float] = None            # Moyenne empirique de l'échantillon
     expectancy_ci_low: Optional[float] = None
     expectancy_ci_high: Optional[float] = None
 

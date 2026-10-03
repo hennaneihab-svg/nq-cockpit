@@ -262,7 +262,7 @@ def build_segmentation_figure(
     hover_texts: list[str] = []
 
     for name, stats in segments.items():
-        val = stats.expectancy_r if stats.expectancy_r is not None else 0.0
+        val = stats.expectancy_r if stats.expectancy_r is not None else (stats.raw_mean_r or 0.0)
         exp_r.append(round(val, 3))
 
         sig_tag = "" if stats.sample_sufficient else " (n < seuil)"
@@ -279,13 +279,19 @@ def build_segmentation_figure(
         exp_ci_str = (
             f"[{stats.expectancy_ci_low:+.3f}R, {stats.expectancy_ci_high:+.3f}R]"
             if stats.expectancy_ci_low is not None and stats.expectancy_ci_high is not None
-            else "—"
+            else "Non significatif (n < seuil)"
+        )
+        val_label = (
+            "Espérance confirmée"
+            if stats.sample_sufficient
+            else "Moyenne empirique (n < seuil)"
         )
 
         hover_texts.append(
             f"<b>{by_label} : {name}</b><br>"
             f"Trades : {stats.n_trades}<br>"
-            f"Espérance : <b>{val:+.3f}R</b> (IC 95% : {exp_ci_str})<br>"
+            f"{val_label} : <b>{val:+.3f}R</b><br>"
+            f"IC 95% : {exp_ci_str}<br>"
             f"Win Rate : <b>{wr_str}</b> (IC Wilson : {ci_str})<br>"
             f"Wins / Pertes : {stats.n_wins} / {stats.n_losses}<br>"
             f"Échantillon suffisant : {'Oui' if stats.sample_sufficient else 'Non'}"
@@ -315,7 +321,7 @@ def build_segmentation_figure(
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
         title=title,
-        xaxis_title="Espérance de gain par trade (R)",
+        xaxis_title="Gain moyen par trade (R)",
         yaxis_title=by_label,
         yaxis={"autorange": "reversed"},
     )

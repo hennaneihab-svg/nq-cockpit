@@ -447,6 +447,8 @@ def compute_performance_stats(
     stats.sample_sufficient = len(trades) >= min_trades
 
     r_values = [t.r_realized for t in trades]
+    if r_values:
+        stats.raw_mean_r = sum(r_values) / len(r_values)
 
     # Win rate + IC Wilson (calculé même avec n < seuil — mais signalé)
     if len(trades) > 0:
