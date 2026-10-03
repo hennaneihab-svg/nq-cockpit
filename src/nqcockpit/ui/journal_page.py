@@ -79,7 +79,10 @@ def render_journal_page() -> None:
     # Sidebar — navigation
     # ---------------------------------------------------------------------------
 
-    st.sidebar.markdown('<div class="section-header">JOURNAL SECTIONS</div>', unsafe_allow_html=True)
+    st.sidebar.markdown(
+        '<div class="section-header">JOURNAL SECTIONS</div>',
+        unsafe_allow_html=True,
+    )
     page = st.sidebar.radio(
         "Section Journal",
         ["Enregistrer un trade", "Journal du jour", "Performance globale", "Coaching"],
@@ -94,7 +97,10 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     if page == "Enregistrer un trade":
-        st.markdown('<div class="section-header">SAISIE D\'UN NOUVEAU TRADE</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">SAISIE D\'UN NOUVEAU TRADE</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -187,7 +193,10 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Journal du jour":
-        st.markdown('<div class="section-header">JOURNAL DE SÉANCE DÉTAILLÉ</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">JOURNAL DE SÉANCE DÉTAILLÉ</div>',
+            unsafe_allow_html=True,
+        )
 
         today_ny = datetime.now(tz_market).date()
         selected_date = st.date_input("Date séance", value=today_ny)
@@ -289,7 +298,10 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Performance globale":
-        st.markdown('<div class="section-header">PERFORMANCE GLOBALE AGREGÉE</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">PERFORMANCE GLOBALE AGREGÉE</div>',
+            unsafe_allow_html=True,
+        )
 
         all_trades = load_trades(conn)
         if not all_trades:
@@ -328,16 +340,23 @@ def render_journal_page() -> None:
                 st.divider()
                 c5, c6, c7, c8 = st.columns(4)
                 with c5:
-                    exp_r_str = f"{stats.expectancy_r:+.3f}R" if stats.expectancy_r is not None else "—"
-                    exp_kind = "pos" if stats.expectancy_r and stats.expectancy_r >= 0 else "neg"
+                    exp_r_val = stats.expectancy_r
+                    exp_r_str = f"{exp_r_val:+.3f}R" if exp_r_val is not None else "—"
+                    exp_kind = "pos" if exp_r_val and exp_r_val >= 0 else "neg"
                     render_terminal_metric("Espérance (R)", exp_r_str, status_kind=exp_kind)
                 with c6:
                     pf_val = f"{stats.profit_factor:.2f}" if stats.profit_factor else "—"
                     render_terminal_metric("Profit Factor", pf_val)
                 with c7:
-                    render_terminal_metric("Max DD (R)", f"-{stats.max_drawdown_r:.3f}R", status_kind="neg")
+                    dd_str = f"-{stats.max_drawdown_r:.3f}R"
+                    render_terminal_metric("Max DD (R)", dd_str, status_kind="neg")
                 with c8:
-                    exp_c_str = f"{stats.expectancy_r_compliant:+.3f}R" if stats.expectancy_r_compliant is not None else "insuffisant"
+                    exp_c_val = stats.expectancy_r_compliant
+                    exp_c_str = (
+                        f"{exp_c_val:+.3f}R"
+                        if exp_c_val is not None
+                        else "insuffisant"
+                    )
                     render_terminal_metric("Espérance Conformes", exp_c_str)
 
             # Segmentation
@@ -374,7 +393,10 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
 
     elif page == "Coaching":
-        st.markdown('<div class="section-header">RAPPORT DE COACHING ET ANALYTICS</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">RAPPORT DE COACHING ET ANALYTICS</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2 = st.columns([1, 2])
         with col1:

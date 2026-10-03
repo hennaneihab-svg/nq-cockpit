@@ -19,6 +19,7 @@ from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
+from nqcockpit.ui.components import render_tradingview_chart
 
 TZ_ALGIERS = ZoneInfo("Africa/Algiers")
 TZ_ET = ZoneInfo("America/New_York")
@@ -42,7 +43,7 @@ def render_cockpit():
         .stApp {
             background-color: #0D0D0D;
             color: #D1D4DC;
-            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: ui-sans-serif, -apple-system, sans-serif;
         }
         .block-container {
             padding-top: 1.2rem;
@@ -154,13 +155,16 @@ def render_cockpit():
     # En-tête : Titre & Horodatages multi-fuseaux
     col_t1, col_t2 = st.columns([2, 1])
     with col_t1:
-        st.markdown('<div class="section-header">NQ COCKPIT // PROFIL DE SÉANCE LIVE</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">NQ COCKPIT // PROFIL DE SÉANCE LIVE</div>',
+            unsafe_allow_html=True,
+        )
         st.caption("Aide à la décision non-directionnelle · Discipline & Cadre d'exécution")
     with col_t2:
         now_alg = now_utc.astimezone(TZ_ALGIERS).strftime("%H:%M:%S")
         now_et = now_utc.astimezone(TZ_ET).strftime("%H:%M:%S")
         st.markdown(
-            f"<div style='text-align: right; font-family: ui-monospace, monospace; font-size: 0.8rem; color: #787B86;'>"
+            f"<div style='text-align: right; font-family: monospace; font-size: 0.8rem;'>"
             f"<b>Alger :</b> {now_alg} | <b>New York :</b> {now_et} ET<br>"
             f"Séance cible : <b>{profile.target_date}</b>"
             f"</div>",
@@ -174,7 +178,7 @@ def render_cockpit():
         st.markdown(
             """
             <div class="status-banner-allowed">
-                <span style="font-family: ui-monospace, monospace; font-size: 1.1rem; font-weight: 700; color: #089981;">
+                <span style="font-family: monospace; font-weight: 700; color: #089981;">
                     SYSTEM // TRADING AUTORISÉ (SOUS CONDITIONS)
                 </span><br>
                 <span style="font-size: 0.82rem; color: #D1D4DC;">
@@ -195,7 +199,7 @@ def render_cockpit():
         st.markdown(
             f"""
             <div class="status-banner-notrade">
-                <span style="font-family: ui-monospace, monospace; font-size: 1.1rem; font-weight: 700; color: #F23645;">
+                <span style="font-family: monospace; font-weight: 700; color: #F23645;">
                     SYSTEM // DRAPEAU NO-TRADE ACTIF ({cnt})
                 </span><br>
                 <span style="font-size: 0.82rem; color: #D1D4DC;">
@@ -285,7 +289,11 @@ def render_cockpit():
     # -----------------------------------------------------------------------
     # 3. BANDEAU DE SANTÉ DÉCOMPOSÉ DES SOURCES (AUCUN MASQUAGE)
     # -----------------------------------------------------------------------
-    st.markdown("<div style='font-family: ui-sans-serif, sans-serif; font-size: 0.9rem; font-weight: 700; color: #FA7900; margin-top: 10px;'>SANTÉ DES COMPOSANTS SOURCES</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='font-size: 0.9rem; font-weight: 700; color: #FA7900; margin-top: 10px;'>"
+        "SANTÉ DES COMPOSANTS SOURCES</div>",
+        unsafe_allow_html=True,
+    )
     chips_html = []
     for _c_key, c_val in profile.component_statuses.items():
         is_deg = "DÉGRADÉ" in c_val.status
@@ -300,7 +308,10 @@ def render_cockpit():
     c_left, c_right = st.columns([1, 1], gap="medium")
 
     with c_left:
-        st.markdown('<div class="section-header">NIVEAUX CLÉS EN POINTS NQ</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">NIVEAUX CLÉS EN POINTS NQ</div>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             f"Spot NQ de référence : <b>{profile.spot_nq:.2f} pts</b>",
             unsafe_allow_html=True,
@@ -333,7 +344,10 @@ def render_cockpit():
             st.warning("Aucun niveau clé disponible.")
 
     with c_right:
-        st.markdown('<div class="section-header">CARTE DE SCÉNARIOS « SI… ALORS… »</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header">CARTE DE SCÉNARIOS « SI… ALORS… »</div>',
+            unsafe_allow_html=True,
+        )
         st.caption("Conditions objectives de structure de carnet sans prédiction de direction.")
 
         if profile.scenarios:
@@ -354,6 +368,22 @@ def render_cockpit():
                     )
         else:
             st.info("Aucun scénario généré pour la séance.")
+
+    # -----------------------------------------------------------------------
+    # 5. GRAPHIQUE TRADINGVIEW LIVE (CONFORT VISUEL SANS IMPACT MÉTIER)
+    # -----------------------------------------------------------------------
+    st.divider()
+    tv_symbol = getattr(cfg.sources, "tradingview_symbol", "CME_MINI:NQ1!")
+    st.markdown(
+        f'<div class="section-header">GRAPHIQUE TRADINGVIEW LIVE // {tv_symbol}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"Symbole : <b>{tv_symbol}</b> (Source : <code>config.yaml</code>) · "
+        "Flux visuel de confort · Aucun impact sur la logique métier.",
+        unsafe_allow_html=True,
+    )
+    render_tradingview_chart(symbol=tv_symbol, height=520)
 
     st.divider()
     st.caption(

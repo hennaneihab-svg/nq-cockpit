@@ -369,14 +369,24 @@ def render_coaching_app() -> None:
     st.markdown(
         """
     <style>
-    body, .main { background-color: #0D0D0D; color: #D1D4DC; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body, .main {
+        background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif;
+    }
     .metric-card {
         background-color: #131722; border: 1px solid #2A2E39;
         border-radius: 2px; padding: 12px 16px; margin: 4px 0;
     }
-    .metric-label { font-size: 0.75rem; color: #787B86; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-    .metric-val { font-size: 1.4rem; font-weight: 700; color: #D1D4DC; font-family: "JetBrains Mono", Consolas, monospace; }
-    .metric-sub { font-size: 0.8rem; color: #787B86; font-family: "JetBrains Mono", Consolas, monospace; }
+    .metric-label {
+        font-size: 0.75rem; color: #787B86; text-transform: uppercase;
+        letter-spacing: 0.5px; font-weight: 600;
+    }
+    .metric-val {
+        font-size: 1.4rem; font-weight: 700; color: #D1D4DC;
+        font-family: monospace;
+    }
+    .metric-sub {
+        font-size: 0.8rem; color: #787B86; font-family: monospace;
+    }
     .ok { color: #089981; font-weight: 700; }
     .warn { color: #D29922; font-weight: 700; }
     .err { color: #F23645; font-weight: 700; }

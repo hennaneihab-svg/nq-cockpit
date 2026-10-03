@@ -26,7 +26,7 @@ from nqcockpit.discipline.models import (
 )
 from nqcockpit.discipline.risk import compute_position_size
 from nqcockpit.journal.store import load_trades
-from nqcockpit.ui.components import render_status_badge, render_terminal_metric
+from nqcockpit.ui.components import render_terminal_metric
 from nqcockpit.ui.db import get_ui_db
 
 
@@ -44,21 +44,23 @@ def render_discipline_page() -> None:
     st.markdown(
         """
         <style>
-        .stApp { background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif; }
+        .stApp {
+            background-color: #0D0D0D; color: #D1D4DC; font-family: ui-sans-serif, sans-serif;
+        }
         .badge-go {
             background-color: #131722; border: 1px solid #089981aa;
             color: #089981; padding: 12px; border-radius: 3px;
-            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .badge-stop {
             background-color: #131722; border: 1px solid #F23645aa;
             color: #F23645; padding: 12px; border-radius: 3px;
-            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .badge-warn {
             background-color: #131722; border: 1px solid #D29922aa;
             color: #D29922; padding: 12px; border-radius: 3px;
-            font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
+            font-family: monospace; font-weight: 700; font-size: 1.1rem; text-align: center;
         }
         .card {
             background-color: #131722; border: 1px solid #2A2E39;
@@ -84,7 +86,10 @@ def render_discipline_page() -> None:
     now_utc = datetime.now(timezone.utc)
     state = evaluate_session_state(trades, now_utc, config)
 
-    st.markdown('<div class="section-header">PORTE DE DISCIPLINE & GESTION DU RISQUE LIVE</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-header">PORTE DE DISCIPLINE & GESTION DU RISQUE LIVE</div>',
+        unsafe_allow_html=True,
+    )
 
     # ---------------------------------------------------------------------------
     # Section 1 : État vivant de la séance
@@ -121,10 +126,12 @@ def render_discipline_page() -> None:
         with c2:
             render_terminal_metric("Fenêtre active", state.current_window_name or "Aucune")
         with c3:
-            render_terminal_metric("Trades restants", f"{state.trades_remaining} / {state.max_trades_allowed}")
+            rem_str = f"{state.trades_remaining} / {state.max_trades_allowed}"
+            render_terminal_metric("Trades restants", rem_str)
         with c4:
             r_kind = "pos" if state.r_realized_today >= 0 else "neg"
-            render_terminal_metric("R cumulé jour", f"{state.r_realized_today:+.2f}R", status_kind=r_kind)
+            r_str = f"{state.r_realized_today:+.2f}R"
+            render_terminal_metric("R cumulé jour", r_str, status_kind=r_kind)
 
     if state.lock_reasons:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -187,11 +194,21 @@ def render_discipline_page() -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     with s1:
-        render_terminal_metric("Contrats autorisés", f"{sizing_res.contracts}x {inst}", subtext="Math.floor floor", status_kind="ok")
+        render_terminal_metric(
+            "Contrats autorisés",
+            f"{sizing_res.contracts}x {inst}",
+            subtext="Math.floor floor",
+            status_kind="ok",
+        )
     with s2:
         render_terminal_metric("Budget risque", f"{sizing_res.risk_budget_dollars:.2f} $")
     with s3:
-        render_terminal_metric("Risque réel", f"{sizing_res.actual_risk_dollars:.2f} $", subtext=f"{sizing_res.actual_risk_pct:.2f}% capital")
+        act_sub = f"{sizing_res.actual_risk_pct:.2f}% capital"
+        render_terminal_metric(
+            "Risque réel",
+            f"{sizing_res.actual_risk_dollars:.2f} $",
+            subtext=act_sub,
+        )
     with s4:
         render_terminal_metric("Valeur du point", f"{sizing_res.point_value:.1f} $/pt")
 

@@ -40,7 +40,7 @@ st.markdown(
     .stApp {
         background-color: #0D0D0D;
         color: #D1D4DC;
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family: ui-sans-serif, -apple-system, sans-serif;
     }
     .sidebar-header {
         font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;

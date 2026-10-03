@@ -94,6 +94,7 @@ class SourcesConfig:
     bls_contact_email: str = "contact@nqcockpit.local"
     stale_data_threshold_minutes: int = 60
     cboe_ndx_url: str = "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json"
+    tradingview_symbol: str = "CME_MINI:NQ1!"
 
 
 @dataclass(frozen=True)
@@ -457,10 +458,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json",
         )
     )
+    tv_symbol = str(raw_sources.get("tradingview_symbol", "CME_MINI:NQ1!"))
     sources = SourcesConfig(
         bls_contact_email=bls_email,
         stale_data_threshold_minutes=stale_thresh,
         cboe_ndx_url=cboe_url,
+        tradingview_symbol=tv_symbol,
     )
 
     # 10. Market Sessions

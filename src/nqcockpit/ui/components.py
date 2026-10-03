@@ -48,7 +48,7 @@ def render_status_badge(status: str, label: str = "") -> None:
         text-align: center;
         margin-bottom: 6px;
     ">
-        {f'<span style="color: #787B86; font-weight: normal;">{label}: </span>' if label else ''}SYSTEM // {norm_status}
+        {f'<span style="color: #787B86;">{label}: </span>' if label else ''}SYSTEM // {norm_status}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
@@ -68,11 +68,11 @@ def render_degraded_banner(warnings: list[str]) -> None:
         border-radius: 3px;
         padding: 10px 14px;
         margin: 10px 0 16px 0;
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: ui-sans-serif, -apple-system, sans-serif;
         font-size: 0.82rem;
         line-height: 1.4;
     ">
-        <div style="font-weight: 700; font-family: ui-monospace, monospace; letter-spacing: 0.5px; margin-bottom: 4px;">
+        <div style="font-weight: 700; font-family: monospace; margin-bottom: 4px;">
             [AVERTISSEMENT DE SANTÉ DES SOURCES — STATUT DÉGRADÉ]
         </div>
         <ul style="margin: 4px 0 0 16px; padding: 0; font-family: ui-monospace, monospace;">
@@ -102,6 +102,12 @@ def render_terminal_metric(
     }
     val_color = color_map.get(status_kind, "#D1D4DC")
 
+    sub_html = (
+        f'<div style="font-family: monospace; font-size: 0.72rem; color: #787B86;">'
+        f'{subtext}</div>'
+        if subtext
+        else ''
+    )
     html = f"""
     <div style="
         background-color: #131722;
@@ -111,7 +117,7 @@ def render_terminal_metric(
         margin: 4px 0;
     ">
         <div style="
-            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: ui-sans-serif, -apple-system, sans-serif;
             font-size: 0.72rem;
             color: #787B86;
             text-transform: uppercase;
@@ -128,7 +134,91 @@ def render_terminal_metric(
         ">
             {value}
         </div>
-        {f'<div style="font-family: ui-monospace, monospace; font-size: 0.72rem; color: #787B86;">{subtext}</div>' if subtext else ''}
+        {sub_html}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
+
+
+def is_tradingview_reachable(
+    host: str = "s3.tradingview.com",
+    port: int = 443,
+    timeout: float = 1.5,
+) -> bool:
+    """Vérifie la joignabilité réseau des serveurs du widget TradingView."""
+    import socket
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+
+def render_tradingview_chart(
+    symbol: str = "CME_MINI:NQ1!",
+    height: int = 500,
+    force_offline: bool = False,
+) -> None:
+    """Rendu du widget TradingView Advanced Chart avec dégradation gracieuse offline.
+
+    - Gratuit, sans clé API ni dépendance externe payante.
+    - Attribution 'Powered by TradingView' conservée.
+    - Thème sombre aligné sur Bloomberg x TradingView (#131722).
+    - Strictement visuel : aucune donnée du widget n'alimente la logique métier.
+    """
+    import streamlit.components.v1 as components
+
+    if force_offline or not is_tradingview_reachable():
+        st.markdown(
+            """
+            <div style="
+                background-color: #181512;
+                border: 1px solid #D29922;
+                color: #D29922;
+                border-radius: 3px;
+                padding: 12px 16px;
+                margin: 10px 0;
+                font-family: ui-monospace, monospace;
+                font-size: 0.85rem;
+                font-weight: 600;
+            ">
+                [DÉGRADÉ] Graphique TradingView indisponible — vérifier la connexion internet
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    widget_html = f"""
+    <div class="tradingview-widget-container" style="height:100%;width:100%;">
+      <div id="tradingview_advanced_chart" style="height:calc(100% - 32px);width:100%;"></div>
+      <div class="tradingview-widget-copyright" style="font-family: monospace; font-size: 11px;">
+        <a href="https://fr.tradingview.com/" rel="noopener nofollow" target="_blank"
+           style="color: #FA7900; text-decoration: none;">
+          <span class="blue-text">Powered by TradingView</span>
+        </a>
+      </div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+      {{
+        "autosize": true,
+        "symbol": "{symbol}",
+        "interval": "5",
+        "timezone": "America/New_York",
+        "theme": "dark",
+        "style": "1",
+        "locale": "fr",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "container_id": "tradingview_advanced_chart",
+        "backgroundColor": "#131722",
+        "gridColor": "#2A2E39"
+      }}
+      );
+      </script>
+    </div>
+    """
+    components.html(widget_html, height=height)
+
