@@ -67,6 +67,27 @@ PLOTLY_LAYOUT_DEFAULTS: dict[str, Any] = {
     "title_y": 0.94,
     "title_yanchor": "top",
     "margin": {"l": 55, "r": 35, "t": 65, "b": 45},
+    "xaxis_gridcolor": "rgba(51, 65, 85, 0.4)",
+    "xaxis_gridwidth": 1,
+    "xaxis_zerolinecolor": "rgba(71, 85, 105, 0.6)",
+    "xaxis_zerolinewidth": 1,
+    "yaxis_gridcolor": "rgba(51, 65, 85, 0.4)",
+    "yaxis_gridwidth": 1,
+    "yaxis_zerolinecolor": "rgba(71, 85, 105, 0.6)",
+    "yaxis_zerolinewidth": 1,
+    "hoverlabel": {
+        "bgcolor": "#0F172A",
+        "bordercolor": "rgba(100, 116, 139, 0.5)",
+        "font": {
+            "family": "ui-monospace, SFMono-Regular, monospace",
+            "size": 12,
+            "color": "#F8FAFC",
+        },
+    },
+    "transition": {
+        "duration": 500,
+        "easing": "cubic-in-out",
+    },
 }
 
 
@@ -113,26 +134,29 @@ def build_equity_curve_figure(
         trade_id_to_point[t.trade_id] = (label, round(current_r, 4))
 
         contracts_str = f"{t.contracts}" if t.contracts is not None else "N/A"
+        conforme_str = "Oui" if not (t.sl_moved or t.early_exit) else "Non"
         txt = (
-            f"Trade #{i} [{t.trade_id[:8]}]<br>"
+            f"<b>Trade #{i} [{t.trade_id[:8]}]</b><br>"
             f"Date : {t.session_date} {t.entry_time_ny or ''}<br>"
             f"Direction : {t.direction.value} | Contrats : {contracts_str}<br>"
             f"Setup : {t.setup_tag or 'N/A'}<br>"
-            f"Résultat : {t.r_realized:+.3f}R ({t.outcome.value})<br>"
-            f"R cumulé : {current_r:+.3f}R<br>"
-            f"Conforme : {'Oui' if not (t.sl_moved or t.early_exit) else 'Non'}"
+            f"Résultat : <b>{t.r_realized:+.3f}R</b> ({t.outcome.value})<br>"
+            f"R cumulé : <b>{current_r:+.3f}R</b><br>"
+            f"Conforme aux règles : {conforme_str}"
         )
         hover_texts.append(txt)
 
-    # Courbe d'équité
+    # Courbe d'équité avec aire translucide et transitions fluides
     fig.add_trace(
         go.Scatter(
             x=x_labels,
             y=cum_r,
             mode="lines+markers",
             name="R Cumulé",
-            line={"color": "#FA7900", "width": 2.5},
-            marker={"size": 5, "color": "#FA7900"},
+            line={"color": "#6366F1", "width": 2.5, "shape": "spline"},
+            marker={"size": 6, "color": "#6366F1", "line": {"color": "#F8FAFC", "width": 1}},
+            fill="tozeroy",
+            fillcolor="rgba(99, 102, 241, 0.08)",
             hovertext=hover_texts,
             hoverinfo="text",
         )
@@ -246,8 +270,8 @@ def build_segmentation_figure(
         hover_texts.append(
             f"<b>{by_label} : {name}</b><br>"
             f"Trades : {stats.n_trades}<br>"
-            f"Espérance : {val:+.3f}R (IC 95% : {exp_ci_str})<br>"
-            f"Win Rate : {wr_str} (IC Wilson : {ci_str})<br>"
+            f"Espérance : <b>{val:+.3f}R</b> (IC 95% : {exp_ci_str})<br>"
+            f"Win Rate : <b>{wr_str}</b> (IC Wilson : {ci_str})<br>"
             f"Wins / Pertes : {stats.n_wins} / {stats.n_losses}<br>"
             f"Échantillon suffisant : {'Oui' if stats.sample_sufficient else 'Non'}"
         )
@@ -257,7 +281,10 @@ def build_segmentation_figure(
             y=labels,
             x=exp_r,
             orientation="h",
-            marker={"color": colors},
+            marker={
+                "color": colors,
+                "line": {"color": "rgba(255, 255, 255, 0.15)", "width": 1},
+            },
             hovertext=hover_texts,
             hoverinfo="text",
         )
@@ -327,14 +354,17 @@ def build_compliance_timeline_figure(
             f"<b>Séance : {s_date}</b><br>"
             f"Trades totaux : {n_total}<br>"
             f"Trades conformes : {n_compliant} / {n_total}<br>"
-            f"Conformité : {rate:.1f}%"
+            f"Conformité : <b>{rate:.1f}%</b>"
         )
 
     fig.add_trace(
         go.Bar(
             x=session_dates,
             y=comp_rates,
-            marker={"color": bar_colors},
+            marker={
+                "color": bar_colors,
+                "line": {"color": "rgba(255, 255, 255, 0.15)", "width": 1},
+            },
             hovertext=hover_texts,
             hoverinfo="text",
             name="Conformité (%)",
