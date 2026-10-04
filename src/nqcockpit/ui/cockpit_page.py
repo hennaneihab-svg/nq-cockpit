@@ -476,7 +476,7 @@ def render_cockpit():
 
     # Chargement de la configuration et des données de profil
     cfg = load_config()
-    db_path = Path("data/cockpit.db")
+    db_path = Path(cfg.data.db_path)
     conn = None
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
