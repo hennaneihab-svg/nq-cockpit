@@ -39,4 +39,4 @@ Règle WCAG 2.1 SC 1.4.3 : Ratio minimal de **4.5:1** pour texte normal, **3.0:1
 | Texte Secondaire (#94A3B8 sur Slate-950 #020617) | `#94A3B8` | `#020617` | **7.87:1** | >=4.5:1 | >=3.0:1 | **PASS** | Sous-titres et métriques |
 | Texte Secondaire (#94A3B8 sur Card #0F172A) | `#94A3B8` | `#0F172A` | **6.96:1** | >=4.5:1 | >=3.0:1 | **PASS** | Labels de cartes |
 | Texte Muted (#94A3B8 sur Canvas #090D16) | `#94A3B8` | `#090D16` | **7.58:1** | >=4.5:1 | >=3.0:1 | **PASS** | Mentions secondaires Cockpit |
-| Texte Muted standard (#64748B sur Slate-950 #020617) | `#64748B` | `#020617` | **4.24:1** | >=4.5:1 | >=3.0:1 | **PASS_LARGE_ONLY** | Notes discrètes |
+| Texte Muted standard (#8091A5 sur Slate-950 #020617) | `#8091A5` | `#020617` | **6.25:1** | >=4.5:1 | >=3.0:1 | **PASS** | Notes discrètes et footers radar (conforme AA normal) |

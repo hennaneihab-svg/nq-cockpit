@@ -117,7 +117,7 @@ def render_cockpit():
             --border-focus: #334155;
             --text-primary: #E2E8F0;
             --text-secondary: #94A3B8;
-            --text-muted: #64748B;
+            --text-muted: #8091A5;
             --status-ok-bg: rgba(6, 78, 59, 0.25);
             --status-ok-border: #065F46;
             --status-ok-text: #10B981;
@@ -789,7 +789,7 @@ def render_cockpit():
                         <div class="scenario-box">
                             <b>Condition :</b> {sc.if_condition}<br>
                             <b>Plan / Action :</b> {sc.then_plan}<br>
-                            <small style="color: #64748B;">
+                            <small style="color: var(--text-muted);">
                                 <b>Contexte :</b> {sc.context_notes}
                             </small>
                         </div>
