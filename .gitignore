@@ -39,6 +39,8 @@ data/*.parquet
 data/cache/
 data/levels/
 data/events/
+data/backups/
+data/screenshots/
 
 # Reports
 reports/*.json

@@ -1,0 +1,105 @@
+# ==============================================================================
+# NQ Cockpit — Registre des Hypothèses Empiriques du Laboratoire (P14)
+# ==============================================================================
+# RÈGLE MÉTHODOLOGIQUE FONDAMENTALE :
+# Toutes les hypothèses, définitions d'événements, métriques et seuils sont
+# FIGÉS AVANT L'ANALYSE DES DONNÉES. Aucun ajout ou ajustement a posteriori sans
+# horodatage vérifié et nouveau cycle de validation n'est autorisé.
+#
+# Seuil de significativité : n >= 60 séances complètes (ou >= 12 occurrences Tier 1).
+# En-dessous de ce seuil, le système refuse formellement de conclure.
+# ==============================================================================
+
+version: "1.0.0"
+created_at: "2026-10-04T20:00:00Z"
+target_market: "NQ_FUTURES"
+methodology: "EMPIRICAL_NON_DIRECTIONAL"
+min_sessions_threshold: 60
+min_events_threshold: 12
+confidence_level: 0.95
+family_wise_error_control: "HOLM_BONFERRONI"
+
+hypotheses:
+  - id: "H1"
+    title: "Régime Gamma Négatif et Amplitude de Séance"
+    created_at: "2026-10-04T20:00:00Z"
+    description: >
+      En régime de Gamma Négatif (Net GEX < 0), la couverture des teneurs de marché
+      étant déstabilisatrice (vendre en baisse, acheter en hausse), l'amplitude
+      réalisée de la séance (High - Low) et la consommation de l'Expected Move
+      journalier sont statistiquement supérieures à celles observées en Gamma Positif.
+    frozen_parameters:
+      gex_metric: "net_gamma_dollars"
+      regime_split_threshold: 0.0
+      primary_variable: "realized_session_range_points"
+      secondary_variable: "expected_move_consumption_pct"
+      test_type: "WELCH_T_TEST_AND_MANN_WHITNEY"
+      effect_size_metric: "COHENS_D"
+      min_sessions_required: 60
+    expected_direction: "RANGE_NEGATIVE_GAMMA > RANGE_POSITIVE_GAMMA"
+    directional_bias: "NONE"
+
+  - id: "H2"
+    title: "Position Relative au Gamma Flip et Compression de Volatilité"
+    created_at: "2026-10-04T20:00:00Z"
+    description: >
+      Lorsque le cours du NQ évolue durablement au-dessus du Gamma Flip de séance,
+      l'action de marché bénéficie d'un amortissement de volatilité (Mean Reversion),
+      induisant une amplitude de volatilité intra-journalière plus faible que lorsque
+      le cours navigue sous le niveau de Flip.
+    frozen_parameters:
+      flip_reference: "ndx_gamma_flip_converted_to_nq"
+      measurement_window: "REGULAR_TRADING_HOURS_1530_2200_ALGIERS"
+      primary_variable: "realized_session_range_points"
+      test_type: "WELCH_T_TEST_AND_MANN_WHITNEY"
+      effect_size_metric: "COHENS_D"
+      min_sessions_required: 60
+    expected_direction: "RANGE_ABOVE_FLIP < RANGE_BELOW_FLIP"
+    directional_bias: "NONE"
+
+  - id: "H3"
+    title: "Expansion d'Amplitude lors des Sessions à Événements Tier 1"
+    created_at: "2026-10-04T20:00:00Z"
+    description: >
+      Les séances comportant un événement macroéconomique majeur de Tier 1 (CPI, NFP,
+      décision de taux FOMC) présentent une amplitude réalisée significativement plus
+      large que les séances sans publication de niveau Tier 1.
+    frozen_parameters:
+      tier1_events:
+        - "CPI"
+        - "NFP"
+        - "FOMC_RATE_DECISION"
+        - "PPI"
+      primary_variable: "realized_session_range_points"
+      secondary_variable: "open_to_close_displacement_points"
+      test_type: "TWO_SAMPLE_T_TEST"
+      effect_size_metric: "COHENS_D"
+      min_events_required: 12
+      min_sessions_required: 60
+    expected_direction: "RANGE_TIER1_SESSIONS > RANGE_NON_TIER1_SESSIONS"
+    directional_bias: "NONE"
+
+  - id: "H4"
+    title: "Réaction Mesurable aux Niveaux Structuraux Majeurs (Murs Gamma)"
+    created_at: "2026-10-04T20:00:00Z"
+    description: >
+      Lorsqu'un niveau structural majeur (Call Wall, Put Support, Expected Move ±1σ)
+      est testé (tolérance ±5 points NQ), la probabilité d'un retournement (rejet)
+      ou d'une expansion directionnelle rapide dans une fenêtre de N minutes (N=15, 30)
+      est statistiquement différente d'une marche aléatoire brownienne sans mémoire.
+    frozen_parameters:
+      levels_tested:
+        - "CALL_WALL"
+        - "PUT_SUPPORT"
+        - "EXPECTED_MOVE_HIGH"
+        - "EXPECTED_MOVE_LOW"
+      tolerance_points: 5.0
+      reaction_windows_minutes: [15, 30]
+      reversal_threshold_points: 15.0
+      breakout_threshold_points: 25.0
+      test_type: "BINOMIAL_EXACT_TEST"
+      effect_size_metric: "RISK_DIFFERENCE"
+      min_touches_required: 60
+      min_sessions_required: 60
+    expected_direction: "P_REACTION != P_RANDOM_WALK"
+    directional_bias: "NONE"
