@@ -67,8 +67,8 @@ def evaluate_session_state(
     trades_taken = len(session_trades)
     max_trades = config.rules.max_trades_per_day
 
-    # Si la règle d'annulation du trade 2 après perte du trade 1 est active et que trade 1 est en perte,
-    # le nombre maximal de trades autorisés pour cette séance est ramené à 1.
+    # Si la règle d'annulation du trade 2 après perte du trade 1 est active
+    # et que trade 1 est en perte, le nombre maximal de trades autorisés est ramené à 1.
     trade1_loss = (
         config.rules.cancel_trade2_if_trade1_loss
         and len(session_trades) >= 1
@@ -127,8 +127,8 @@ def evaluate_session_state(
         can_trade = False
         if trades_taken > max_trades:
             reasons.append(
-                f"Nombre maximal de trades dépassé ({trades_taken}/{max_trades} trades enregistrés). "
-                "Séance terminée."
+                f"Nombre maximal de trades dépassé ({trades_taken}/{max_trades} trades "
+                "enregistrés). Séance terminée."
             )
         else:
             reasons.append(
