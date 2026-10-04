@@ -149,5 +149,5 @@ Conformément à la règle d'honnêteté des données de `AGENTS.md`, **les stat
 ## 6. Conclusion et Statut Global
 
 - **Statut global P13 : VALIDÉ** pour l'intégralité des 8 critères techniques, interactifs et visuels prouvés avec pièces justificatives.
-- **Séance US en direct : NON VÉRIFIÉ** (marché CME/CBOE fermé le dimanche lors de la qualification ; qualification dynamique tick-par-tick réservée à une séance réelle RTH 15h30–22h00 Alger).
+- **Séance US en direct (RTH, 15h30–22h00 Alger) : NON VÉRIFIÉE** (La séance US en direct (RTH, 15h30–22h00 Alger) n'a pas été testée un jour ouvré : elle reste NON VÉRIFIÉE).
 

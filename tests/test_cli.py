@@ -40,3 +40,48 @@ def test_cli_subcommands(subcmd, capsys):
         assert code == 0
         captured = capsys.readouterr()
         assert f"'{subcmd}'" in captured.out
+
+
+def test_cli_run_launches_scheduler_and_ui():
+    """Vérifie formellement que 'run' démarre le planificateur et invoque Streamlit."""
+    with (
+        patch("nqcockpit.levels.scheduler.LevelsScheduler") as mock_sched_cls,
+        patch("subprocess.run") as mock_subproc,
+    ):
+        mock_sched_instance = mock_sched_cls.return_value
+        code = main(["run", "--port", "8555"])
+        assert code == 0
+
+        # Vérifie le cycle de vie du planificateur
+        mock_sched_instance.start.assert_called_once()
+        mock_sched_instance.stop.assert_called_once()
+
+        # Vérifie les arguments exacts passés au sous-processus Streamlit
+        mock_subproc.assert_called_once()
+        args_passed = mock_subproc.call_args[0][0]
+        assert "-m" in args_passed
+        assert "streamlit" in args_passed
+        assert "run" in args_passed
+        assert any("app.py" in str(arg) for arg in args_passed)
+        assert "--server.port" in args_passed
+        assert "8555" in args_passed
+        assert "--theme.base" in args_passed
+        assert "dark" in args_passed
+
+
+def test_cli_ui_launches_streamlit():
+    """Vérifie formellement que 'ui' invoque Streamlit avec port et app.py."""
+    with patch("subprocess.run") as mock_subproc:
+        code = main(["ui", "--port", "8501"])
+        assert code == 0
+        mock_subproc.assert_called_once()
+        args_passed = mock_subproc.call_args[0][0]
+        assert "-m" in args_passed
+        assert "streamlit" in args_passed
+        assert "run" in args_passed
+        assert any("app.py" in str(arg) for arg in args_passed)
+        assert "--server.port" in args_passed
+        assert "8501" in args_passed
+        assert "--theme.base" in args_passed
+        assert "dark" in args_passed
+

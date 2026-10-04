@@ -1135,7 +1135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     elif args.subcommand == "ui":
         print("[nqcockpit] Commande 'ui' invoquée (interface utilisateur).")
-        return 0
+        return _handle_ui(args)
     elif args.subcommand == "data":
         from nqcockpit.data.archiver import BarArchiver
         from nqcockpit.data.db import apply_migrations, get_db_connection
