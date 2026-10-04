@@ -153,10 +153,24 @@ def main() -> None:
         "[05] BRIEFING PRE-SEANCE": render_briefing_page,
     }
 
+    page_keys = list(PAGES.keys())
+    default_idx = 0
+    param_page = str(st.query_params.get("page", "")).lower()
+    if param_page in ["1", "cockpit"]:
+        default_idx = 0
+    elif param_page in ["2", "journal"]:
+        default_idx = 1
+    elif param_page in ["3", "discipline"]:
+        default_idx = 2
+    elif param_page in ["4", "coaching"]:
+        default_idx = 3
+    elif param_page in ["5", "briefing"]:
+        default_idx = 4
+
     choice = st.sidebar.radio(
         "Navigation Sections",
-        list(PAGES.keys()),
-        index=0,
+        page_keys,
+        index=default_idx,
     )
 
     st.sidebar.markdown("---")
