@@ -46,7 +46,7 @@ def render_cockpit():
                 "Segoe UI", Roboto, sans-serif;
         }
         .block-container {
-            padding-top: 1rem;
+            padding-top: 1.5rem;
             padding-bottom: 2rem;
             max-width: 98%;
         }
@@ -166,7 +166,8 @@ def render_cockpit():
         now_alg = now_utc.astimezone(TZ_ALGIERS).strftime("%H:%M:%S")
         now_et = now_utc.astimezone(TZ_ET).strftime("%H:%M:%S")
         st.markdown(
-            f"<div style='text-align: right; font-family: monospace; font-size: 0.8rem;'>"
+            f"<div class='header-clock' style='text-align: right; font-family: monospace; "
+            f"font-size: 0.82rem; line-height: 1.45; padding-top: 4px;'>"
             f"<b>Alger :</b> {now_alg} | <b>New York :</b> {now_et} ET<br>"
             f"Séance cible : <b>{profile.target_date}</b>"
             f"</div>",
