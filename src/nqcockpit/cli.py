@@ -2435,6 +2435,7 @@ def _handle_run(args: Any) -> int:
 
     from nqcockpit.levels.scheduler import LevelsScheduler
 
+    print("[nqcockpit] Commande 'run' invoquée (planificateur / exploitation).")
     if getattr(args, "dry_run", False):
         print(
             "[nqcockpit] Commande 'run --dry-run' : validation de la configuration et des tâches."

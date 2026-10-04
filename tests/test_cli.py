@@ -26,7 +26,11 @@ def test_cli_no_args(capsys):
 @pytest.mark.parametrize("subcmd", ["run", "check-sources", "snapshot", "brief", "ui"])
 def test_cli_subcommands(subcmd, capsys):
     """Verify each required subcommand runs and outputs notification."""
-    with patch("nqcockpit.sources.health.run_all_checks") as mock_checks:
+    with (
+        patch("nqcockpit.sources.health.run_all_checks") as mock_checks,
+        patch("nqcockpit.cli._handle_ui", return_value=0),
+        patch("nqcockpit.levels.scheduler.LevelsScheduler"),
+    ):
         mock_report = MagicMock()
         mock_report.render_console_table.return_value = "Mock Table"
         mock_report.save_json.return_value = "reports/source_check.json"
