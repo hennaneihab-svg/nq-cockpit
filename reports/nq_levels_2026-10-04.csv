@@ -1,0 +1,8 @@
+Symbol,Level_Name,Price_NQ,Distance_Pts,Distance_Pct,Type,Source,Updated_Algiers,Description
+NQ=F,Call Wall,31000.00,-156.25,-0.50%,GAMMA,CBOE NDX (P04),2026-10-04 23:55:13 (Alger),Plus forte concentration d'OI Call (résistance dealer)
+NQ=F,Expected Move Haut (+1σ),31243.66,+87.41,+0.28%,EXPECTED_MOVE,CBOE ACT/365 (P04),2026-10-04 23:55:13 (Alger),Borne haute d'amplitude statistique 1σ
+NQ=F,Overnight High,30887.50,-268.75,-0.86%,OVERNIGHT,CME NQ=F (P07),2026-10-04 23:55:13 (Alger),Sommet de la session de nuit CME (18:00 - 09:30 ET)
+NQ=F,Gamma Flip,29715.24,-1441.01,-4.63%,GAMMA,CBOE NDX (P04),2026-10-04 23:55:13 (Alger),Niveau pivot de basculement de régime gamma institutionnel
+NQ=F,Overnight Low,30684.50,-471.75,-1.51%,OVERNIGHT,CME NQ=F (P07),2026-10-04 23:55:13 (Alger),Creux de la session de nuit CME (18:00 - 09:30 ET)
+NQ=F,Expected Move Bas (-1σ),31068.84,-87.41,-0.28%,EXPECTED_MOVE,CBOE ACT/365 (P04),2026-10-04 23:55:13 (Alger),Borne basse d'amplitude statistique 1σ
+NQ=F,Put Support,30200.00,-956.25,-3.07%,GAMMA,CBOE NDX (P04),2026-10-04 23:55:13 (Alger),Plus forte concentration d'OI Put (support dealer)
