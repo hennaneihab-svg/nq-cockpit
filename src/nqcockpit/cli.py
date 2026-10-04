@@ -53,6 +53,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="Démarre le cockpit NQ et son planificateur de tâches",
     )
     parser_run.add_argument(
+        "--port",
+        type=int,
+        default=8501,
+        help="Port d'écoute pour l'interface Streamlit (défaut : 8501)",
+    )
+    parser_run.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="Démarre uniquement le planificateur sans ouvrir l'interface Streamlit",
+    )
+    parser_run.add_argument(
         "--dry-run",
         action="store_true",
         help="Exécute un cycle complet sans enregistrement en base",
@@ -433,8 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.subcommand == "run":
-        print("[nqcockpit] Commande 'run' invoquée (planificateur / exploitation).")
-        return 0
+        return _handle_run(args)
     elif args.subcommand == "check-sources":
         from nqcockpit.sources.health import run_all_checks
 
@@ -2417,6 +2427,45 @@ def _handle_discipline(args: Any) -> int:
         "Essayez : status, check, sizing, ui."
     )
     return 1
+
+
+def _handle_run(args: Any) -> int:
+    """Démarre le planificateur de tâches de fond et l'UI Streamlit unifiée (P13)."""
+    import time
+
+    from nqcockpit.levels.scheduler import LevelsScheduler
+
+    if getattr(args, "dry_run", False):
+        print(
+            "[nqcockpit] Commande 'run --dry-run' : validation de la configuration et des tâches."
+        )
+        sched = LevelsScheduler()
+        print("[nqcockpit] Planificateur instancié sans erreur (dry-run validé).")
+        return 0
+
+    print("[nqcockpit] Démarrage du planificateur de niveaux NQ...")
+    sched = LevelsScheduler()
+    sched.start()
+    print("[nqcockpit] Planificateur actif (cron en America/New_York).")
+
+    if getattr(args, "no_ui", False):
+        print("[nqcockpit] Mode sans interface (--no-ui). En écoute (Ctrl+C pour arrêter)...")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[nqcockpit] Arrêt demandé.")
+        finally:
+            sched.stop()
+            print("[nqcockpit] Planificateur arrêté.")
+        return 0
+
+    try:
+        return _handle_ui(args)
+    finally:
+        print("[nqcockpit] Arrêt du planificateur de niveaux...")
+        sched.stop()
+        print("[nqcockpit] Planificateur arrêté.")
 
 
 def _handle_ui(args: Any) -> int:
