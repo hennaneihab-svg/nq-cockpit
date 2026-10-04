@@ -398,9 +398,10 @@ def test_unified_default_session_date_across_modules(tmp_path: Path, monkeypatch
     entre reports.py, backup.py, cli.py, journal_page.py et coaching_page.py.
 
     A un instant où l'heure à New York (22h30 le 30 sept) et l'heure à Alger (03h30 le 1er oct)
-    sont sur deux dates différentes, TOUS les modules doivent déduire la date de séance NY (2026-09-30).
+    sont sur deux dates différentes, TOUS les modules doivent déduire la date NY (2026-09-30).
     """
     from zoneinfo import ZoneInfo
+
     from nqcockpit.journal.backup import create_journal_backup
 
     cfg = load_config()
