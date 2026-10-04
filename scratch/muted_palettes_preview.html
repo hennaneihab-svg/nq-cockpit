@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NQ Cockpit — Comparatif des 3 Variantes de Palette Désaturée</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0B0E14;
+            color: #D1D5DB;
+            font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Fira Code", monospace;
+            padding: 20px;
+            font-size: 12px;
+        }
+
+        h1 { font-size: 1.4rem; font-weight: 700; color: #F3F4F6; margin-bottom: 6px; }
+        p.desc { font-size: 0.85rem; color: #9CA3AF; margin-bottom: 24px; }
+
+        .palette-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .variant-card {
+            background: #141A24;
+            border: 1px solid #222B3A;
+            border-radius: 6px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .variant-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #E5E7EB;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #222B3A;
+            padding-bottom: 8px;
+        }
+        .variant-tag {
+            font-size: 0.7rem;
+            color: #9CA3AF;
+            background: #0E121A;
+            padding: 3px 8px;
+            border-radius: 3px;
+            border: 1px solid #222B3A;
+        }
+
+        .badge-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 3px;
+            letter-spacing: 0.5px;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* VARIANTE 1 : Muted Slate & Matte Earth (Teinte Terre & Ardoise Mâte)*/
+        /* ------------------------------------------------------------------ */
+        .v1-ok  { background: #181F2C; color: #549F75; border: 1px solid #2D5940; }
+        .v1-deg { background: #181F2C; color: #C28E46; border: 1px solid #6A4C23; }
+        .v1-blk { background: #181F2C; color: #B85656; border: 1px solid #642E2E; }
+        .v1-nt  { background: #181F2C; color: #8473A8; border: 1px solid #463B5D; }
+
+        .v1-banner {
+            background: #181F2C;
+            border: 1px solid #6A4C23;
+            color: #C28E46;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* VARIANTE 2 : Nordic Terminal (Teinte Froid Mât & Acier)            */
+        /* ------------------------------------------------------------------ */
+        .v2-ok  { background: #161C26; color: #4E9A86; border: 1px solid #285348; }
+        .v2-deg { background: #161C26; color: #BBA054; border: 1px solid #63542A; }
+        .v2-blk { background: #161C26; color: #C7605D; border: 1px solid #6B3230; }
+        .v2-nt  { background: #161C26; color: #787DAB; border: 1px solid #3E415B; }
+
+        .v2-banner {
+            background: #161C26;
+            border: 1px solid #63542A;
+            color: #BBA054;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* VARIANTE 3 : Monochrome Charcoal & Fine Border Outline (Transparence)*/
+        /* ------------------------------------------------------------------ */
+        .v3-ok  { background: #141A24; color: #52A676; border: 1px solid #27543A; }
+        .v3-deg { background: #141A24; color: #CCA046; border: 1px solid #664E21; }
+        .v3-blk { background: #141A24; color: #C55A5A; border: 1px solid #612B2B; }
+        .v3-nt  { background: #141A24; color: #8C7DB3; border: 1px solid #473D5C; }
+
+        .v3-banner {
+            background: #141A24;
+            border: 1px solid #664E21;
+            color: #CCA046;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+
+        .sample-card {
+            background: #0E121A;
+            border: 1px solid #1F2937;
+            padding: 10px;
+            border-radius: 3px;
+            margin-top: 6px;
+        }
+        .sample-val { font-size: 1.2rem; font-weight: bold; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+    <h1>NQ Cockpit — Comparatif des Palettes Adoucies & Désaturées</h1>
+    <p class="desc">Chaque variante remplace les fonds denses et néons par des teintes mat/cassées, des fonds sombres identiques au panneau et une couleur strictement localisée au mot de statut.</p>
+
+    <div class="palette-container">
+
+        <!-- =================================================================== -->
+        <!-- VARIANTE 1                                                          -->
+        <!-- =================================================================== -->
+        <div class="variant-card">
+            <div class="variant-title">
+                VARIANTE 1 : Muted Slate & Matte Earth (Teinte Terre & Ardoise Mâte)
+                <span class="variant-tag">Fond Badge: #181F2C</span>
+            </div>
+
+            <div class="badge-row">
+                <div class="badge v1-ok">SYSTEM // OK</div>
+                <div class="badge v1-deg">SYSTEM // DÉGRADÉ</div>
+                <div class="badge v1-blk">SYSTEM // BLOQUÉ</div>
+                <div class="badge v1-nt">SYSTEM // NO-TRADE</div>
+            </div>
+
+            <div class="v1-banner">
+                <b>[Avertissement Santé Sources]</b> Data feed Cboe Option Gamma indisponible. Remplacement automatique par la source de secours Yahoo Finance. Statut général : <b>DÉGRADÉ</b>.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">VERDICT CHECKLIST</div>
+                    <div class="sample-val" style="color: #549F75;">VERDICT: GO</div>
+                </div>
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">R CUMULÉ AUJOURD'HUI</div>
+                    <div class="sample-val" style="color: #549F75;">+1.25R</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- =================================================================== -->
+        <!-- VARIANTE 2                                                          -->
+        <!-- =================================================================== -->
+        <div class="variant-card">
+            <div class="variant-title">
+                VARIANTE 2 : Nordic Terminal (Teinte Froid Mât & Acier / Lichen)
+                <span class="variant-tag">Fond Badge: #161C26</span>
+            </div>
+
+            <div class="badge-row">
+                <div class="badge v2-ok">SYSTEM // OK</div>
+                <div class="badge v2-deg">SYSTEM // DÉGRADÉ</div>
+                <div class="badge v2-blk">SYSTEM // BLOQUÉ</div>
+                <div class="badge v2-nt">SYSTEM // NO-TRADE</div>
+            </div>
+
+            <div class="v2-banner">
+                <b>[Avertissement Santé Sources]</b> Data feed Cboe Option Gamma indisponible. Remplacement automatique par la source de secours Yahoo Finance. Statut général : <b>DÉGRADÉ</b>.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">VERDICT CHECKLIST</div>
+                    <div class="sample-val" style="color: #4E9A86;">VERDICT: GO</div>
+                </div>
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">R CUMULÉ AUJOURD'HUI</div>
+                    <div class="sample-val" style="color: #4E9A86;">+1.25R</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- =================================================================== -->
+        <!-- VARIANTE 3                                                          -->
+        <!-- =================================================================== -->
+        <div class="variant-card">
+            <div class="variant-title">
+                VARIANTE 3 : Monochrome Charcoal & Outline Fine (Transparence Fond)
+                <span class="variant-tag">Fond Badge: #141A24 (Même fond panneau)</span>
+            </div>
+
+            <div class="badge-row">
+                <div class="badge v3-ok">SYSTEM // OK</div>
+                <div class="badge v3-deg">SYSTEM // DÉGRADÉ</div>
+                <div class="badge v3-blk">SYSTEM // BLOQUÉ</div>
+                <div class="badge v3-nt">SYSTEM // NO-TRADE</div>
+            </div>
+
+            <div class="v3-banner">
+                <b>[Avertissement Santé Sources]</b> Data feed Cboe Option Gamma indisponible. Remplacement automatique par la source de secours Yahoo Finance. Statut général : <b>DÉGRADÉ</b>.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">VERDICT CHECKLIST</div>
+                    <div class="sample-val" style="color: #52A676;">VERDICT: GO</div>
+                </div>
+                <div class="sample-card">
+                    <div style="font-size: 0.7rem; color: #6B7280;">R CUMULÉ AUJOURD'HUI</div>
+                    <div class="sample-val" style="color: #52A676;">+1.25R</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
