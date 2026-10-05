@@ -27,6 +27,7 @@ from nqcockpit.macro.news_radar import (
     fetch_mega_caps_card,
     fetch_oil_card,
     fetch_rates_card,
+    is_relevant_fed_wire_item,
 )
 from nqcockpit.ui.cockpit_page import _render_radar_card_html, render_cockpit
 
@@ -325,3 +326,76 @@ def test_live_news_wire_fetches_and_degraded_fallback():
 def test_render_cockpit_full_execution_without_error():
     """Exécute render_cockpit() de bout en bout avec le radar et le fil sans exception."""
     render_cockpit()
+
+
+def test_fed_wire_filter_relevance_procedural_vs_policy():
+    """Vérifie que le filtre élimine le bruit procédural et préserve les dépêches de marché."""
+    # Exemples administratifs/procéduraux qui ne bougent pas le marché (à exclure)
+    assert not is_relevant_fed_wire_item("extend comment period on Regulation O proposal")
+    assert not is_relevant_fed_wire_item("enforcement action with Ontario Bancorporation")
+    assert not is_relevant_fed_wire_item(
+        "Federal Reserve Board announces it will extend comment period on Regulation O proposal"
+    )
+    assert not is_relevant_fed_wire_item(
+        "Federal Reserve Board issues enforcement action with Ontario Bancorporation"
+    )
+    assert not is_relevant_fed_wire_item("proposes to extend compliance date for regulatory report")
+    assert not is_relevant_fed_wire_item("Federal Reserve issues correction to statistical release")
+    assert not is_relevant_fed_wire_item("appointment of director to branch board")
+
+    # Exemple de dépêche pertinente (à conserver impérativement)
+    assert is_relevant_fed_wire_item("FOMC raises target rate")
+
+    # Autres dépêches monétaires et macroéconomiques pertinentes conservées par défaut
+    assert is_relevant_fed_wire_item("Federal Reserve issues FOMC statement")
+    assert is_relevant_fed_wire_item("Chair Powell speech on monetary policy and inflation outlook")
+    assert is_relevant_fed_wire_item("Federal Reserve releases Beige Book")
+    assert is_relevant_fed_wire_item("Minutes of the Federal Open Market Committee")
+    assert is_relevant_fed_wire_item("release economic projections from the September FOMC meeting")
+
+
+def test_fetch_live_news_wire_filters_administrative_items():
+    """Vérifie l'intégration dans fetch_live_news_wire : exclusion des dépêches procédurales."""
+    fake_fed_xml = b"""<rss version="2.0"><channel>
+        <item>
+            <title>extend comment period on Regulation O proposal</title>
+            <link>https://www.federalreserve.gov/press/1.htm</link>
+            <pubDate>Mon, 05 Oct 2026 14:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title>enforcement action with Ontario Bancorporation</title>
+            <link>https://www.federalreserve.gov/press/2.htm</link>
+            <pubDate>Mon, 05 Oct 2026 13:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title>FOMC raises target rate</title>
+            <link>https://www.federalreserve.gov/press/3.htm</link>
+            <pubDate>Mon, 05 Oct 2026 12:00:00 GMT</pubDate>
+        </item>
+    </channel></rss>"""
+
+    def mock_urlopen(req, *args, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "federalreserve.gov" in url:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = fake_fed_xml
+            mock_resp.__enter__.return_value = mock_resp
+            return mock_resp
+        # Stub Google News sans éléments
+        mock_g = MagicMock()
+        mock_g.read.return_value = b"<rss><channel></channel></rss>"
+        mock_g.__enter__.return_value = mock_g
+        return mock_g
+
+    with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        report = fetch_live_news_wire(max_items_per_source=5)
+        fed_items = [it for it in report.items if it.tag == "FED / TAUX"]
+        titles = [it.title for it in fed_items]
+
+        # L'élément pertinent doit être présent
+        assert "FOMC raises target rate" in titles
+        # Les éléments administratifs doivent être exclus
+        assert "extend comment period on Regulation O proposal" not in titles
+        assert "enforcement action with Ontario Bancorporation" not in titles
+        assert len(fed_items) == 1
+

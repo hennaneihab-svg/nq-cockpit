@@ -46,6 +46,50 @@ CACHE_TTL_CONFIG: dict[str, float] = {
     "RSS_GOOGLE_NEWS": 60.0,  # Google News US Macro & Nasdaq
 }
 
+# Motifs textuels (en minuscules) identifiant les communiqués administratifs ou procéduraux
+# sans impact macroéconomique ni volatilité sur le Nasdaq (bruit exclu du Live Wire).
+FED_ADMIN_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    "comment period",
+    "enforcement action",
+    "proposes to extend",
+    "proposal to extend",
+    "correction to",
+    "public comment",
+    "request for comment",
+    "requests comment",
+    "seek comment",
+    "seeking comment",
+    "approval of application",
+    "approves application",
+    "cease and desist",
+    "written agreement with",
+    "paperwork reduction act",
+    "freedom of information act",
+    "foia",
+    "advisory council",
+    "branch director",
+    "election of directors",
+    "appointment of director",
+    "appointments of director",
+    "deputy chair",
+    "office of inspector general",
+    "oig report",
+)
+
+
+def is_relevant_fed_wire_item(title: str) -> bool:
+    """Filtre de pertinence pour les dépêches de la Réserve Fédérale (Live Wire).
+
+    Exclut le bruit administratif et procédural sans impact sur le Nasdaq
+    (actions disciplinaires, consultations réglementaires, errata, nominations non-votantes),
+    tout en conservant par défaut l'ensemble des dépêches économiques et de politique monétaire
+    (taux FOMC, discours de gouverneurs, Beige Book, minutes, projections).
+    """
+    if not title or not isinstance(title, str):
+        return False
+    t_lower = title.strip().lower()
+    return not any(pattern in t_lower for pattern in FED_ADMIN_EXCLUDE_PATTERNS)
+
 
 @dataclass
 class MacroRadarCard:
@@ -435,7 +479,7 @@ def fetch_fed_card(fetcher: DataFetcher | None = None) -> MacroRadarCard:
     val_u = obs_u.value if obs_u.status == DataStatus.OK and obs_u.value > 0 else None
     val_l = obs_l.value if obs_l.status == DataStatus.OK and obs_l.value > 0 else None
 
-    # Communiqué récent Fed RSS
+    # Communiqué récent Fed RSS (filtrage du bruit procédural)
     fed_headline = ""
     try:
         url_fed = "https://www.federalreserve.gov/feeds/press_all.xml"
@@ -446,8 +490,13 @@ def fetch_fed_card(fetcher: DataFetcher | None = None) -> MacroRadarCard:
         with urllib.request.urlopen(req, timeout=5) as r:
             root = ET.fromstring(r.read())
             items = list(root.iter("item"))
-            if items:
-                fed_headline = items[0].findtext("title") or ""
+            for it in items:
+                candidate = (it.findtext("title") or "").strip()
+                if is_relevant_fed_wire_item(candidate):
+                    fed_headline = candidate
+                    break
+            if not fed_headline and items:
+                fed_headline = (items[0].findtext("title") or "").strip()
     except Exception as exc:
         log.warning("Échec RSS Fed: %s", exc)
 
@@ -608,9 +657,14 @@ def fetch_live_news_wire(
         )
         with urllib.request.urlopen(req_fed, timeout=5) as r:
             root_fed = ET.fromstring(r.read())
-            fed_items = list(root_fed.iter("item"))[:max_items_per_source]
+            fed_items = list(root_fed.iter("item"))
+            fed_count = 0
             for it in fed_items:
+                if fed_count >= max_items_per_source:
+                    break
                 title = (it.findtext("title") or "").strip()
+                if not is_relevant_fed_wire_item(title):
+                    continue
                 link = (it.findtext("link") or "").strip()
                 pub_date_str = it.findtext("pubDate") or ""
                 try:
@@ -640,6 +694,7 @@ def fetch_live_news_wire(
                         status="OK",
                     )
                 )
+                fed_count += 1
     except Exception as exc:
         log.warning("Échec flux RSS Fed: %s", exc)
         degraded_sources.append(f"Communiqués Fed (press_all.xml) : {exc}")

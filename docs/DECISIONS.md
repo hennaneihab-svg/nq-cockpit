@@ -96,3 +96,30 @@ Une erreur classique consiste à injecter des jours calendaires (ex: 3 jours ent
    - Après la clôture (après 16:00 ET) : fraction minimale $\epsilon = 0.001$.
 4. **Contrôle croisé systématique** :
    L'Expected Move analytique $1\sigma$ est comparé au prix du straddle ATM du front month ($C_{ATM} + P_{ATM}$) pour valider la cohérence de marché.
+
+---
+
+## ADR-004 : Filtrage du bruit administratif et procédural dans le fil Live Wire (Fed RSS)
+
+- **Date** : 2026-10-05
+- **Statut** : **Adopté** (feat/dashboard-news)
+- **Auteurs / Contexte** : Chef de produit / Dashboard Live Wire
+
+### Contexte & Problématique
+Le flux RSS officiel de la Réserve Fédérale (`https://www.federalreserve.gov/feeds/press_all.xml`) remonte un flux continu de dépêches. Parmi celles-ci figurent de nombreuses notifications purement administratives ou réglementaires locales sans aucun impact macroéconomique ni volatilité sur le Nasdaq (ex. : *"extend comment period on Regulation O proposal"*, *"enforcement action with Ontario Bancorporation"*, contentieux avec d'anciens employés de banques communautaires, corrections typographiques de tableaux, renouvellements de conseils consultatifs régionaux).
+Ces dépêches saturaient le quota de dépêches affichées dans le bandeau Live Wire sans apporter aucune valeur décisionnelle au trader, risquant même de masquer les annonces de politique monétaire majeures.
+
+### Décision
+1. **Filtre par motifs d'exclusion explicites (liste blanche implicite par défaut)** :
+   - Par défaut, toute dépêche est conservée (politique de taux, décisions FOMC, discours de gouverneurs votants, Beige Book, minutes, projections économiques SEP, bilans).
+   - Seules les dépêches contenant explicitement des motifs textuels administratifs/procéduraux identifiés (`FED_ADMIN_EXCLUDE_PATTERNS`) sont écartées (`is_relevant_fed_wire_item`).
+2. **Collecte exhaustive jusqu'au quota** :
+   - Dans `fetch_live_news_wire`, le flux RSS est désormais parcouru jusqu'à accumuler le nombre requis de dépêches pertinentes (`max_items_per_source`), évitant ainsi qu'une série de communiqués procéduraux en tête de flux n'assèche le fil.
+3. **Respect des principes du projet** :
+   - Aucun biais directionnel : le filtre ne juge pas du caractère haussier ou baissier, mais uniquement de la nature opérationnelle vs macroéconomique de l'annonce.
+   - Zéro donnée inventée, traçabilité et horodatage stricts préservés.
+
+### Conséquences
+- **Avantages** : Ratio signal/bruit considérablement amélioré dans le cockpit, élimination des fausses alertes sans pertinence pour le trading du contrat NQ.
+- **Inconvénients / Maintenance** : La liste des motifs d'exclusion doit être enrichie si la Fed adopte de nouveaux intitulés procéduraux spécifiques.
+
