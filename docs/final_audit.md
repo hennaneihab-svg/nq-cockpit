@@ -1,6 +1,6 @@
 # Audit Final — NQ Cockpit (P14)
 
-**Date d'audit :** 4 octobre 2026  
+**Date d'audit :** 5 octobre 2026  
 **Version logicielle :** 1.0.0 (Production Candidate)  
 **Environnement de validation :** Python 3.14 (venv local), Streamlit 1.64.0, Microsoft Edge (Playwright Headless)  
 **Emplacement racine :** `C:\Users\pccom\Desktop\trading asistante`  
@@ -19,7 +19,7 @@ L'audit a passé au crible l'ensemble de la base logicielle au regard des 9 règ
 | **R4 — Seuil statistique** | Aucune conclusion sous 60 séances ou 12 événements | **CONFORME** | Barrière stricte dans le coaching (P11) et le laboratoire de validation (P14). |
 | **R5 — Fuseaux horaires** | `America/New_York` pour les calculs, `Africa/Algiers` pour l'affichage | **CONFORME** | Implémenté via la bibliothèque standard `zoneinfo`. Zéro décalage UTC codé en dur (immunité DST). |
 | **R6 — Sécurité & Isolation** | Aucun secret en dur, vendor/ sanctuarisé | **CONFORME** | Dossier `vendor/` non modifié et non chargé. Secrets externalisés dans `.env`. Sauvegardes SQLite intègres. |
-| **R7 — Qualité & Tests** | Fonctions typées, ruff 0 erreur, suite pytest verte | **CONFORME** | `ruff check .` sans aucune erreur. Suite complète `pytest` : 302 tests passés, 0 échec. |
+| **R7 — Qualité & Tests** | Fonctions typées, ruff 0 erreur, suite pytest verte | **CONFORME** | `ruff check .` sans aucune erreur. Suite complète `pytest` : 318 tests passés, 0 échec. |
 | **R8 — Traçabilité livrables** | Rapports honnêtes, preuves pour chaque critère | **CONFORME** | Rapports `reports/p13_report.md`, `reports/lab.md`, captures SHA-256 certifiées. |
 | **R9 — Rôle de l'outil** | Préparer, discipliner, mesurer ; n'exécute pas d'ordres | **CONFORME** | Aucun module d'envoi d'ordres. Le trader conserve l'entière autonomie d'exécution. |
 
@@ -59,7 +59,9 @@ L'audit a passé au crible l'ensemble de la base logicielle au regard des 9 règ
    - Déclinaison console et connecteurs optionnels (Gemini, Telegram).
 9. **Interface Multipage Unifiée Streamlit (`ui/` - P13) :**
    - 5 pages connectées : Cockpit Live, Journal, Discipline, Coaching, Briefing.
-   - Thème sombre dense Slate-950/900, typographie lisible, horloges synchronisées Alger/New York sans rognage.
+   - Thème sombre dense Slate-950/900, typographie lisible, horloges synchronisées Alger/New York sans rognage, contraste rehaussé WCAG AA (#8091A5).
+   - **Radar Macro 6 fenêtres** en direct (Taux US 2Y/10Y via FRED, Inflation CPI/BEI, Mega-Caps Top 5 NQ, Fed, Pétrole WTI, DXY) avec caches intraday 60 s et statut `DÉGRADÉ` explicite.
+   - **Fil d'actualités en direct (Live Wire)** : dépêches officielles de politique monétaire de la Fed (filtrage ciblé excluant le bruit procédural) et flux macroéconomique Nasdaq.
 10. **Laboratoire de Validation Empirique (`lab/` - P14) :**
     - Registre figé d'hypothèses (`hypotheses.yaml`, H1 à H4) certifié par empreinte SHA-256.
     - Contrôle du risque multi-tests via correction séquentielle de Holm-Bonferroni.
@@ -91,8 +93,8 @@ L'audit a passé au crible l'ensemble de la base logicielle au regard des 9 règ
    - 2 avertissements `datetime.datetime.utcnow()` subsistent dans les tests historiques `test_p04fix6.py`. Bien que sans impact sous Python 3.14, ces appels devront être convertis vers `datetime.datetime.now(datetime.timezone.utc)`.
 2. **Taille du module de commande en ligne (`src/nqcockpit/cli.py`) :**
    - Avec plus de 2 500 lignes regroupant la gestion de l'ensemble des sous-commandes, `cli.py` constitue un monolithe qu'il conviendra de refactoriser en plusieurs modules spécialisés (`src/nqcockpit/commands/run.py`, `snapshot.py`, etc.).
-3. **Multiplicité des scripts d'audit dans `scratch/` :**
-   - Plusieurs scripts d'inspection et de vérification Playwright créés pour les phases de recette P11-P13 devront être archivés ou intégrés dans une suite d'outils utilitaires formelle.
+3. **Hygiène du dossier `scratch/` & Outillage :**
+   - Les scripts QA et E2E majeurs ont été promus dans `scripts/` (`qa_audit.py`, `e2e_p13_flow.py`). Le dossier `scratch/` a été sanctuarisé dans `.gitignore` et retiré de l'index git pour éviter la contamination du dépôt par des artefacts temporaires.
 
 ---
 

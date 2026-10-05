@@ -19,8 +19,8 @@ conçu pour fonctionner depuis l'Algérie. Décrit : docs/PRODUCT_SPEC.md. Terme
 6. Ouvre le dossier dans Antigravity comme espace de travail. Les règles (.agents/rules) et
    skills (.agents/skills) sont chargés automatiquement. Redémarre la session si besoin.
    Si ta version lit GEMINI.md ou AGENTS.md, ils sont déjà à la racine.
-7. Lance les prompts dans l'ordre : prompts/P00 -> P14. Un prompt à la fois.
-   Ne passe au suivant qu'après avoir vérifié les critères d'acceptation du précédent.
+7. L'application est prête à l'emploi (P00 à P14 validés). Lance le cockpit unifié avec :
+   `python -m nqcockpit run` (ouvre `http://localhost:8501` avec les 5 pages du desk).
 
 ## Règles d'or
 - Ne saute pas P01 : il teste quelles sources sont accessibles depuis chez toi.

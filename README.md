@@ -45,7 +45,9 @@ Le workflow du trader s'articule autour de 4 rendez-vous clés calés sur les he
 1. **Cockpit Live** (`[01] COCKPIT LIVE`) :
    - Vue synthétique du profil de séance : statut autorisé vs NO-TRADE, compte à rebours macro, régime gamma, expected move.
    - Niveaux clés structuraux (Call Wall, Put Support, Gamma Flip, Overnight Range).
-   - Carte de scénarios conditionnels « Si... Alors... » et fil de presse macro en direct.
+   - Carte de scénarios conditionnels « Si... Alors... ».
+   - **Radar Macro 6 fenêtres** en direct : Taux US (2Y/10Y via FRED), Inflation US & Breakeven (FRED/BLS), Mega-Caps Top 5 NQ (Stooq/Yahoo), Politique Fed, Pétrole WTI et Dollar Index DXY (statut `DÉGRADÉ` explicite si indisponible, caches intraday 60 s).
+   - **Fil d'actualités en direct (Live Wire)** : dépêches officielles de politique monétaire de la Fed (bruit procédural éliminé) et flux macroéconomique Nasdaq.
 
 2. **Journal de Bord** (`[02] JOURNAL DE BORD`) :
    - Enregistrement structuré des transactions (prix d'entrée, stop, cible, R réalisé, respect du plan).

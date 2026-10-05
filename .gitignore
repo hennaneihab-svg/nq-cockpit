@@ -25,6 +25,9 @@ logs/*.log
 .pytest_cache/
 .ruff_cache/
 
+# Scratch & temporary work
+scratch/
+
 # Vendor
 vendor/
 
