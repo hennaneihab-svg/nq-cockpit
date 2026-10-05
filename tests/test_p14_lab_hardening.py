@@ -243,12 +243,13 @@ def test_sqlite_backup_and_integrity_restore(tmp_path: Path):
     check_conn.close()
 
 
-def test_network_failure_resilience_and_graceful_degradation():
+def test_network_failure_resilience_and_graceful_degradation(tmp_path: Path):
     """Durcissement : Tolérance aux pannes réseau et repli dégradé sans crash."""
+    from nqcockpit.data.cache import DiskCache
     from nqcockpit.data.fetcher import DataFetcher
     from nqcockpit.data.models import DataStatus
 
-    fetcher = DataFetcher()
+    fetcher = DataFetcher(cache=DiskCache(cache_dir=tmp_path))
 
     # Simulation d'un crash réseau complet (ex: coupure de connexion en Algérie)
     with patch("yfinance.Ticker") as mock_ticker:

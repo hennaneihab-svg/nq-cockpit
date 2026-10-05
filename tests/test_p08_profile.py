@@ -311,10 +311,99 @@ def test_day_profile_structure():
 def test_streamlit_cockpit_no_error():
     """Vérifie que la page Cockpit Streamlit se charge sans levée d'exception."""
     from pathlib import Path
+    from unittest.mock import patch
 
     from streamlit.testing.v1 import AppTest
 
+    from nqcockpit.macro.news_radar import (
+        MacroNewsRadar,
+        MacroRadarCard,
+        NewsWireItem,
+        NewsWireReport,
+    )
+    from nqcockpit.profile.models import DayProfile, NoTradeAssessment
+
+    card = MacroRadarCard(
+        category="TAUX US",
+        title="10Y & 2Y",
+        main_value="10Y: 4.25% | 2Y: 3.95%",
+        sub_value="Spread: +30 bps",
+        source="FRED",
+        timestamp_utc=NOW_UTC,
+        observation_date="2026-09-30",
+        age_str="2 min",
+        status="OK",
+        is_ok=True,
+    )
+    fake_radar = MacroNewsRadar(
+        rates=card,
+        inflation=card,
+        mega_caps=card,
+        fed=card,
+        oil=card,
+        dollar=card,
+    )
+    fake_wire = NewsWireReport(
+        items=[
+            NewsWireItem(
+                title="Titre de dépêche de test",
+                link="https://example.com",
+                source="Fed",
+                tag="FOMC",
+                tag_color="#38BDF8",
+                timestamp_utc=NOW_UTC,
+                timestamp_algiers_str="30/09/2026 15:30 (Alger)",
+                timestamp_et_str="30/09/2026 10:30 ET",
+                age_str="2 min",
+                is_ok=True,
+                status="OK",
+            )
+        ],
+        degraded_sources=[],
+        is_ok=True,
+    )
+    levels = _make_levels(spot=20000.0)
+    scenarios = build_scenario_map(levels, gamma_regime="POSITIVE_GAMMA", base_em_pts=150.0)
+    fake_profile = DayProfile(
+        as_of_utc=NOW_UTC.isoformat(),
+        as_of_algiers="30/09/2026 15:30 (Alger)",
+        as_of_et="30/09/2026 10:30 ET",
+        target_date="2026-09-30",
+        spot_nq=20000.0,
+        event_risk_level="GREEN",
+        event_risk_reason="Aucun événement critique",
+        next_tier1_event=None,
+        next_tier1_countdown=None,
+        volatility_regime="VOLATILITÉ NORMALE",
+        vix_level=15.2,
+        vxn_level=16.4,
+        overnight_range_pts=65.0,
+        gamma_regime="POSITIVE_GAMMA",
+        net_gex_dollars=1.5e8,
+        distance_to_flip_pts=120.0,
+        base_expected_move_pts=150.0,
+        em_consumption_pct=43.3,
+        probable_day_type="TYPICAL",
+        day_type_reasons=["Volatilité normale", "Gamma positif"],
+        key_levels=levels,
+        scenarios=scenarios,
+        component_statuses={
+            "gamma": ComponentHealth(name="Niveaux Gamma", status="OK"),
+            "macro": ComponentHealth(name="Contexte Macro", status="OK"),
+        },
+        no_trade=NoTradeAssessment(
+            is_trading_allowed=True,
+            overall_status="AUTORISÉ (sous conditions)",
+            active_flags_count=0,
+        ),
+    )
+
     page = Path(__file__).parent.parent / "src" / "nqcockpit" / "ui" / "cockpit_page.py"
-    at = AppTest.from_file(str(page), default_timeout=30)
-    at.run()
-    assert not at.exception, f"Streamlit a levé une exception : {at.exception}"
+    with (
+        patch("nqcockpit.profile.engine.build_day_profile", return_value=fake_profile),
+        patch("nqcockpit.macro.news_radar.fetch_macro_news_radar", return_value=fake_radar),
+        patch("nqcockpit.macro.news_radar.fetch_live_news_wire", return_value=fake_wire),
+    ):
+        at = AppTest.from_file(str(page), default_timeout=30)
+        at.run()
+        assert not at.exception, f"Streamlit a levé une exception : {at.exception}"
