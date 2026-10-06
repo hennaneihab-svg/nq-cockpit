@@ -8,15 +8,18 @@ Design System Bloomberg x TradingView :
 
 from __future__ import annotations
 
+import io
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
 from streamlit.errors import StreamlitAPIException
 
+from nqcockpit.broker.mt5_client import MT5Client
 from nqcockpit.config import load_config
+from nqcockpit.env import get_mt5_credentials, save_mt5_credentials
 from nqcockpit.journal.engine import (
     compute_daily_stats,
     compute_performance_stats,
@@ -24,6 +27,7 @@ from nqcockpit.journal.engine import (
     generate_coaching_report,
     segment_performance,
 )
+from nqcockpit.journal.importer import import_trades_from_csv
 from nqcockpit.journal.models import (
     GammaRegime,
     TradeDirection,
@@ -96,7 +100,13 @@ def render_journal_page() -> None:
     )
     page = st.radio(
         "Section Journal",
-        ["Enregistrer un trade", "Journal du jour", "Performance globale", "Coaching"],
+        [
+            "Enregistrer un trade",
+            "Import MT5 & CSV",
+            "Journal du jour",
+            "Performance globale",
+            "Coaching",
+        ],
         index=0,
         horizontal=True,
         label_visibility="collapsed",
@@ -201,6 +211,207 @@ def render_journal_page() -> None:
     # ---------------------------------------------------------------------------
     # Page 2 — Journal du jour
     # ---------------------------------------------------------------------------
+
+    elif page == "Import MT5 & CSV":
+        st.markdown(
+            '<div class="section-header">IMPORTATION AUTOMATIQUE (MT5) & FICHIERS CSV</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.info(
+            "Conformément à la règle R9, l'intégration MetaTrader 5 fonctionne **strictement "
+            "en lecture seule** (aucun passage d'ordre). Les identifiants sont stockés "
+            "exclusivement dans votre fichier local .env (hors Git)."
+        )
+
+        col_mt5, col_csv = st.columns([1, 1], gap="medium")
+
+        with col_mt5:
+            st.markdown("### 🔌 Passerelle MetaTrader 5 (MT5)")
+
+            client = MT5Client()
+            status = client.get_status()
+
+            if status.is_ok:
+                st.success(
+                    f"**[STATUT MT5 · OK]** Connecté au compte {status.account_login} "
+                    f"({status.server or 'Serveur standard'})"
+                )
+                acc = client.get_account_info()
+                if acc:
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        render_terminal_metric("Solde", f"{acc.balance:,.2f} {acc.currency}")
+                    with c2:
+                        render_terminal_metric("Equity", f"{acc.equity:,.2f} {acc.currency}")
+                    with c3:
+                        render_terminal_metric("Mode", acc.trade_mode)
+
+                open_positions = client.get_open_positions()
+                if open_positions:
+                    st.markdown(f"**Positions en cours ({len(open_positions)})**")
+                    pos_rows = [
+                        {
+                            "Ticket": p.ticket,
+                            "Symbole": p.symbol,
+                            "Sens": p.direction.value,
+                            "Volume": p.volume,
+                            "Entrée": p.price_open,
+                            "Prix actuel": p.price_current,
+                            "PnL ($)": round(p.profit, 2),
+                        }
+                        for p in open_positions
+                    ]
+                    st.dataframe(pos_rows, use_container_width=True)
+            else:
+                st.warning(
+                    f"**[STATUT MT5 · DÉGRADÉ {status.reason}\n\n"
+                    "_Le terminal MetaTrader 5 doit être installé et lancé localement sur Windows._"
+                )
+
+            with st.expander(
+                "⚙️ Configuration des identifiants MT5 (.env)",
+                expanded=not status.is_ok,
+            ):
+                st.caption(
+                    "Les identifiants sont écrits directement dans le fichier .env "
+                    "sans modifier les autres variables."
+                )
+                creds = get_mt5_credentials()
+                login_default = creds.get("login") or ""
+                server_default = creds.get("server") or ""
+                path_default = creds.get("path") or ""
+                tz_default = creds.get("broker_tz") or "UTC"
+
+                cfg_login = st.text_input(
+                    "Numéro de compte (Login)",
+                    value=str(login_default) if login_default else "",
+                )
+                cfg_password = st.text_input(
+                    "Mot de passe (masqué)",
+                    type="password",
+                    help="Stocké uniquement dans .env. Jamais loggé ni réaffiché en clair.",
+                )
+                if creds.get("has_password"):
+                    st.caption(
+                        "🔒 Un mot de passe est déjà enregistré dans .env. "
+                        "Laissez ce champ vide pour le conserver."
+                    )
+
+                cfg_server = st.text_input(
+                    "Serveur Broker (ex: ICMarketsSC-Demo)",
+                    value=server_default,
+                )
+                cfg_path = st.text_input(
+                    "Chemin terminal64.exe (optionnel si installation standard)",
+                    value=path_default,
+                )
+                cfg_tz = st.text_input(
+                    "Fuseau horaire serveur broker (zoneinfo, ex: UTC, Europe/Athens)",
+                    value=tz_default,
+                )
+
+                if st.button("Enregistrer & Connecter MT5", type="primary"):
+                    if not cfg_login or not cfg_server:
+                        st.error("Le numéro de compte et le serveur broker sont obligatoires.")
+                    else:
+                        saved = save_mt5_credentials(
+                            login=cfg_login,
+                            password=cfg_password,
+                            server=cfg_server,
+                            path=cfg_path,
+                            broker_tz=cfg_tz,
+                        )
+                        if saved:
+                            re_client = MT5Client()
+                            re_status = re_client.connect()
+                            if re_status.is_ok:
+                                st.success("Identifiants sauvegardés et connexion MT5 réussie !")
+                            else:
+                                st.warning(
+                                    f"Identifiants enregistrés dans .env. "
+                                    f"Statut MT5 : {re_status.reason}"
+                                )
+                            st.rerun()
+                        else:
+                            st.error("Échec d'écriture dans le fichier .env.")
+
+            st.markdown("#### 📥 Importer les trades fermés")
+            period_choice = st.selectbox(
+                "Période d'historique",
+                ["Aujourd'hui", "Derniers 7 jours", "Derniers 30 jours", "Tout l'historique"],
+                index=1,
+            )
+            symbol_filter = st.text_input(
+                "Filtrer par symbole (ex: NQ, NAS100, laisser vide pour tout)",
+                value="",
+            )
+
+            now_utc = datetime.now(timezone.utc)
+            if period_choice == "Aujourd'hui":
+                d_from = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period_choice == "Derniers 7 jours":
+                d_from = now_utc - timedelta(days=7)
+            elif period_choice == "Derniers 30 jours":
+                d_from = now_utc - timedelta(days=30)
+            else:
+                d_from = None
+
+            if st.button("Importer depuis MT5", disabled=not status.is_ok):
+                with st.spinner("Récupération des deals et consolidation en cours..."):
+                    import_res = client.import_trades_to_journal(
+                        conn=conn,
+                        date_from=d_from,
+                        symbol=symbol_filter if symbol_filter.strip() else None,
+                        config=config,
+                    )
+                if import_res.is_success:
+                    st.success(
+                        f"**Succès !** {import_res.imported} trade(s) importé(s), "
+                        f"{import_res.duplicates} doublon(s) ignoré(s) sur "
+                        f"{import_res.total_positions} position(s) fermée(s)."
+                    )
+                    st.rerun()
+                else:
+                    st.error(f"Erreur d'import : {', '.join(import_res.errors)}")
+
+        with col_csv:
+            st.markdown("### 📄 Importation alternative CSV (P10)")
+            st.caption(
+                "Vous pouvez importer des trades depuis un fichier CSV exporté "
+                "de votre plateforme de trading ou de Notion."
+            )
+
+            uploaded_file = st.file_uploader(
+                "Déposer un fichier CSV de trades",
+                type=["csv"],
+                help="Colonnes requises: session_date, instrument, direction, prix...",
+            )
+
+            if uploaded_file is not None:
+                if st.button("Lancer l'importation du fichier CSV"):
+                    try:
+                        content = uploaded_file.getvalue().decode("utf-8-sig")
+                        csv_stream = io.StringIO(content)
+                        csv_summary = import_trades_from_csv(csv_stream, conn, config)
+
+                        if csv_summary.is_success:
+                            msg_ok = (
+                                f"**Import CSV terminé !** {csv_summary.imported} trade(s), "
+                                f"{csv_summary.duplicates} doublon(s), "
+                                f"{csv_summary.rejected} rejeté(s) / {csv_summary.total_rows}."
+                            )
+                            st.success(msg_ok)
+                            if csv_summary.warnings:
+                                with st.expander("Avertissements CSV"):
+                                    for w in csv_summary.warnings:
+                                        st.write(f"- {w}")
+                            st.rerun()
+                        else:
+                            st.error(f"Erreurs d'import CSV : {', '.join(csv_summary.errors)}")
+                    except Exception as exc:
+                        st.error(f"Erreur lors de la lecture du fichier : {exc}")
+
 
     elif page == "Journal du jour":
         st.markdown(

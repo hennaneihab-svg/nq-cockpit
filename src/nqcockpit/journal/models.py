@@ -118,6 +118,8 @@ class TradeEntry:
 
     def compute_r(self) -> float:
         """Calcule le R réalisé depuis les prix bruts."""
+        if not self.stop_price or self.stop_price <= 0:
+            return 0.0
         initial_risk = abs(self.entry_price - self.stop_price)
         if initial_risk == 0:
             return 0.0
