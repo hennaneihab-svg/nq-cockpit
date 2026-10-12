@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -396,65 +396,52 @@ def fetch_inflation_card() -> MacroRadarCard:
 
 
 def fetch_mega_caps_card() -> MacroRadarCard:
-    """Fenêtre 3 : Mega-Caps Tech (Calendrier des résultats trimestriels Mag 7)."""
+    """Fenêtre 3 : Mega-Caps Tech (Calendrier des résultats trimestriels Tier 1/2)."""
     now_utc = datetime.now(UTC)
     today = now_utc.date()
+    from nqcockpit.config import load_config
+    from nqcockpit.events.earnings import fetch_earnings_events
+    try:
+        conf = load_config()
+        symbols = list(conf.events.megacaps)
+    except Exception:
+        symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO"]
 
-    mag7_symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
-    upcoming: list[tuple[str, str, int]] = []
-    failed: list[str] = []
+    events = fetch_earnings_events(tickers=symbols, now_utc=now_utc, horizon_days=90)
+    upcoming = []
+    failed = []
 
-    for sym in mag7_symbols:
-        try:
-            ticker = yf.Ticker(sym)
-            cal = ticker.calendar
-            e_date = None
-            if isinstance(cal, dict) and "Earnings Date" in cal:
-                ed_list = cal["Earnings Date"]
-                if isinstance(ed_list, list) and ed_list:
-                    e_date = ed_list[0]
-                elif ed_list:
-                    e_date = ed_list
-            if e_date:
-                if isinstance(e_date, str):
-                    d_parsed = datetime.fromisoformat(e_date.split()[0]).date()
-                elif hasattr(e_date, "date"):
-                    d_parsed = e_date.date()
-                elif isinstance(e_date, date):
-                    d_parsed = e_date
-                else:
-                    d_parsed = None
-
-                if d_parsed:
-                    delta_d = (d_parsed - today).days
-                    upcoming.append((sym, d_parsed.strftime("%d/%m"), delta_d))
-        except Exception as exc:
-            log.warning("Échec calendrier earnings pour %s: %s", sym, exc)
-            failed.append(sym)
+    for ev in events:
+        if ev.status.value == "OK" and ev.scheduled_utc:
+            d_parsed = ev.scheduled_utc.date()
+            delta_d = (d_parsed - today).days
+            # Add tier info T1/T2
+            upcoming.append((ev.ticker, d_parsed.strftime("%d/%m"), delta_d, ev.tier))
+        else:
+            failed.append(ev.ticker)
 
     upcoming.sort(key=lambda x: x[2])
-
-    is_ok = len(upcoming) >= 3
+    is_ok = len(upcoming) >= len(symbols) // 2
     status_str = "OK" if is_ok else "DÉGRADÉ"
 
     if upcoming:
         first3 = upcoming[:3]
-        main_val = " · ".join([f"{s}: {d}" for s, d, _ in first3])
-        next_sym, next_d, next_days = upcoming[0]
+        main_val = " • ".join([f"[T{t}] {s}: {d}" for s, d, _, t in first3])
+        next_sym, next_d, next_days, next_tier = upcoming[0]
         if next_days >= 0:
-            sub_val = f"Plus proche : {next_sym} ({next_d}, dans {next_days} jours)"
+            sub_val = f"Plus proche : [T{next_tier}] {next_sym} ({next_d}, dans {next_days} jours)"
         else:
-            sub_val = f"Dernier : {next_sym} (passé il y a {abs(next_days)} jours)"
+            sub_val = f"Dernier : [T{next_tier}] {next_sym} (passé il y a {abs(next_days)} jours)"
     else:
         main_val = "INDISPONIBLE"
         sub_val = "Calendrier non reçu"
 
-    details = [f"{s}: date {d} (J{days:+d})" for s, d, days in upcoming]
+    details = [f"[T{t}] {s}: date {d} (J{days:+d})" for s, d, days, t in upcoming]
     reason = f"Échec récupération pour: {', '.join(failed)}" if failed else ""
 
     return MacroRadarCard(
         category="MEGA-CAPS TECH",
-        title="Résultats Mag 7 (Earnings)",
+        title="Résultats Megacaps",
         main_value=main_val,
         sub_value=sub_val,
         source="Yahoo Finance / SEC Filings",
@@ -466,8 +453,6 @@ def fetch_mega_caps_card() -> MacroRadarCard:
         details=details,
         degraded_reason=reason,
     )
-
-
 def fetch_fed_card(fetcher: DataFetcher | None = None) -> MacroRadarCard:
     """Fenêtre 4 : Banques Centrales & Fed (DFEDTARL/U & RSS)."""
     f = fetcher or DataFetcher()

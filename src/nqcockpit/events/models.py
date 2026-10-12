@@ -116,6 +116,9 @@ class EarningsEvent:
     scheduled_utc: datetime | None
     """Date/heure de publication des résultats, si connue."""
 
+    tier: int = 1
+    """Tier 1 (plus gros poids) ou Tier 2 (poids secondaire)."""
+
     confirmed: bool = False
     """True si la date est confirmée par yfinance."""
 

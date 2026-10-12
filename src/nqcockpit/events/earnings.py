@@ -22,7 +22,20 @@ UTC = timezone.utc
 ET_TZ = ZoneInfo("America/New_York")
 
 _CACHE_TTL_SECONDS = 12 * 3600
+_CACHE_TTL_DEGRADED_SECONDS = 60
 
+
+def _get_tier(ticker: str) -> int:
+    """Classifie le ticker en Tier 1 ou Tier 2 selon son poids dans le NDX.
+
+    Source: https://www.slickcharts.com/nasdaq100 (octobre 2026) et données officielles Nasdaq.com.
+    Note: Ces poids évoluent (rebalancing périodique du NDX) et doivent être revus périodiquement.
+
+    Tier 1 (> 5.9%) : NVDA (8.15%), AAPL (7.26%), MSFT (5.90%)
+    Tier 2 (< 5.0%) : AMZN (4.98%), META (4.19%), AVGO (3.95%), GOOGL (3.55%), TSLA (3.46%),
+    GOOG (3.31%)
+    """
+    return 1 if ticker.upper() in {"NVDA", "AAPL", "MSFT"} else 2
 
 def _get_cache_path(cache_dir: pathlib.Path, ticker: str) -> pathlib.Path:
     return cache_dir / f"earnings_{ticker.upper()}.json"
@@ -44,7 +57,13 @@ def _load_cache(
         if fetched_dt.tzinfo is None:
             fetched_dt = fetched_dt.replace(tzinfo=UTC)
         age_s = (now_utc - fetched_dt).total_seconds()
-        if age_s > _CACHE_TTL_SECONDS:
+        status_val = raw.get("status", "OK")
+        max_ttl = (
+            _CACHE_TTL_DEGRADED_SECONDS
+            if status_val != "OK"
+            else _CACHE_TTL_SECONDS
+        )
+        if age_s > max_ttl:
             return None
         scheduled_raw = raw.get("scheduled_utc")
         scheduled_dt = (
@@ -54,6 +73,7 @@ def _load_cache(
         return EarningsEvent(
             ticker=raw["ticker"],
             scheduled_utc=scheduled_dt,
+            tier=_get_tier(raw["ticker"]),
             confirmed=raw.get("confirmed", False),
             eps_estimate=raw.get("eps_estimate"),
             revenue_estimate=raw.get("revenue_estimate"),
@@ -109,6 +129,7 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         return EarningsEvent(
             ticker=ticker,
             scheduled_utc=None,
+            tier=_get_tier(ticker),
             status=DataStatus.DEGRADED,
             source_fetched_utc=now_utc,
             source_age_seconds=0.0,
@@ -221,6 +242,7 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         return EarningsEvent(
             ticker=ticker,
             scheduled_utc=scheduled_dt,
+            tier=_get_tier(ticker),
             confirmed=confirmed,
             eps_estimate=eps_est,
             revenue_estimate=rev_est,
@@ -240,6 +262,7 @@ def _fetch_yfinance_earnings(ticker: str) -> EarningsEvent:
         return EarningsEvent(
             ticker=ticker,
             scheduled_utc=None,
+            tier=_get_tier(ticker),
             status=DataStatus.DEGRADED,
             source_fetched_utc=now_utc,
             source_age_seconds=0.0,

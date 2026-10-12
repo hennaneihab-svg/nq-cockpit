@@ -233,7 +233,9 @@ def test_inflation_card_degraded_when_history_insufficient():
 
 def test_mega_caps_card_degraded_when_scans_fail():
     """Vérifie le statut DÉGRADÉ si les calendriers tech sont inaccessibles."""
-    with patch("yfinance.Ticker") as mock_ticker:
+    with patch("nqcockpit.events.earnings._load_cache", return_value=None), \
+         patch("nqcockpit.events.earnings._save_cache"), \
+         patch("yfinance.Ticker") as mock_ticker:
         mock_ticker.return_value.calendar = {}
         card = fetch_mega_caps_card()
         assert card.status == "DÉGRADÉ"

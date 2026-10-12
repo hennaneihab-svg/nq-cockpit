@@ -12,6 +12,7 @@ Design System calme, dense et mat :
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,9 +69,14 @@ def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
         dot_html = '<span class="deg-dot" title="Flux dégradé ou clôture différée"></span>'
         deg_card_cls = "degraded"
         reason = card.degraded_reason or "Source indisponible ou marché fermé"
+        clean_reason = re.sub(
+            r"^(\[?DÉGRADÉ\]?\s*[:—\-]?\s*)+", "", reason, flags=re.IGNORECASE
+        ).strip()
+        if not clean_reason:
+            clean_reason = "Source indisponible ou marché fermé"
         alert_html = (
             f'<div class="news-alert">'
-            f"<b>[DÉGRADÉ]</b> {reason}"
+            f"<b>[DÉGRADÉ]</b> {clean_reason}"
             f"</div>"
         )
 
@@ -640,7 +646,10 @@ def render_cockpit():
     for _c_key, c_val in profile.component_statuses.items():
         is_deg = "DÉGRADÉ" in c_val.status
         cls = "chip-degraded" if is_deg else "chip-ok"
-        chips_html.append(f"<span class='{cls}'>{c_val.name} : {c_val.status}</span>")
+        display_status = re.sub(
+            r"(DÉGRADÉ\s*[:—\-]\s*)+DÉGRADÉ", "DÉGRADÉ", c_val.status
+        )
+        chips_html.append(f"<span class='{cls}'>{c_val.name} : {display_status}</span>")
     st.markdown("".join(chips_html), unsafe_allow_html=True)
     st.write("")
 

@@ -318,6 +318,7 @@ def _export_json(report: EventRiskReport, config: AppConfig) -> None:
             "earnings_14d": [
                 {
                     "ticker": e.ticker,
+                    "tier": e.tier,
                     "scheduled_utc": (
                         e.scheduled_utc.isoformat() if e.scheduled_utc else None
                     ),
@@ -416,7 +417,7 @@ def render_console(report: EventRiskReport) -> str:
                 raw_dates_str = "brut: N/A"
 
             field_str = f", champ: {e.raw_field_used}" if e.raw_field_used else ""
-            tag_str = f"[{conf_str} | {raw_dates_str}{field_str}] [{st}]"
+            tag_str = f"[T{e.tier} | {conf_str} | {raw_dates_str}{field_str}] [{st}]"
             lines.append(f"    {e.ticker}: {dt_str}{eps_str} {tag_str}")
 
     lines.append("-" * 70)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -699,7 +700,8 @@ def build_day_profile(  # noqa: C901
             row = conn.execute(
                 """
                 SELECT spot, gamma_flip, call_wall, put_support, expected_move,
-                       regime, source, status, created_at_utc, basis, synthetic_basis
+                       regime, source, status, created_at_utc, basis, synthetic_basis,
+                       payload_json
                 FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
                 """
             ).fetchone()
@@ -710,6 +712,7 @@ def build_day_profile(  # noqa: C901
                 put_support = float(row[3]) if row[3] is not None else None
                 base_em = float(row[4]) if row[4] is not None else base_em
                 gamma_regime = str(row[5]) if row[5] else gamma_regime
+                snap_source = str(row[6]) if row[6] else "CBOE"
                 snap_status = str(row[7])
 
                 basis_val = float(row[9]) if row[9] is not None else None
@@ -722,7 +725,42 @@ def build_day_profile(  # noqa: C901
                             f"({synth_val:.1f}) > 100 pts"
                         )
 
-                g_status = "OK" if snap_status == "OK" else f"DÉGRADÉ: {snap_status}"
+                if snap_status == "OK":
+                    g_status = "OK"
+                else:
+                    deg_reason = ""
+                    if len(row) > 11 and row[11]:
+                        try:
+                            payload_data = json.loads(row[11])
+                            anomalies = payload_data.get("anomalies", [])
+                            for a in anomalies:
+                                a_clean = (
+                                    a.replace("DÉGRADÉ :", "")
+                                    .replace("DÉGRADÉ:", "")
+                                    .replace("DÉGRADÉ", "")
+                                    .strip(" :-·")
+                                )
+                                if a_clean:
+                                    deg_reason = a_clean
+                                    break
+                            if not deg_reason and payload_data.get("data_age_minutes"):
+                                age_m = float(payload_data["data_age_minutes"])
+                                deg_reason = f"données âgées de {age_m:.0f} min"
+                        except Exception:
+                            pass
+
+                    if not deg_reason:
+                        if ":" in snap_status:
+                            deg_reason = snap_status.split(":", 1)[1].strip()
+                        elif snap_status != "DÉGRADÉ":
+                            deg_reason = snap_status
+
+                    if not deg_reason:
+                        deg_reason = f"source {snap_source} différée ou marché fermé"
+
+                    deg_reason = deg_reason.replace("DÉGRADÉ", "").strip(" :-·")
+                    g_status = f"DÉGRADÉ: {deg_reason}" if deg_reason else "DÉGRADÉ"
+
                 g_detail = (
                     f"Spot={spot_nq:.1f}, Flip={gamma_flip}, "
                     f"CW={call_wall}, PS={put_support}"

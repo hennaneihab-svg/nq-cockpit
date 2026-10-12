@@ -92,6 +92,17 @@ def create_parser() -> argparse.ArgumentParser:
         "ui",
         help="Lance l'interface utilisateur Streamlit",
     )
+
+    parser_desktop = subparsers.add_parser(
+        "desktop",
+        help="Lance l'interface Streamlit nativement (Desktop)",
+    )
+    parser_desktop.add_argument(
+        "--port",
+        type=int,
+        default=8501,
+        help="Port local pour le backend Streamlit (défaut 8501)",
+    )
     parser_ui.add_argument(
         "--port",
         type=int,
@@ -1136,6 +1147,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.subcommand == "ui":
         print("[nqcockpit] Commande 'ui' invoquée (interface utilisateur).")
         return _handle_ui(args)
+    elif args.subcommand == "desktop":
+        print("[nqcockpit] Commande 'desktop' invoquée (interface native).")
+        return _handle_desktop(args)
     elif args.subcommand == "data":
         from nqcockpit.data.archiver import BarArchiver
         from nqcockpit.data.db import apply_migrations, get_db_connection
@@ -2544,6 +2558,105 @@ def _handle_briefing(args: Any) -> int:
     )
     return 1
 
+
+
+def run_streamlit_desktop(page_path_str: str, port_str: str):
+    import sys
+
+    from streamlit.web import cli as stcli
+    sys.argv = [
+        "streamlit", "run", page_path_str,
+        "--server.port", port_str,
+        "--server.address", "127.0.0.1",
+        "--server.headless", "true",
+        "--theme.base", "dark",
+        "--global.developmentMode", "false",
+    ]
+    try:
+        stcli.main()
+    except SystemExit:
+        pass
+
+
+def _handle_desktop(args):
+    """Lance l'interface Streamlit nativement."""
+    import ctypes
+    import multiprocessing
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+    from pathlib import Path
+
+    import webview
+
+    mutex_name = "NQCockpit_Single_Instance_Mutex"
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = ctypes.windll.kernel32.GetLastError()
+
+    if last_error == 183:
+        if sys.stdout is not None:
+            print("[nqcockpit] L'application NQ Cockpit est déjà en cours d'exécution.")
+        return 1
+
+    port = getattr(args, "port", 8501)
+    page_path = Path(__file__).parent / "ui" / "app.py"
+
+    if sys.stdout is not None:
+        print(f"[nqcockpit] Lancement de l'app Desktop native (port {port})...")
+
+    process = multiprocessing.Process(
+        target=run_streamlit_desktop,
+        args=(str(page_path), str(port)),
+        daemon=True,
+    )
+    process.start()
+
+    def check_server():
+        url = f"http://127.0.0.1:{port}/_stcore/health"
+        for _ in range(30):
+            try:
+                with urllib.request.urlopen(url, timeout=1) as response:
+                    if response.status == 200:
+                        return True
+            except urllib.error.URLError:
+                pass
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
+    if not check_server():
+        if sys.stdout is not None:
+            print("[nqcockpit] Erreur: Le serveur local n'a pas démarré à temps.")
+        process.terminate()
+        process.join()
+        if mutex:
+            ctypes.windll.kernel32.CloseHandle(mutex)
+        return 1
+
+    if sys.stdout is not None:
+        print("[nqcockpit] Serveur local prêt. Ouverture de la fenêtre native.")
+
+    webview.create_window(
+        title="NQ Cockpit",
+        url=f"http://127.0.0.1:{port}",
+        width=1200,
+        height=800,
+        min_size=(800, 600),
+    )
+
+    webview.start()
+
+    if sys.stdout is not None:
+        print("[nqcockpit] Fermeture de l'application...")
+    process.terminate()
+    process.join()
+
+    if mutex:
+        ctypes.windll.kernel32.CloseHandle(mutex)
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
