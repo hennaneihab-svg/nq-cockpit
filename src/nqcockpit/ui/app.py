@@ -23,6 +23,7 @@ from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_app
 from nqcockpit.ui.cockpit_page import render_cockpit
 from nqcockpit.ui.discipline_page import render_discipline_page
+from nqcockpit.ui.i18n import render_lang_selector, t
 from nqcockpit.ui.journal_page import render_journal_page
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ from nqcockpit.ui.journal_page import render_journal_page
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="NQ Cockpit — Desk de Trading",
+    page_title="NQ Cockpit — Trading Desk",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -130,30 +131,38 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    with st.sidebar:
+        render_lang_selector(key_prefix="sidebar_main")
+
+    algiers_lbl = t("Alger :", "Algiers:")
+    ny_lbl = t("New York :", "New York:")
     st.sidebar.markdown(
         f"""
         <div class="sidebar-clock">
-            <b>Alger :</b> {now_algiers.strftime('%Y-%m-%d %H:%M:%S')}<br>
-            <b>New York :</b> {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ET
+            <b>{algiers_lbl}</b> {now_algiers.strftime('%Y-%m-%d %H:%M:%S')}<br>
+            <b>{ny_lbl}</b> {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ET
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     db_file = Path(config.data.db_path)
-    db_status_str = f"`{db_file.name}` (OK)" if db_file.exists() else "`Base absente` (DÉGRADÉ)"
-    st.sidebar.caption(f"Base SQLite : {db_status_str}")
+    db_status_str = (
+        f"`{db_file.name}` (OK)"
+        if db_file.exists()
+        else t("`Base absente` (DÉGRADÉ)", "`Database missing` (DEGRADED)")
+    )
+    st.sidebar.caption(f"{t('Base SQLite', 'SQLite DB')} : {db_status_str}")
     st.sidebar.markdown("---")
 
-    PAGES = {
-        "[01] COCKPIT LIVE": render_cockpit,
-        "[02] JOURNAL DE BORD": render_journal_page,
-        "[03] DISCIPLINE & SIZING": render_discipline_page,
-        "[04] COACHING & ANALYTICS": render_coaching_app,
-        "[05] BRIEFING PRE-SEANCE": render_briefing_page,
-    }
+    page_defs = [
+        (t("[01] COCKPIT LIVE", "[01] LIVE COCKPIT"), render_cockpit),
+        (t("[02] JOURNAL DE BORD", "[02] TRADE JOURNAL"), render_journal_page),
+        (t("[03] DISCIPLINE & SIZING", "[03] DISCIPLINE & SIZING"), render_discipline_page),
+        (t("[04] COACHING & ANALYTICS", "[04] COACHING & ANALYTICS"), render_coaching_app),
+        (t("[05] BRIEFING PRE-SEANCE", "[05] PRE-SESSION BRIEFING"), render_briefing_page),
+    ]
 
-    page_keys = list(PAGES.keys())
     default_idx = 0
     param_page = str(st.query_params.get("page", "")).lower()
     if param_page in ["1", "cockpit"]:
@@ -167,20 +176,23 @@ def main() -> None:
     elif param_page in ["5", "briefing"]:
         default_idx = 4
 
-    choice = st.sidebar.radio(
-        "Navigation Sections",
-        page_keys,
+    choice_idx = st.sidebar.radio(
+        t("Navigation Sections", "Navigation"),
+        options=list(range(len(page_defs))),
         index=default_idx,
+        format_func=lambda idx: page_defs[idx][0],
     )
 
     st.sidebar.markdown("---")
     st.sidebar.caption(
-        "NQ Cockpit P13 · Design System Swetrix · "
-        "Strictement non-directionnel"
+        t(
+            "NQ Cockpit P13 · Design System Swetrix · Strictement non-directionnel",
+            "NQ Cockpit P13 · Swetrix Design System · Strictly non-directional",
+        )
     )
 
     # Exécution du composant de la page choisie
-    renderer = PAGES[choice]
+    renderer = page_defs[choice_idx][1]
     renderer()
 
 

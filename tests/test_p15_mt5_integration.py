@@ -1,4 +1,4 @@
-﻿"""Tests pytest unitaires et d'intégration pour la passerelle MetaTrader 5 (P15).
+"""Tests pytest unitaires et d'intégration pour la passerelle MetaTrader 5 (P15).
 
 Couvre :
 - RàƒÂ¨gle R9 : lecture seule absolue, interdiction d'envoi d'ordres
@@ -998,3 +998,30 @@ def test_import_ignores_gold_and_out_of_scope(monkeypatch, mem_conn):
     from nqcockpit.journal.store import load_trades
     trades = load_trades(mem_conn)
     assert len(trades) == 0
+
+
+def test_terminal_running_but_no_account_logged_in(mock_mt5):
+    """Vérifie que si MT5 est lancé mais qu'aucun compte n'est connecté, le statut est DÉGRADÉ."""
+    mock_mt5.initialize.return_value = True
+    mock_mt5.account_info.return_value = None
+    mock_mt5.last_error.return_value = (1, "No IPC connection to trade server")
+
+    client = MT5Client()
+    status = client.connect()
+
+    assert status.is_ok is False
+    assert status.status == "DÉGRADÉ"
+    assert status.terminal_detected is True
+    assert status.connected is False
+    assert "aucun compte connecté" in status.reason
+    assert isinstance(status.checked_at, datetime)
+    assert status.checked_at.tzinfo is not None
+
+
+def test_mt5_status_checked_at_field():
+    """Vérifie que le champ checked_at est présent et correctement instancié."""
+    s = MT5Status(status="OK", reason="Test", connected=True)
+    assert hasattr(s, "checked_at")
+    assert isinstance(s.checked_at, datetime)
+    assert s.checked_at.tzinfo is not None
+

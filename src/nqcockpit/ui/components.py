@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from nqcockpit.ui.i18n import t, tr_text
+
 # Palette sémantique extraite de Swetrix (Badge.tsx & Text.tsx en mode sombre)
 STATUS_COLORS = {
     "OK": {
@@ -106,7 +108,7 @@ def render_status_badge(status: str, label: str = "") -> None:
         letter-spacing: 0.02em;
         margin-bottom: 6px;
     ">
-        {label_part}SYSTEM // {norm_status}
+        {label_part}SYSTEM // {tr_text(norm_status)}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
@@ -117,7 +119,13 @@ def render_degraded_banner(warnings: list[str]) -> None:
     if not warnings:
         return
 
-    warn_html = "".join([f"<li style='margin-bottom: 2px;'>{w}</li>" for w in warnings])
+    warn_html = "".join(
+        [f"<li style='margin-bottom: 2px;'>{tr_text(w)}</li>" for w in warnings]
+    )
+    banner_title = t(
+        "[AVERTISSEMENT DE SANTÉ DES SOURCES — STATUT DÉGRADÉ]",
+        "[SOURCE HEALTH WARNING — DEGRADED STATUS]",
+    )
     html = f"""
     <div style="
         background-color: rgba(251, 191, 36, 0.08);
@@ -131,7 +139,7 @@ def render_degraded_banner(warnings: list[str]) -> None:
         line-height: 1.45;
     ">
         <div style="font-weight: 600; font-family: ui-monospace, monospace; margin-bottom: 4px;">
-            [AVERTISSEMENT DE SANTÉ DES SOURCES — STATUT DÉGRADÉ]
+            {banner_title}
         </div>
         <ul style="margin: 4px 0 0 18px; padding: 0; font-family: ui-monospace, monospace;">
             {warn_html}

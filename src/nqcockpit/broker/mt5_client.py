@@ -3,7 +3,7 @@
 Règles impératives :
 - STRICTEMENT AUCUNE fonction d'exécution ou d'envoi d'ordres (conformité avec
   la règle fondatrice R9 : "l'outil prépare, discipline et mesure, il n'exécute pas d'ordres").
-- Statut honnête : OK ou DÉGRADÉ avec motif explicite (terminal non installé, non lancéé,
+- Statut honnête : OK ou DÉGRADÉ avec motif explicite (terminal non installé, non lancé,
   authentification échouée). Jamais de solde ni de trades fictifs inventés.
 - Identifiants : lus depuis .env ou passés explicitement. Mot de passe masqué,
   jamais journalisé en clair dans les logs structurés.
@@ -52,7 +52,7 @@ class MT5Status:
     currency: Optional[str] = None
     balance: Optional[float] = None
     equity: Optional[float] = None
-    Échecked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def is_ok(self) -> bool:
@@ -250,7 +250,7 @@ class MT5Client:
             self._is_connected = False
             return MT5Status(
                 status="DÉGRADÉ",
-                reason=f"Terminal MT5 non détecté ou non lancéé ({code}: {msg})",
+                reason=f"Terminal MT5 non détecté ou non lancé ({code}: {msg})",
                 error_code=code,
                 terminal_detected=False,
                 connected=False,
@@ -270,7 +270,7 @@ class MT5Client:
                     mt5.shutdown()
                     self._is_connected = False
                     login_err = (
-                        f"ÉÉchec d'authentification MT5 pour le compte {self.login} ({code}: {msg})"
+                        f"Échec d'authentification MT5 pour le compte {self.login} ({code}: {msg})"
                     )
                     return MT5Status(
                         status="DÉGRADÉ",
@@ -281,10 +281,21 @@ class MT5Client:
                     )
 
         acc = mt5.account_info()
+        if acc is None:
+            code, msg = self._get_last_error()
+            self._is_connected = False
+            return MT5Status(
+                status="DÉGRADÉ",
+                reason=f"Terminal MT5 détecté mais aucun compte connecté ({code}: {msg})",
+                error_code=code,
+                terminal_detected=True,
+                connected=False,
+            )
+
         self._is_connected = True
 
         acc_dict: dict[str, Any] = (
-            acc._asdict() if acc is not None and hasattr(acc, "_asdict") else {}
+            acc._asdict() if hasattr(acc, "_asdict") else {}
         )
         return MT5Status(
             status="OK",
@@ -467,7 +478,7 @@ class MT5Client:
         for d in raw_deals:
             deal_dict = d._asdict() if hasattr(d, "_asdict") else {}
             sym = deal_dict.get("symbol", "")
-            # Filtrer les opérations d'ééquilibrage / compte sans symbole
+            # Filtrer les opérations d'équilibrage / compte sans symbole
             if not sym or deal_dict.get("type", 0) not in (0, 1):
                 continue
             if symbol and sym.upper() != symbol.upper():
@@ -794,7 +805,7 @@ class MT5Client:
 
             save_trade(conn, entry)
 
-            # Mise àƒÂ  jour des index de dàƒÂ©duplication en màƒÂ©moire
+            # Mise à jour des index de déduplication en mémoire
             existing_ids.add(trade_id)
             existing_timed_keys.add(
                 (
@@ -827,7 +838,7 @@ class MT5Client:
     def _convert_broker_time(self, timestamp_epoch: int) -> tuple[datetime, datetime, datetime]:
         """Convertit l'horodatage serveur broker vers UTC, NY et Alger via zoneinfo.
 
-        Ne code JAMAIS de dàƒÂ©calage horaire en dur.
+        Ne code JAMAIS de décalage horaire en dur.
         """
         if not timestamp_epoch or timestamp_epoch <= 0:
             dt_utc = datetime.now(timezone.utc)
@@ -836,7 +847,7 @@ class MT5Client:
         else:
             try:
                 tz_broker = ZoneInfo(self.broker_tz_name)
-                # InterpràƒÂ©tation de l'horodatage dans le fuseau du broker
+                # Interprétation de l'horodatage dans le fuseau du broker
                 dt_broker = datetime.fromtimestamp(timestamp_epoch, tz=tz_broker)
                 dt_utc = dt_broker.astimezone(TZ_UTC)
             except Exception:  # noqa: BLE001
@@ -858,7 +869,7 @@ class MT5Client:
 
     @staticmethod
     def _get_last_error() -> tuple[int, str]:
-        """RàƒÂ©cupàƒÂ¨re l'erreur systàƒÂ¨me MT5."""
+        """Récupère l'erreur système MT5."""
         if HAS_MT5_PACKAGE and mt5 is not None and hasattr(mt5, "last_error"):
             try:
                 err = mt5.last_error()
@@ -866,7 +877,7 @@ class MT5Client:
                     return int(err[0]), str(err[1])
                 return -1, str(err)
             except Exception:  # noqa: BLE001
-                return -1, "Erreur MT5 indàƒÂ©terminàƒÂ©e"
+                return -1, "Erreur MT5 indéterminée"
         return -1, "Package MT5 indisponible"
 
 

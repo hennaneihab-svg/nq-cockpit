@@ -29,6 +29,7 @@ from nqcockpit.macro.news_radar import (
     fetch_macro_news_radar,
 )
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
+from nqcockpit.ui.i18n import get_lang, t, toggle_lang, tr_text
 
 log = logging.getLogger(__name__)
 
@@ -39,19 +40,23 @@ UTC = timezone.utc
 
 def _render_wire_item_html(item: NewsWireItem, delay_idx: int) -> str:
     """Génère le fragment HTML d'une dépêche d'actualité en direct."""
-    dot_html = '<span class="live-dot" title="Dépêche récente"></span>'
+    dot_title = t("Dépêche récente", "Recent wire item")
+    dot_html = f'<span class="live-dot" title="{dot_title}"></span>'
+    alg_lbl = t("Alger", "Algiers")
+    age_lbl = t("Âge", "Age")
     return (
         f'<div class="news-wire-card animate-enter delay-{delay_idx}">'
         f'<div class="news-wire-header">'
-        f'<span class="wire-tag" style="color: {item.tag_color};">{item.tag}</span>'
-        f'<span class="wire-source">{dot_html}{item.source}</span>'
+        f'<span class="wire-tag" style="color: {item.tag_color};">{tr_text(item.tag)}</span>'
+        f'<span class="wire-source">{dot_html}{tr_text(item.source)}</span>'
         f'</div>'
         f'<div class="wire-title">'
-        f'<a href="{item.link}" target="_blank" rel="noopener noreferrer">{item.title}</a>'
+        f'<a href="{item.link}" target="_blank" rel="noopener noreferrer">{tr_text(item.title)}</a>'
         f'</div>'
         f'<div class="wire-footer">'
-        f'<span>Alger : {item.timestamp_algiers_str} | NY : {item.timestamp_et_str}</span>'
-        f'<span>Âge : <b>{item.age_str}</b></span>'
+        f'<span>{alg_lbl} : {tr_text(item.timestamp_algiers_str)} | '
+        f'NY : {item.timestamp_et_str}</span>'
+        f'<span>{age_lbl} : <b>{tr_text(item.age_str)}</b></span>'
         f'</div>'
         f'</div>'
     )
@@ -59,14 +64,17 @@ def _render_wire_item_html(item: NewsWireItem, delay_idx: int) -> str:
 
 def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
     """Génère le fragment HTML d'une carte macro avec ses animations et statuts."""
+    deg_badge_txt = t("[DÉGRADÉ]", "[DEGRADED]")
     if card.is_ok:
         status_pill_cls = "pill-ok"
-        dot_html = '<span class="live-dot" title="Donnée active en direct"></span>'
+        dot_title = t("Donnée active en direct", "Active live data")
+        dot_html = f'<span class="live-dot" title="{dot_title}"></span>'
         deg_card_cls = ""
         alert_html = ""
     else:
         status_pill_cls = "pill-deg"
-        dot_html = '<span class="deg-dot" title="Flux dégradé ou clôture différée"></span>'
+        dot_title = t("Flux dégradé ou clôture différée", "Degraded feed or delayed close")
+        dot_html = f'<span class="deg-dot" title="{dot_title}"></span>'
         deg_card_cls = "degraded"
         reason = card.degraded_reason or "Source indisponible ou marché fermé"
         clean_reason = re.sub(
@@ -76,24 +84,29 @@ def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
             clean_reason = "Source indisponible ou marché fermé"
         alert_html = (
             f'<div class="news-alert">'
-            f"<b>[DÉGRADÉ]</b> {clean_reason}"
+            f"<b>{deg_badge_txt}</b> {tr_text(clean_reason)}"
             f"</div>"
         )
+
+    src_lbl = t("Source :", "Source:")
+    ts_lbl = t("Horodatages :", "Timestamps:")
+    age_lbl = t("Âge :", "Age:")
+    card_alg_ts = tr_text(card.timestamp_algiers_str)
 
     return (
         f'<div class="news-card animate-enter delay-{delay_idx} {deg_card_cls}">'
         f'<div class="news-card-header">'
-        f'<span class="news-card-title">{card.category} · {card.title}</span>'
-        f'<span class="news-pill {status_pill_cls}">{dot_html}{card.status}</span>'
+        f'<span class="news-card-title">{tr_text(card.category)} · {tr_text(card.title)}</span>'
+        f'<span class="news-pill {status_pill_cls}">{dot_html}{tr_text(card.status)}</span>'
         f'</div>'
         f'<div class="news-body">'
-        f'<div class="news-kpi refresh-flash">{card.main_value}</div>'
-        f'<div class="news-desc">{card.sub_value}</div>'
+        f'<div class="news-kpi refresh-flash">{tr_text(card.main_value)}</div>'
+        f'<div class="news-desc">{tr_text(card.sub_value)}</div>'
         f'</div>'
         f'<div class="news-footer">'
-        f'<div><b>Source :</b> {card.source}</div>'
-        f'<div><b>Horodatages :</b> {card.timestamp_algiers_str} | {card.timestamp_et_str}</div>'
-        f'<div><b>Âge :</b> {card.age_str}</div>'
+        f'<div><b>{src_lbl}</b> {tr_text(card.source)}</div>'
+        f'<div><b>{ts_lbl}</b> {card_alg_ts} | {card.timestamp_et_str}</div>'
+        f'<div><b>{age_lbl}</b> {tr_text(card.age_str)}</div>'
         f'{alert_html}'
         f'</div>'
         f'</div>'
@@ -104,7 +117,10 @@ def render_cockpit():
     """Rendu complet de la page Cockpit."""
     try:
         st.set_page_config(
-            page_title="NQ Cockpit — Profil de Séance & Radar Macro",
+            page_title=t(
+                "NQ Cockpit — Profil de Séance & Radar Macro",
+                "NQ Cockpit — Session Profile & Macro Radar",
+            ),
             layout="wide",
             initial_sidebar_state="collapsed",
         )
@@ -493,42 +509,71 @@ def render_cockpit():
     if conn:
         conn.close()
 
-    # En-tête : Titre & Horodatages multi-fuseaux sans décalage codé en dur
-    col_t1, col_t2 = st.columns([2, 1])
+    # En-tête : Titre, Horodatages multi-fuseaux & Bouton de langue instantané
+    col_t1, col_t2, col_t3 = st.columns([2.2, 1.1, 0.7])
     with col_t1:
+        header_title = t(
+            "NQ COCKPIT // PROFIL DE SÉANCE & RADAR MACRO",
+            "NQ COCKPIT // SESSION PROFILE & MACRO RADAR",
+        )
         st.markdown(
-            '<div class="section-header">NQ COCKPIT // PROFIL DE SÉANCE & RADAR MACRO</div>',
+            f'<div class="section-header">{header_title}</div>',
             unsafe_allow_html=True,
         )
         st.caption(
-            "Aide à la décision non-directionnelle · Risque événementiel · Cadre d'exécution"
+            t(
+                "Aide à la décision non-directionnelle · Risque événementiel · Cadre d'exécution",
+                "Non-directional decision support · Event risk · Execution framework",
+            )
         )
     with col_t2:
         now_alg = now_utc.astimezone(TZ_ALGIERS).strftime("%H:%M:%S")
         now_et = now_utc.astimezone(TZ_ET).strftime("%H:%M:%S")
+        alg_lbl = t("Alger :", "Algiers:")
+        ny_lbl = t("New York :", "New York:")
+        sess_lbl = t("Séance cible :", "Target session:")
         st.markdown(
             f"<div class='header-clock' style='text-align: right; font-family: monospace; "
             f"font-size: 0.82rem; line-height: 1.45; padding-top: 4px; "
             f"color: var(--text-secondary);'>"
-            f"<b>Alger :</b> {now_alg} | <b>New York :</b> {now_et} ET<br>"
-            f"Séance cible : <b>{profile.target_date}</b>"
+            f"<b>{alg_lbl}</b> {now_alg} | <b>{ny_lbl}</b> {now_et} ET<br>"
+            f"{sess_lbl} <b>{profile.target_date}</b>"
             f"</div>",
             unsafe_allow_html=True,
+        )
+    with col_t3:
+        top_btn_lbl = (
+            "🇬🇧 English (EN)" if get_lang() == "FR" else "🇫🇷 Français (FR)"
+        )
+        st.button(
+            top_btn_lbl,
+            key="cockpit_header_lang_btn",
+            on_click=toggle_lang,
+            use_container_width=True,
         )
 
     # -----------------------------------------------------------------------
     # 1. BANDEAU DE STATUT EN 5 SECONDES : AUTORISÉ OU NO-TRADE
     # -----------------------------------------------------------------------
     if profile.no_trade.is_trading_allowed:
+        allowed_title = t(
+            "SYSTEM // TRADING AUTORISÉ (SOUS CONDITIONS)",
+            "SYSTEM // TRADING AUTHORIZED (CONDITIONAL)",
+        )
+        allowed_sub = t(
+            "Aucun drapeau bloquant actif. Respecter impérativement les Kill Zones d'Alger "
+            "(15h30–17h00 / 17h00–18h30) et la règle de max 2 trades/jour.",
+            "No active blocking flags. Strictly respect Algiers Kill Zones "
+            "(15:30–17:00 / 17:00–18:30) and the max 2 trades/day rule.",
+        )
         st.markdown(
-            """
+            f"""
             <div class="status-banner-allowed animate-enter delay-0">
                 <span style="font-family: monospace; font-weight: 700; color: #10B981;">
-                    SYSTEM // TRADING AUTORISÉ (SOUS CONDITIONS)
+                    {allowed_title}
                 </span><br>
                 <span style="font-size: 0.82rem; color: #94A3B8;">
-                    Aucun drapeau bloquant actif. Respecter impérativement les Kill Zones d'Alger
-                    (15h30–17h00 / 17h00–18h30) et la règle de max 2 trades/jour.
+                    {allowed_sub}
                 </span>
             </div>
             """,
@@ -536,19 +581,27 @@ def render_cockpit():
         )
     else:
         reasons_list = [
-            f"<li><b>{f.code.value}</b> : {f.reason}</li>"
+            f"<li><b>{f.code.value}</b> : {tr_text(f.reason)}</li>"
             for f in profile.no_trade.blocking_flags
         ]
         reasons_html = "".join(reasons_list)
         cnt = profile.no_trade.active_flags_count
+        notrade_title = t(
+            f"SYSTEM // DRAPEAU NO-TRADE ACTIF ({cnt})",
+            f"SYSTEM // ACTIVE NO-TRADE FLAG ({cnt})",
+        )
+        notrade_sub = t(
+            "Trading strictement suspendu :",
+            "Trading strictly suspended:",
+        )
         st.markdown(
             f"""
             <div class="status-banner-notrade animate-enter delay-0">
                 <span style="font-family: monospace; font-weight: 700; color: #EF4444;">
-                    SYSTEM // DRAPEAU NO-TRADE ACTIF ({cnt})
+                    {notrade_title}
                 </span><br>
                 <span style="font-size: 0.82rem; color: #94A3B8;">
-                    <b>Trading strictement suspendu :</b>
+                    <b>{notrade_sub}</b>
                     <ul style="margin: 4px 0 0 0; padding-left: 20px;">{reasons_html}</ul>
                 </span>
             </div>
@@ -562,20 +615,22 @@ def render_cockpit():
     k1, k2, k3, k4 = st.columns(4)
 
     with k1:
-        cd_text = profile.next_tier1_countdown or "Aucun"
-        ev_title = profile.next_tier1_event or "Aucun Tier 1 imminent"
+        cd_text = tr_text(profile.next_tier1_countdown or "Aucun")
+        ev_title = tr_text(profile.next_tier1_event or "Aucun Tier 1 imminent")
         if profile.event_risk_level == "GREEN":
             color_ev = "#10B981"
         elif profile.event_risk_level == "AMBER":
             color_ev = "#D97706"
         else:
             color_ev = "#EF4444"
+        k1_title = t("Prochain Événement Tier 1", "Next Tier 1 Event")
+        risk_lbl = t("Risque", "Risk")
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-1">
-                <div class="kpi-title">Prochain Événement Tier 1</div>
+                <div class="kpi-title">{k1_title}</div>
                 <div class="kpi-value refresh-flash" style="color: {color_ev};">{cd_text}</div>
-                <div class="kpi-sub">{ev_title} (Risque {profile.event_risk_level})</div>
+                <div class="kpi-sub">{ev_title} ({risk_lbl} {profile.event_risk_level})</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -588,14 +643,16 @@ def render_cockpit():
             if profile.distance_to_flip_pts is not None
             else "N/A"
         )
+        k2_title = t("Régime Gamma (P04)", "Gamma Regime (P04)")
+        k2_sub = t("Distance au Flip :", "Distance to Flip:")
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-2">
-                <div class="kpi-title">Régime Gamma (P04)</div>
+                <div class="kpi-title">{k2_title}</div>
                 <div class="kpi-value refresh-flash" style="color: {g_color};">
                     {profile.gamma_regime}
                 </div>
-                <div class="kpi-sub">Distance au Flip : <b>{dist_f}</b></div>
+                <div class="kpi-sub">{k2_sub} <b>{dist_f}</b></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -604,11 +661,12 @@ def render_cockpit():
     with k3:
         vix_str = f"{profile.vix_level:.2f}" if profile.vix_level else "N/A"
         vxn_str = f"{profile.vxn_level:.2f}" if profile.vxn_level else "N/A"
+        k3_title = t("Régime de Volatilité (P07)", "Volatility Regime (P07)")
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-3">
-                <div class="kpi-title">Régime de Volatilité (P07)</div>
-                <div class="kpi-value refresh-flash">{profile.volatility_regime}</div>
+                <div class="kpi-title">{k3_title}</div>
+                <div class="kpi-value refresh-flash">{tr_text(profile.volatility_regime)}</div>
                 <div class="kpi-sub">VIX : <b>{vix_str}</b> | VXN : <b>{vxn_str}</b></div>
             </div>
             """,
@@ -622,12 +680,14 @@ def render_cockpit():
             if profile.em_consumption_pct is not None
             else "N/A"
         )
+        k4_title = t("Expected Move Journalier", "Daily Expected Move")
+        k4_sub = t("Consommé Overnight :", "Overnight Consumed:")
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-4">
-                <div class="kpi-title">Expected Move Journalier</div>
+                <div class="kpi-title">{k4_title}</div>
                 <div class="kpi-value refresh-flash">{em_pts}</div>
-                <div class="kpi-sub">Consommé Overnight : <b>{em_cons}</b></div>
+                <div class="kpi-sub">{k4_sub} <b>{em_cons}</b></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -636,10 +696,11 @@ def render_cockpit():
     # -----------------------------------------------------------------------
     # 3. BANDEAU DE SANTÉ DÉCOMPOSÉ DES SOURCES (AUCUN MASQUAGE)
     # -----------------------------------------------------------------------
+    health_hdr = t("SANTÉ DES COMPOSANTS SOURCES", "SOURCE COMPONENT HEALTH")
     st.markdown(
-        "<div style='font-size: 0.85rem; font-weight: 700; color: #94A3B8; margin-top: 10px; "
-        "text-transform: uppercase; letter-spacing: 0.05em;'>"
-        "SANTÉ DES COMPOSANTS SOURCES</div>",
+        f"<div style='font-size: 0.85rem; font-weight: 700; color: #94A3B8; margin-top: 10px; "
+        f"text-transform: uppercase; letter-spacing: 0.05em;'>"
+        f"{health_hdr}</div>",
         unsafe_allow_html=True,
     )
     chips_html = []
@@ -649,20 +710,30 @@ def render_cockpit():
         display_status = re.sub(
             r"(DÉGRADÉ\s*[:—\-]\s*)+DÉGRADÉ", "DÉGRADÉ", c_val.status
         )
-        chips_html.append(f"<span class='{cls}'>{c_val.name} : {display_status}</span>")
+        chips_html.append(
+            f"<span class='{cls}'>{tr_text(c_val.name)} : {tr_text(display_status)}</span>"
+        )
     st.markdown("".join(chips_html), unsafe_allow_html=True)
     st.write("")
 
     # -----------------------------------------------------------------------
     # 4. RADAR MACRO & ACTUALITÉS INFLUENÇANT LE NASDAQ (6 FENÊTRES - TÂCHE 5)
     # -----------------------------------------------------------------------
+    radar_hdr = t(
+        "RADAR MACRO & ACTUALITÉS INFLUENÇANT LE NASDAQ",
+        "MACRO RADAR & NASDAQ DRIVERS",
+    )
     st.markdown(
-        '<div class="section-header">RADAR MACRO & ACTUALITÉS INFLUENÇANT LE NASDAQ</div>',
+        f'<div class="section-header">{radar_hdr}</div>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "Indicateurs clés influençant le Nasdaq 100 : Taux, Inflation, Résultats Tech, "
-        "Fed, Pétrole, Dollar. Données horodatées avec traçabilité et statut honnête."
+        t(
+            "Indicateurs clés influençant le Nasdaq 100 : Taux, Inflation, Résultats Tech, "
+            "Fed, Pétrole, Dollar. Données horodatées avec traçabilité et statut honnête.",
+            "Key macro drivers impacting the Nasdaq-100: Yields, Inflation, Tech Earnings, "
+            "Fed, Crude Oil, US Dollar. Timestamped data with full provenance and honest status.",
+        )
     )
 
     try:
@@ -689,8 +760,12 @@ def render_cockpit():
 
     except Exception as exc:
         log.warning("Échec affichage radar macro: %s", exc)
+        err_lbl = t(
+            f"[DÉGRADÉ] Radar macro inaccessible : {exc}",
+            f"[DEGRADED] Macro radar unreachable: {exc}",
+        )
         st.markdown(
-            f'<div class="chip-degraded">[DÉGRADÉ] Radar macro inaccessible : {exc}</div>',
+            f'<div class="chip-degraded">{err_lbl}</div>',
             unsafe_allow_html=True,
         )
 
@@ -698,25 +773,37 @@ def render_cockpit():
     # 4B. FIL EN DIRECT DES ACTUALITÉS & COMMUNIQUÉS OFFICIELS (LIVE WIRE)
     # -----------------------------------------------------------------------
     st.write("")
+    wire_hdr = t(
+        "FIL D'ACTUALITÉS EN DIRECT & COMMUNIQUÉS OFFICIELS (LIVE WIRE)",
+        "LIVE NEWS WIRE & OFFICIAL RELEASES",
+    )
     st.markdown(
-        '<div class="section-header" style="font-size: 0.88rem;">'
-        'FIL D\'ACTUALITÉS EN DIRECT & COMMUNIQUÉS OFFICIELS (LIVE WIRE)'
-        '</div>',
+        f'<div class="section-header" style="font-size: 0.88rem;">{wire_hdr}</div>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "Veille d'actualité en direct influençant le Nasdaq (Conseil des Gouverneurs Fed & presse "
-        "financière). Chaque dépêche affiche sa source, son horodatage Alger et NY, et son âge."
+        t(
+            "Veille d'actualité en direct influençant le Nasdaq (Conseil des Gouverneurs "
+            "Fed & presse financière). Chaque dépêche affiche sa source, son horodatage "
+            "Alger et NY, et son âge.",
+            "Live news wire impacting the Nasdaq (Federal Reserve Board of Governors & "
+            "financial press). Every item displays its source, Algiers and NY timestamps, "
+            "and age.",
+        )
     )
 
     try:
         wire_report = fetch_live_news_wire(max_items_per_source=4)
         if wire_report.degraded_sources:
-            deg_reasons_html = " · ".join(wire_report.degraded_sources)
+            deg_reasons_html = " · ".join(
+                tr_text(s) for s in wire_report.degraded_sources
+            )
+            deg_lbl = t(
+                f"<b>[DÉGRADÉ]</b> Sources dégradées dans le fil : {deg_reasons_html}",
+                f"<b>[DEGRADED]</b> Degraded wire sources: {deg_reasons_html}",
+            )
             st.markdown(
-                f'<div class="news-alert" style="margin-bottom: 10px;">'
-                f'<b>[DÉGRADÉ]</b> Sources dégradées dans le fil : {deg_reasons_html}'
-                f'</div>',
+                f'<div class="news-alert" style="margin-bottom: 10px;">{deg_lbl}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -729,16 +816,22 @@ def render_cockpit():
                         unsafe_allow_html=True,
                     )
         else:
+            empty_wire_msg = t(
+                "[DÉGRADÉ] Aucun communiqué reçu (flux RSS Fed & Google News inaccessibles).",
+                "[DEGRADED] No releases received (Fed & Google News RSS feeds unreachable).",
+            )
             st.markdown(
-                '<div class="chip-degraded">'
-                '[DÉGRADÉ] Aucun communiqué reçu (flux RSS Fed & Google News inaccessibles).'
-                '</div>',
+                f'<div class="chip-degraded">{empty_wire_msg}</div>',
                 unsafe_allow_html=True,
             )
     except Exception as exc:
         log.warning("Échec affichage fil d'actualités: %s", exc)
+        err_wire = t(
+            f"[DÉGRADÉ] Fil d'actualités indisponible : {exc}",
+            f"[DEGRADED] News wire unavailable: {exc}",
+        )
         st.markdown(
-            f'<div class="chip-degraded">[DÉGRADÉ] Fil d\'actualités indisponible : {exc}</div>',
+            f'<div class="chip-degraded">{err_wire}</div>',
             unsafe_allow_html=True,
         )
 
@@ -749,69 +842,102 @@ def render_cockpit():
     c_left, c_right = st.columns([1, 1], gap="medium")
 
     with c_left:
+        lvl_hdr = t("NIVEAUX CLÉS EN POINTS NQ", "KEY LEVELS IN NQ POINTS")
         st.markdown(
-            '<div class="section-header">NIVEAUX CLÉS EN POINTS NQ</div>',
+            f'<div class="section-header">{lvl_hdr}</div>',
             unsafe_allow_html=True,
         )
+        spot_lbl = t("Spot NQ de référence :", "Reference NQ Spot:")
         st.caption(
-            f"Spot NQ de référence : <b>{profile.spot_nq:.2f} pts</b>",
+            f"{spot_lbl} <b>{profile.spot_nq:.2f} pts</b>",
             unsafe_allow_html=True,
         )
 
         if profile.key_levels:
+            col_lvl = t("Niveau", "Level")
+            col_px = t("Prix NQ", "NQ Price")
+            col_dist = t("Distance (pts)", "Distance (pts)")
+            col_pct = t("Écart %", "Diff %")
+            col_type = t("Type", "Type")
+            col_src = t("Source", "Source")
+
             table_data = []
             for lvl in profile.key_levels:
                 table_data.append({
-                    "Niveau": lvl.name,
-                    "Prix NQ": f"{lvl.price:.2f}",
-                    "Distance (pts)": f"{lvl.distance_pts:+.1f}",
-                    "Écart %": f"{lvl.distance_pct:+.2f}%",
-                    "Type": lvl.level_type,
-                    "Source": lvl.source,
+                    col_lvl: tr_text(lvl.name),
+                    col_px: f"{lvl.price:.2f}",
+                    col_dist: f"{lvl.distance_pts:+.1f}",
+                    col_pct: f"{lvl.distance_pct:+.2f}%",
+                    col_type: lvl.level_type,
+                    col_src: lvl.source,
                 })
             st.dataframe(table_data, use_container_width=True, hide_index=True)
 
-            csv_str = export_levels_to_csv(profile.key_levels)
+            csv_str = tr_text(export_levels_to_csv(profile.key_levels))
             st.download_button(
-                label="Exporter les Niveaux (CSV TradingView / ATAS)",
+                label=t(
+                    "Exporter les Niveaux (CSV TradingView / ATAS)",
+                    "Export Key Levels (CSV TradingView / ATAS)",
+                ),
                 data=csv_str,
                 file_name=f"nq_levels_{profile.target_date}.csv",
                 mime="text/csv",
                 use_container_width=True,
             )
         else:
-            st.warning("Aucun niveau clé disponible.")
+            st.warning(t("Aucun niveau clé disponible.", "No key levels available."))
 
     with c_right:
+        scen_hdr = t(
+            "CARTE DE SCÉNARIOS « SI… ALORS… »",
+            "CONDITIONAL SCENARIO MAP ('IF... THEN...')",
+        )
         st.markdown(
-            '<div class="section-header">CARTE DE SCÉNARIOS « SI… ALORS… »</div>',
+            f'<div class="section-header">{scen_hdr}</div>',
             unsafe_allow_html=True,
         )
-        st.caption("Conditions objectives de structure de carnet sans prédiction de direction.")
+        st.caption(
+            t(
+                "Conditions objectives de structure de carnet sans prédiction de direction.",
+                "Objective order-flow and structural conditions with zero directional prediction.",
+            )
+        )
 
         if profile.scenarios:
+            cond_lbl = t("Condition :", "Condition:")
+            plan_lbl = t("Plan / Action :", "Plan / Action:")
+            ctx_lbl = t("Contexte :", "Context:")
             for sc in profile.scenarios:
-                header = f"{sc.level_name} ({sc.level_price:.1f}) — {sc.level_type}"
+                header = f"{tr_text(sc.level_name)} ({sc.level_price:.1f}) — {sc.level_type}"
                 with st.expander(header, expanded=True):
                     st.markdown(
                         f"""
                         <div class="scenario-box">
-                            <b>Condition :</b> {sc.if_condition}<br>
-                            <b>Plan / Action :</b> {sc.then_plan}<br>
+                            <b>{cond_lbl}</b> {tr_text(sc.if_condition)}<br>
+                            <b>{plan_lbl}</b> {tr_text(sc.then_plan)}<br>
                             <small style="color: var(--text-muted);">
-                                <b>Contexte :</b> {sc.context_notes}
+                                <b>{ctx_lbl}</b> {tr_text(sc.context_notes)}
                             </small>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
         else:
-            st.info("Aucun scénario généré pour la séance.")
+            st.info(
+                t(
+                    "Aucun scénario généré pour la séance.",
+                    "No scenarios generated for this session.",
+                )
+            )
 
     st.divider()
     st.caption(
-        "NQ Cockpit P08 / P13 / Tâche 5 · Thème sombre mat Slate-950 · "
-        "Strictement non-directionnel."
+        t(
+            "NQ Cockpit P08 / P13 / Tâche 5 · Thème sombre mat Slate-950 · "
+            "Strictement non-directionnel.",
+            "NQ Cockpit P08 / P13 / Task 5 · Matte Dark Slate-950 Theme · "
+            "Strictly non-directional.",
+        )
     )
 
 
