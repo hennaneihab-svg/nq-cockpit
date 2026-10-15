@@ -102,6 +102,29 @@ class LevelsScheduler:
         conn = get_db_connection()
         nq_bars = get_bars(conn, "NQ=F", "1m", limit=500)
         ndx_bars = get_bars(conn, "^NDX", "1m", limit=500)
+
+        if not nq_bars or not ndx_bars:
+            try:
+                from nqcockpit.data.db import insert_bars
+                from nqcockpit.data.fetcher import DataFetcher
+
+                now_utc = datetime.now(timezone.utc)
+                f_live = DataFetcher()
+                if not nq_bars:
+                    res_nq = f_live.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
+                    if res_nq.bars:
+                        insert_bars(conn, res_nq.bars, "NQ=F", "1m", "yahoo", now_utc)
+                        nq_bars = res_nq.bars
+                if not ndx_bars:
+                    res_ndx = f_live.fetch_yahoo_bars("^NDX", interval="1m", period="1d")
+                    if res_ndx.bars:
+                        insert_bars(conn, res_ndx.bars, "^NDX", "1m", "yahoo", now_utc)
+                        ndx_bars = res_ndx.bars
+            except Exception as exc:
+                log.warning(
+                    "Échec actualisation live des barres NQ/NDX dans trigger_snapshot: %s", exc
+                )
+
         conn.close()
 
         snap = self.engine.compute_snapshot(

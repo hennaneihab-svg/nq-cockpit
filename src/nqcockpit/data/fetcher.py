@@ -197,6 +197,38 @@ class DataFetcher:
         api_key = get_key("FRED_API_KEY")
 
         if not api_key:
+            # Repli transparent sur l'endpoint CSV public gratuit de FRED (sans clé requise)
+            try:
+                from nqcockpit.macro.fetcher import fetch_fred_history
+
+                hist = fetch_fred_history(
+                    series_id, cache=self.cache, max_cache_age_seconds=max_cache_age_seconds
+                )
+                if hist:
+                    last_date, last_val = hist[-1]
+                    res = FredObservation(
+                        series_id=series_id,
+                        observation_date=last_date,
+                        value=float(last_val),
+                        source="FRED (CSV public)",
+                        fetched_at_utc=now_utc,
+                        status=DataStatus.OK,
+                        notes="Récupéré via endpoint CSV public gratuit sans clé",
+                    )
+                    self.cache.set(
+                        cache_key,
+                        {
+                            "series_id": series_id,
+                            "observation_date": last_date,
+                            "value": float(last_val),
+                            "fetched_at_utc": now_utc.isoformat(),
+                            "status": DataStatus.OK.value,
+                        },
+                    )
+                    return res
+            except Exception as exc:
+                log.warning("Échec repli FRED CSV public pour %s: %s", series_id, exc)
+
             return FredObservation(
                 series_id=series_id,
                 observation_date="",
@@ -204,7 +236,7 @@ class DataFetcher:
                 source="FRED",
                 fetched_at_utc=now_utc,
                 status=DataStatus.DEGRADED,
-                notes="Clé FRED_API_KEY absente",
+                notes="Clé FRED_API_KEY absente et repli CSV indisponible",
             )
 
         base_url = "https://api.stlouisfed.org/fred/series/observations"
@@ -268,7 +300,42 @@ class DataFetcher:
             return res
 
         except Exception as e:
-            log.warning("Erreur lors de la récupération FRED %s: %s", series_id, e)
+            log.warning(
+                "Erreur lors de la récupération FRED API %s: %s — tentative repli CSV public",
+                series_id,
+                e,
+            )
+            try:
+                from nqcockpit.macro.fetcher import fetch_fred_history
+
+                hist = fetch_fred_history(
+                    series_id, cache=self.cache, max_cache_age_seconds=max_cache_age_seconds
+                )
+                if hist:
+                    last_date, last_val = hist[-1]
+                    res = FredObservation(
+                        series_id=series_id,
+                        observation_date=last_date,
+                        value=float(last_val),
+                        source="FRED (CSV public)",
+                        fetched_at_utc=now_utc,
+                        status=DataStatus.OK,
+                        notes="Récupéré via endpoint CSV public gratuit après échec API",
+                    )
+                    self.cache.set(
+                        cache_key,
+                        {
+                            "series_id": series_id,
+                            "observation_date": last_date,
+                            "value": float(last_val),
+                            "fetched_at_utc": now_utc.isoformat(),
+                            "status": DataStatus.OK.value,
+                        },
+                    )
+                    return res
+            except Exception as exc2:
+                log.warning("Échec repli FRED CSV public secondaire pour %s: %s", series_id, exc2)
+
             return FredObservation(
                 series_id=series_id,
                 observation_date="",

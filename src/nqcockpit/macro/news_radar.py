@@ -214,7 +214,7 @@ def fetch_rates_card(fetcher: DataFetcher | None = None) -> MacroRadarCard:
     val10 = obs10.value if obs10.status == DataStatus.OK and obs10.value > 0 else None
     val2 = obs2.value if obs2.status == DataStatus.OK and obs2.value > 0 else None
 
-    # Repli 10 ans sur Yahoo ^TNX / 10 si FRED indisponible
+    # Repli 10 ans sur Yahoo ^TNX si FRED indisponible
     source10 = obs10.source
     is_10_fallback = False
     if val10 is None:
@@ -222,8 +222,13 @@ def fetch_rates_card(fetcher: DataFetcher | None = None) -> MacroRadarCard:
             ticker_tnx = yf.Ticker("^TNX")
             hist_tnx = ticker_tnx.history(period="1d", interval="1m")
             if not hist_tnx.empty:
-                val10 = float(hist_tnx["Close"].iloc[-1]) / 10.0
-                source10 = "Yahoo ^TNX/10 [différé 15 min]"
+                raw_tnx = float(hist_tnx["Close"].iloc[-1])
+                val10 = raw_tnx / 10.0 if raw_tnx > 15.0 else raw_tnx
+                source10 = (
+                    "Yahoo ^TNX/10 [différé 15 min]"
+                    if raw_tnx > 15.0
+                    else "Yahoo ^TNX [différé 15 min]"
+                )
                 is_10_fallback = True
         except Exception as exc:
             log.warning("Échec repli Yahoo ^TNX: %s", exc)

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -499,10 +498,10 @@ def render_cockpit():
     # Chargement de la configuration et des données de profil
     cfg = load_config()
     db_path = Path(cfg.data.db_path)
-    conn = None
-    if db_path.exists():
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+    from nqcockpit.data.db import apply_migrations, get_db_connection
+
+    conn = get_db_connection(db_path)
+    apply_migrations(conn)
 
     now_utc = datetime.now(timezone.utc)
     profile = build_day_profile(conn=conn, config=cfg, now_utc=now_utc)

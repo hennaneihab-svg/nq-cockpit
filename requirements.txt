@@ -18,3 +18,5 @@ tzdata
 pytest
 ruff
 dash
+pywebview
+MetaTrader5; sys_platform == 'win32'

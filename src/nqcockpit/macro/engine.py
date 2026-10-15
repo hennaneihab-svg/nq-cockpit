@@ -280,7 +280,19 @@ def compute_macro_snapshot(
     )
 
     # 6. Overnight NQ
-    overnight = compute_overnight_stats(bars_nq or [], now_utc=now_utc)
+    effective_bars = bars_nq or []
+    if not effective_bars:
+        try:
+            from nqcockpit.data.fetcher import DataFetcher
+
+            f_live = DataFetcher()
+            res_live = f_live.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
+            if res_live.bars:
+                effective_bars = res_live.bars
+        except Exception as exc:
+            log.warning("Échec récupération live NQ pour overnight stats: %s", exc)
+
+    overnight = compute_overnight_stats(effective_bars, now_utc=now_utc)
 
     # 7. CFTC COT
     cot = fetch_cftc_cot(contract_keyword=cot_contract)

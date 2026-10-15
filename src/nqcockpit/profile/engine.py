@@ -705,6 +705,41 @@ def build_day_profile(  # noqa: C901
                 FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
                 """
             ).fetchone()
+            if not row:
+                # Base vide lors du premier lancement : génération d'un snapshot initial à la volée
+                try:
+                    from nqcockpit.data.cboe import fetch_cboe_options_chain
+                    from nqcockpit.data.db import insert_bars
+                    from nqcockpit.data.fetcher import DataFetcher
+                    from nqcockpit.levels.engine import LevelsEngine
+
+                    f_init = DataFetcher()
+                    live_nq = f_init.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
+                    live_ndx = f_init.fetch_yahoo_bars("^NDX", interval="1m", period="1d")
+                    if live_nq.bars:
+                        insert_bars(conn, live_nq.bars, "NQ=F", "1m", "yahoo", now_utc)
+                    if live_ndx.bars:
+                        insert_bars(conn, live_ndx.bars, "^NDX", "1m", "yahoo", now_utc)
+
+                    chain = fetch_cboe_options_chain()
+                    engine = LevelsEngine()
+                    engine.compute_snapshot(
+                        chain=chain,
+                        nq_bars=live_nq.bars or [],
+                        ndx_bars=live_ndx.bars or [],
+                        now_utc=now_utc,
+                    )
+                    row = conn.execute(
+                        """
+                        SELECT spot, gamma_flip, call_wall, put_support, expected_move,
+                               regime, source, status, created_at_utc, basis, synthetic_basis,
+                               payload_json
+                        FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
+                        """
+                    ).fetchone()
+                except Exception as exc:
+                    log.warning("Échec initialisation automatique du snapshot: %s", exc)
+
             if row:
                 spot_nq = float(row[0]) if row[0] is not None else spot_nq
                 gamma_flip = float(row[1]) if row[1] is not None else None
