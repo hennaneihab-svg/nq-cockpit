@@ -10,6 +10,35 @@ Conçu selon des principes stricts :
 
 ---
 
+## Installation & Prérequis
+
+1. **Cloner le projet** :
+   ```bash
+   git clone https://github.com/hennaneihab-svg/nq-cockpit.git
+   cd nq-cockpit
+   ```
+
+2. **Créer un environnement virtuel Python** (Python 3.10+) :
+   ```bash
+   python -m venv .venv
+   .\.venv\Scripts\activate       # Windows PowerShell / CMD
+   # ou : source .venv/bin/activate  # Linux / MacOS
+   ```
+
+3. **Installer les dépendances** :
+   ```bash
+   pip install -e .
+   ```
+
+4. **Configuration (100 % gratuit, aucune clé obligatoire)** :
+   ```bash
+   copy .env.example .env       # Windows
+   # ou : cp .env.example .env      # Linux / MacOS
+   ```
+   *Note : L'outil fonctionne immédiatement sans aucune clé payante.*
+
+---
+
 ## Démarrage Rapide
 
 Pour lancer à la fois le planificateur de tâches d'arrière-plan (APScheduler) et l'interface utilisateur unifiée :
