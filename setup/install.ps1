@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 python -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m pip install -e .
 New-Item -ItemType Directory -Force -Path vendor | Out-Null
 Set-Location vendor
 if (!(Test-Path gex-dashboard)) { git clone https://github.com/Darthreign/gex-dashboard.git }

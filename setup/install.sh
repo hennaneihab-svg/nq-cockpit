@@ -3,6 +3,7 @@ set -euo pipefail
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -e .
 mkdir -p vendor && cd vendor
 [ -d gex-dashboard ] || git clone https://github.com/Darthreign/gex-dashboard.git
 [ -d gammagrid ]     || git clone https://github.com/gammagrid/gammagrid.git
