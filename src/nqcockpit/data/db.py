@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -178,7 +179,7 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
 def get_db_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     """Ouvre une connexion SQLite avec WAL, foreign keys et row_factory activés."""
     if db_path is None:
-        db_path = DEFAULT_DB_PATH
+        db_path = os.getenv("NQ_DATA_DB_PATH") or DEFAULT_DB_PATH
 
     is_memory = str(db_path) == ":memory:"
 

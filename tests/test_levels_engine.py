@@ -171,7 +171,7 @@ def test_max_pain_calculation(sample_options_df):
 
 def test_levels_engine_full_snapshot(sample_options_df, tmp_path: Path):
     """Vérifie l'exécution de bout en bout du snapshot de niveaux avec conversion NQ."""
-    engine = LevelsEngine(output_dir=tmp_path)
+    engine = LevelsEngine(output_dir=tmp_path, db_path=tmp_path / "nqcockpit_test.db")
 
     t0 = datetime(2026, 9, 28, 15, 0, 0, tzinfo=timezone.utc)
     chain = CboeChainSnapshot(
@@ -207,7 +207,7 @@ def test_levels_engine_full_snapshot(sample_options_df, tmp_path: Path):
 
 def test_empty_chain_handling(tmp_path: Path):
     """Vérifie la robustesse si la chaîne d'options CBOE est vide."""
-    engine = LevelsEngine(output_dir=tmp_path)
+    engine = LevelsEngine(output_dir=tmp_path, db_path=tmp_path / "nqcockpit_test.db")
     t0 = datetime(2026, 9, 28, 15, 0, 0, tzinfo=timezone.utc)
 
     chain_empty = CboeChainSnapshot(
@@ -321,7 +321,7 @@ def test_basis_previous_session_stale_degraded() -> None:
 
 def test_basis_parity_divergence_degraded(tmp_path: Path, sample_options_df: pd.DataFrame) -> None:
     """Écart supérieur à la tolérance entre base future et parité : DÉGRADÉ."""
-    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    engine = LevelsEngine(output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db")
     # Date en séance régulière : vendredi 25 sept 2026 14:00 ET = 18:00 UTC
     t_now = datetime(2026, 9, 25, 18, 0, tzinfo=timezone.utc)
 
@@ -389,7 +389,7 @@ def test_reference_session_monday_evening(tmp_path: Path):
     - Expected Move basé sur l'échéance du mardi avec jours = 1,0.
     - 0DTE = mardi.
     """
-    engine = LevelsEngine(output_dir=tmp_path)
+    engine = LevelsEngine(output_dir=tmp_path, db_path=tmp_path / "nqcockpit_test.db")
     # Lundi 28 sept 2026 21:37 ET = Mardi 29 sept 2026 01:37 UTC
     now_utc = datetime(2026, 9, 29, 1, 37, 0, tzinfo=timezone.utc)
 
@@ -471,7 +471,7 @@ def test_reference_session_tuesday_morning_fraction(tmp_path: Path):
 
     - 0DTE = mardi avec fraction de jour.
     """
-    engine = LevelsEngine(output_dir=tmp_path)
+    engine = LevelsEngine(output_dir=tmp_path, db_path=tmp_path / "nqcockpit_test.db")
     # Mardi 29 sept 2026 10:00 ET = 14:00 UTC
     now_utc = datetime(2026, 9, 29, 14, 0, 0, tzinfo=timezone.utc)
 

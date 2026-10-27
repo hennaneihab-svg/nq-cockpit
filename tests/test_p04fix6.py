@@ -137,13 +137,13 @@ def test_straddle_diagnostic_calculation_and_cause_documentation():
         assert "IV CBOE" in diag.calculated_cause
 
 
-def test_live_basis_calculation_and_three_way_comparison():
+def test_live_basis_calculation_and_three_way_comparison(tmp_path):
     """TÂCHE 2 : Vérifie le calcul de la base live et le comparatif des 3 bases.
     - Recherche de la barre NQ la plus proche (|Δt| <= 1.0 min)
     - Calcul des écarts live vs séance précédente, live vs parité, précédente vs parité
     - Détection de désalignement temporel (> 1 min) entraînant l'indisponibilité de la base live
     """
-    engine = LevelsEngine()
+    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
     now_utc = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
     spot_ndx = 20000.0
 
@@ -220,11 +220,11 @@ def test_live_basis_calculation_and_three_way_comparison():
     assert "Désalignement temporel" in (snap_misaligned.live_basis_unavailable_reason or "")
 
 
-def test_cboe_distinct_age_metrics_and_stale_detection():
+def test_cboe_distinct_age_metrics_and_stale_detection(tmp_path):
     """TÂCHE 3 : Vérifie que l'âge de la chaîne JSON et le retard des cotations
     d'options actives sont distincts et mesurés séparément.
     """
-    engine = LevelsEngine()
+    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
     now_utc = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
     chain_file_time = now_utc - timedelta(seconds=30)  # JSON publié il y a 0.5 min
     quote_time = now_utc - timedelta(minutes=15)  # Cotation retardée de 15 min
@@ -277,7 +277,7 @@ def test_sqlite_fallback_on_network_failure(monkeypatch):
         fetcher.fetch_yahoo_bars("NQ=F")
 
 
-def test_straddle_diagnostic_serialization_to_dict():
+def test_straddle_diagnostic_serialization_to_dict(tmp_path):
     """Vérifie la sérialisation JSON complète du diagnostic de straddle."""
     ref_utc = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
     spot_ndx = 20000.0
@@ -325,7 +325,7 @@ def test_straddle_diagnostic_serialization_to_dict():
         status=DataStatus.OK,
     )
 
-    engine = LevelsEngine()
+    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
     snap = engine.compute_snapshot(
         chain=chain,
         nq_bars=[],

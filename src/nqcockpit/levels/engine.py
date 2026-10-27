@@ -912,8 +912,13 @@ def enrich_expected_move_nq(
 class LevelsEngine:
     """Moteur de calcul de niveaux gamma, expected move et conversion vers NQ."""
 
-    def __init__(self, output_dir: Path | str = Path("data/levels")) -> None:
+    def __init__(
+        self,
+        output_dir: Path | str = Path("data/levels"),
+        db_path: Path | str | None = None,
+    ) -> None:
         self.output_dir = Path(output_dir)
+        self.db_path = db_path
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def compute_snapshot(
@@ -1585,8 +1590,8 @@ class LevelsEngine:
         # Enregistrement du fichier JSON horodaté
         self._save_json(snap)
 
-        # Enregistrement dans la base SQLite locale
-        self._save_sqlite(snap)
+        # Enregistrement dans la base SQLite locale (connexion injectée ou db de production)
+        self._save_sqlite(snap, conn=conn)
 
         return snap
 
@@ -1598,9 +1603,12 @@ class LevelsEngine:
             json.dump(snap.to_dict(), f, indent=2)
         return path
 
-    def _save_sqlite(self, snap: LevelsSnapshot) -> None:
+    def _save_sqlite(self, snap: LevelsSnapshot, conn: Any | None = None) -> None:
+        close_conn = False
         try:
-            conn = get_db_connection()
+            if conn is None:
+                conn = get_db_connection(self.db_path)
+                close_conn = True
             apply_migrations(conn)
             insert_snapshot(
                 conn=conn,
@@ -1617,6 +1625,8 @@ class LevelsEngine:
                 status=snap.status.value,
                 payload=snap.to_dict(),
             )
-            conn.close()
         except Exception as e:
             log.warning("Impossible d'enregistrer le snapshot dans SQLite : %s", e)
+        finally:
+            if close_conn:
+                conn.close()

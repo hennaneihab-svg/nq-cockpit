@@ -38,9 +38,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["vendor", ".venv"]
+norecursedirs = ["vendor", ".venv", "tests/e2e", "e2e"]
 pythonpath = ["src"]
-addopts = "-q"
+addopts = "-q --ignore=tests/e2e"
 
 [tool.ruff]
 line-length = 100

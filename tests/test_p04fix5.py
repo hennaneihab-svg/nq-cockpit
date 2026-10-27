@@ -24,9 +24,9 @@ from nqcockpit.levels.models import ExpectedMoveInfo
 ET = ZoneInfo("America/New_York")
 
 
-def test_spot_nq_real_age_and_cme_staleness():
+def test_spot_nq_real_age_and_cme_staleness(tmp_path):
     """Vérifie le calcul de l'âge réel du spot NQ et la détection de péremption pendant CME."""
-    engine = LevelsEngine()
+    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
 
     now_utc = datetime(2026, 9, 29, 14, 0, tzinfo=timezone.utc)  # Mardi 10:00 ET (CME ouvert)
 
@@ -214,11 +214,11 @@ def test_cboe_fetch_force_reload():
         assert snap.request_duration_ms >= 0.0
 
 
-def test_useful_walls_and_global_wall_outside_window():
+def test_useful_walls_and_global_wall_outside_window(tmp_path):
     """Vérifie la restriction des walls à la fenêtre ±10 %
     et le rapport du mur global hors fenêtre.
     """
-    engine = LevelsEngine()
+    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
     now_utc = datetime(2026, 9, 29, 14, 0, tzinfo=timezone.utc)
     spot_ndx = 20000.0
     basis = 2500.0  # NQ = 22500

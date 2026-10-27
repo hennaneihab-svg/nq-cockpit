@@ -24,7 +24,13 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+import pytest
+
+playwright = pytest.importorskip(
+    "playwright",
+    reason="playwright n'est pas installe (requis uniquement pour la suite e2e)",
+)
+from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("e2e_cockpit")

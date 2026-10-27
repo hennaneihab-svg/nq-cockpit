@@ -77,6 +77,7 @@ def init_journal_db(db_path: str | Path) -> sqlite3.Connection:
         if row_count == 0:
             conn.execute("DROP TABLE trades")
             conn.commit()
+            cols = []
 
     if cols and "contracts" not in cols:
         conn.execute("ALTER TABLE trades ADD COLUMN contracts INTEGER")
