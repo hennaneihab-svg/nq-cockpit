@@ -43,7 +43,7 @@ def evaluate_no_trade_flags(  # noqa: C901
     event_risk_level: str = "GREEN",
     is_red_window_active: bool = False,
     event_risk_reason: str = "",
-    spot_nq: float = 20000.0,
+    spot_nq: float | None = None,
     call_wall: float | None = None,
     put_support: float | None = None,
     wall_proximity_points: float = 40.0,
@@ -85,7 +85,7 @@ def evaluate_no_trade_flags(  # noqa: C901
     # 2. Drapeau Compression entre deux murs gamma (P04)
     is_wall_compressed = False
     wall_reason = "Distance entre murs gamma suffisante pour opérer"
-    if call_wall is not None and put_support is not None:
+    if call_wall is not None and put_support is not None and spot_nq is not None:
         wall_span = abs(call_wall - put_support)
         dist_to_call = abs(call_wall - spot_nq)
         dist_to_put = abs(spot_nq - put_support)
@@ -231,7 +231,7 @@ def evaluate_no_trade_flags(  # noqa: C901
 def build_scenario_map(
     key_levels: list[KeyLevel],
     gamma_regime: str = "POSITIVE_GAMMA",
-    base_em_pts: float = 150.0,
+    base_em_pts: float | None = None,
 ) -> list[ScenarioCard]:
     """Génère la carte de scénarios "si... alors..." strictement non-directionnelle."""
     scenarios: list[ScenarioCard] = []
@@ -684,16 +684,35 @@ def build_day_profile(  # noqa: C901
         )
 
     # 3. Niveaux Gamma, Spot & Expected Move (P04 & P07)
-    spot_nq = 20000.0
-    gamma_flip = None
-    call_wall = None
-    put_support = None
+    # Aucun repère inventé : sans snapshot ni barres, les valeurs restent None.
+    spot_nq: float | None = None
+    gamma_flip: float | None = None
+    call_wall: float | None = None
+    put_support: float | None = None
     net_gex = None
-    gamma_regime = "POSITIVE_GAMMA"
+    gamma_regime = "INDISPONIBLE"
     dist_to_flip = None
-    base_em = 150.0
+    base_em: float | None = None
+    em_high_nq: float | None = None
+    em_low_nq: float | None = None
     basis_anomaly = False
     basis_anomaly_detail = ""
+    snapshot_age_min: float | None = None
+
+    stale_thresh = 30.0
+    if hasattr(config, "levels") and hasattr(config.levels, "stale_data_minutes"):
+        stale_thresh = float(config.levels.stale_data_minutes)
+
+    def _nq_level(nq_key: str, ndx_value: Any, basis: float | None) -> float | None:
+        """Niveau NQ : champ *_nq du payload s'il existe, sinon niveau NDX + base."""
+        raw_nq = payload.get(nq_key) if payload else None
+        if raw_nq is not None and float(raw_nq) > 0:
+            return float(raw_nq)
+        if ndx_value is not None and basis is not None:
+            return float(ndx_value) + basis
+        return None
+
+    payload: dict[str, Any] = {}
 
     if conn is not None:
         try:
@@ -701,7 +720,7 @@ def build_day_profile(  # noqa: C901
                 """
                 SELECT spot, gamma_flip, call_wall, put_support, expected_move,
                        regime, source, status, created_at_utc, basis, synthetic_basis,
-                       payload_json
+                       payload_json, timestamp_utc
                 FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
                 """
             ).fetchone()
@@ -733,7 +752,7 @@ def build_day_profile(  # noqa: C901
                         """
                         SELECT spot, gamma_flip, call_wall, put_support, expected_move,
                                regime, source, status, created_at_utc, basis, synthetic_basis,
-                               payload_json
+                               payload_json, timestamp_utc
                         FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
                         """
                     ).fetchone()
@@ -741,14 +760,13 @@ def build_day_profile(  # noqa: C901
                     log.warning("Échec initialisation automatique du snapshot: %s", exc)
 
             if row:
-                spot_nq = float(row[0]) if row[0] is not None else spot_nq
-                gamma_flip = float(row[1]) if row[1] is not None else None
-                call_wall = float(row[2]) if row[2] is not None else None
-                put_support = float(row[3]) if row[3] is not None else None
-                base_em = float(row[4]) if row[4] is not None else base_em
-                gamma_regime = str(row[5]) if row[5] else gamma_regime
-                snap_source = str(row[6]) if row[6] else "CBOE"
-                snap_status = str(row[7])
+                if len(row) > 11 and row[11]:
+                    try:
+                        parsed = json.loads(row[11])
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                    except Exception:
+                        payload = {}
 
                 basis_val = float(row[9]) if row[9] is not None else None
                 synth_val = float(row[10]) if row[10] is not None else None
@@ -760,29 +778,56 @@ def build_day_profile(  # noqa: C901
                             f"({synth_val:.1f}) > 100 pts"
                         )
 
+                # Les colonnes snapshots sont en NDX : conversion en points NQ
+                # via les champs *_nq du payload, sinon niveau NDX + base stockée.
+                spot_nq = _nq_level("spot_nq", row[0], basis_val)
+                gamma_flip = _nq_level("gamma_flip_nq", row[1], basis_val)
+                call_wall = _nq_level("call_wall_nq", row[2], basis_val)
+                put_support = _nq_level("put_wall_nq", row[3], basis_val)
+                base_em = float(row[4]) if row[4] is not None else None
+                gamma_regime = str(row[5]) if row[5] else "INDISPONIBLE"
+                snap_source = str(row[6]) if row[6] else "CBOE"
+                snap_status = str(row[7])
+
+                em_payload = payload.get("expected_move")
+                if isinstance(em_payload, dict):
+                    if em_payload.get("upper_bound_nq") is not None:
+                        em_high_nq = float(em_payload["upper_bound_nq"])
+                    if em_payload.get("lower_bound_nq") is not None:
+                        em_low_nq = float(em_payload["lower_bound_nq"])
+                if em_high_nq is None and spot_nq is not None and base_em is not None:
+                    em_high_nq = spot_nq + base_em / 2.0
+                    em_low_nq = spot_nq - base_em / 2.0
+
+                if len(row) > 12 and row[12]:
+                    try:
+                        snap_ts = datetime.fromisoformat(str(row[12]))
+                        if snap_ts.tzinfo is None:
+                            snap_ts = snap_ts.replace(tzinfo=UTC)
+                        snapshot_age_min = max(
+                            0.0, (now_utc - snap_ts).total_seconds() / 60.0
+                        )
+                    except ValueError:
+                        snapshot_age_min = None
+
                 if snap_status == "OK":
                     g_status = "OK"
                 else:
                     deg_reason = ""
-                    if len(row) > 11 and row[11]:
-                        try:
-                            payload_data = json.loads(row[11])
-                            anomalies = payload_data.get("anomalies", [])
-                            for a in anomalies:
-                                a_clean = (
-                                    a.replace("DÉGRADÉ :", "")
-                                    .replace("DÉGRADÉ:", "")
-                                    .replace("DÉGRADÉ", "")
-                                    .strip(" :-·")
-                                )
-                                if a_clean:
-                                    deg_reason = a_clean
-                                    break
-                            if not deg_reason and payload_data.get("data_age_minutes"):
-                                age_m = float(payload_data["data_age_minutes"])
-                                deg_reason = f"données âgées de {age_m:.0f} min"
-                        except Exception:
-                            pass
+                    anomalies = payload.get("anomalies") or []
+                    for a in anomalies:
+                        a_clean = (
+                            str(a).replace("DÉGRADÉ :", "")
+                            .replace("DÉGRADÉ:", "")
+                            .replace("DÉGRADÉ", "")
+                            .strip(" :-·")
+                        )
+                        if a_clean:
+                            deg_reason = a_clean
+                            break
+                    if not deg_reason and payload.get("data_age_minutes"):
+                        age_m = float(payload["data_age_minutes"])
+                        deg_reason = f"données âgées de {age_m:.0f} min"
 
                     if not deg_reason:
                         if ":" in snap_status:
@@ -796,14 +841,24 @@ def build_day_profile(  # noqa: C901
                     deg_reason = deg_reason.replace("DÉGRADÉ", "").strip(" :-·")
                     g_status = f"DÉGRADÉ: {deg_reason}" if deg_reason else "DÉGRADÉ"
 
+                # Statut honnête : un snapshot plus vieux que le seuil n'est jamais OK
+                if snapshot_age_min is not None and snapshot_age_min > stale_thresh:
+                    g_status = (
+                        f"DÉGRADÉ: snapshot périmé ({snapshot_age_min:.0f} min > "
+                        f"{stale_thresh:.0f} min)"
+                    )
+
                 g_detail = (
                     f"Spot={spot_nq:.1f}, Flip={gamma_flip}, "
                     f"CW={call_wall}, PS={put_support}"
+                    if spot_nq is not None
+                    else "Spot=N/A (snapshot sans spot)"
                 )
                 component_statuses["gamma"] = ComponentHealth(
                     name="Niveaux Gamma & Options NDX (P04)",
                     status=g_status,
                     detail=g_detail,
+                    age_minutes=snapshot_age_min,
                     timestamp_utc=str(row[8]),
                 )
         except Exception as exc:
@@ -813,7 +868,7 @@ def build_day_profile(  # noqa: C901
         component_statuses["gamma"] = ComponentHealth(
             name="Niveaux Gamma & Options NDX (P04)",
             status="DÉGRADÉ: aucun snapshot disponible",
-            detail="Utilisation des repères de secours",
+            detail="Données indisponibles (Data unavailable)",
             timestamp_utc=as_of_utc_str,
         )
 
@@ -826,7 +881,7 @@ def build_day_profile(  # noqa: C901
         except Exception:
             pass
 
-    if gamma_flip is not None:
+    if gamma_flip is not None and spot_nq is not None:
         dist_to_flip = round(spot_nq - gamma_flip, 2)
         if spot_nq >= gamma_flip:
             gamma_regime = "POSITIVE_GAMMA"
@@ -834,7 +889,7 @@ def build_day_profile(  # noqa: C901
             gamma_regime = "NEGATIVE_GAMMA"
 
     em_consumption_pct = None
-    if overnight_range is not None and base_em > 0:
+    if overnight_range is not None and base_em is not None and base_em > 0:
         em_consumption_pct = round((overnight_range / base_em) * 100.0, 1)
 
     key_levels: list[KeyLevel] = []
@@ -842,7 +897,8 @@ def build_day_profile(  # noqa: C901
     def _add_key_level(
         name: str, price: float | None, lvl_type: str, src: str, desc: str
     ):
-        if price is not None and price > 0:
+        # Aucun niveau ni distance sans spot NQ de référence : pas de valeur inventée.
+        if price is not None and price > 0 and spot_nq is not None:
             d_pts = round(price - spot_nq, 2)
             d_pct = round((d_pts / spot_nq) * 100.0, 2)
             key_levels.append(
@@ -867,7 +923,7 @@ def build_day_profile(  # noqa: C901
     )
     _add_key_level(
         "Expected Move Haut (+1σ)",
-        spot_nq + base_em / 2.0,
+        em_high_nq,
         "EXPECTED_MOVE",
         "CBOE ACT/365 (P04)",
         "Borne haute d'amplitude statistique 1σ",
@@ -895,7 +951,7 @@ def build_day_profile(  # noqa: C901
     )
     _add_key_level(
         "Expected Move Bas (-1σ)",
-        spot_nq - base_em / 2.0,
+        em_low_nq,
         "EXPECTED_MOVE",
         "CBOE ACT/365 (P04)",
         "Borne basse d'amplitude statistique 1σ",
@@ -940,10 +996,6 @@ def build_day_profile(  # noqa: C901
     wall_prox = 40.0
     if hasattr(config, "levels") and hasattr(config.levels, "wall_proximity_points"):
         wall_prox = float(config.levels.wall_proximity_points)
-
-    stale_thresh = 30.0
-    if hasattr(config, "levels") and hasattr(config.levels, "stale_data_minutes"):
-        stale_thresh = float(config.levels.stale_data_minutes)
 
     loss_limit_cfg = 2.0
     if hasattr(config, "rules") and hasattr(config.rules, "daily_loss_limit_r"):

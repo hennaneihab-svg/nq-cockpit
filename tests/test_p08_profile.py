@@ -16,6 +16,7 @@ from nqcockpit.profile.engine import (
 )
 from nqcockpit.profile.models import (
     ComponentHealth,
+    DayProfile,
     KeyLevel,
     NoTradeFlagCode,
 )
@@ -274,7 +275,10 @@ def test_export_levels_to_csv(tmp_path: Path):
 
 
 def test_day_profile_structure():
-    """Vérifie la structure complète du DayProfile via build_day_profile (sans DB)."""
+    """Vérifie la structure complète du DayProfile via build_day_profile (sans DB).
+
+    Sans connexion ni snapshot, aucun chiffre ne doit être inventé.
+    """
     from nqcockpit.profile.engine import build_day_profile
 
     profile = build_day_profile(conn=None, config=None, now_utc=NOW_UTC)
@@ -282,15 +286,20 @@ def test_day_profile_structure():
     # Champs obligatoires
     assert isinstance(profile.as_of_utc, str)
     assert isinstance(profile.target_date, str)
-    assert isinstance(profile.spot_nq, float) and profile.spot_nq > 0
+    # Données absentes : valeurs None, jamais de repère inventé
+    assert profile.spot_nq is None
+    assert profile.base_expected_move_pts is None
+    assert profile.key_levels == []
+    assert profile.scenarios == []
     assert profile.event_risk_level in ("GREEN", "AMBER", "RED")
-    assert profile.gamma_regime in ("POSITIVE_GAMMA", "NEGATIVE_GAMMA", "NEUTRAL")
-    assert profile.base_expected_move_pts > 0
+    assert profile.gamma_regime == "INDISPONIBLE"
 
     # Statuts composants toujours présents, jamais vide
     assert len(profile.component_statuses) > 0
     for key, comp in profile.component_statuses.items():
         assert comp.status != "", f"Composant {key} a un statut vide"
+    assert "DÉGRADÉ" in profile.component_statuses["gamma"].status
+    assert "Données indisponibles" in profile.component_statuses["gamma"].detail
 
     # No-trade a toujours les 5 drapeaux
     assert len(profile.no_trade.all_flags) == 5
@@ -301,6 +310,108 @@ def test_day_profile_structure():
     assert "key_levels" in d
     assert "scenarios" in d
     assert "component_statuses" in d
+
+
+# ---------------------------------------------------------------------------
+# Snapshot NDX -> NQ, fraîcheur honnête et état vide sans chiffre inventé
+# ---------------------------------------------------------------------------
+
+
+def _profile_with_snapshot(
+    tmp_path: Path,
+    *,
+    timestamp_utc: datetime,
+    spot: float = 20000.0,
+    basis: float = 300.0,
+) -> DayProfile:
+    import sqlite3
+
+    from nqcockpit.config import load_config
+    from nqcockpit.data.db import apply_migrations, insert_snapshot
+    from nqcockpit.profile.engine import build_day_profile
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "profile_test.db"
+    conn = sqlite3.connect(str(db_path))
+    apply_migrations(conn)
+    insert_snapshot(
+        conn=conn,
+        timestamp_utc=timestamp_utc,
+        spot=spot,
+        regime="AMORTISSEUR",
+        gamma_flip=19800.0,
+        call_wall=20500.0,
+        put_support=19500.0,
+        expected_move=300.0,
+        basis=basis,
+        synthetic_basis=basis + 5.0,
+        source="CBOE",
+        status="OK",
+        payload={},
+    )
+    profile = build_day_profile(conn=conn, config=load_config(), now_utc=NOW_UTC)
+    conn.close()
+    return profile
+
+
+def test_snapshot_levels_converted_from_ndx_to_nq(tmp_path: Path):
+    """Les colonnes snapshots (NDX) deviennent des niveaux NQ : NDX + base stockée."""
+    from datetime import timedelta
+
+    profile = _profile_with_snapshot(
+        tmp_path, timestamp_utc=NOW_UTC - timedelta(minutes=2)
+    )
+
+    # Spot NQ = spot NDX (20000) + base (300)
+    assert profile.spot_nq == 20300.0
+    levels = {lvl.name: lvl for lvl in profile.key_levels}
+    # Call Wall NDX 20500 -> 20800 NQ, distance NQ vs NQ = +500
+    assert levels["Call Wall"].price == 20800.0
+    assert levels["Call Wall"].distance_pts == 500.0
+    assert levels["Gamma Flip"].price == 20100.0
+    assert levels["Put Support"].price == 19800.0
+    # Bornes Expected Move en NQ : spot NQ +/- 150
+    assert levels["Expected Move Haut (+1σ)"].price == 20450.0
+    assert levels["Expected Move Bas (-1σ)"].price == 20150.0
+
+
+def test_stale_snapshot_is_never_ok(tmp_path: Path):
+    """Un snapshot plus vieux que levels.stale_data_minutes n'est jamais OK."""
+    from datetime import timedelta
+
+    from nqcockpit.config import load_config
+
+    stale_minutes = float(load_config().levels.stale_data_minutes)
+
+    stale_profile = _profile_with_snapshot(
+        tmp_path / "stale", timestamp_utc=NOW_UTC - timedelta(minutes=stale_minutes + 60)
+    )
+    gamma_stale = stale_profile.component_statuses["gamma"]
+    assert "DÉGRADÉ" in gamma_stale.status
+    assert "périmé" in gamma_stale.status
+    assert gamma_stale.age_minutes is not None
+    assert gamma_stale.age_minutes > stale_minutes
+    assert stale_profile.status == "DÉGRADÉ"
+
+    fresh_profile = _profile_with_snapshot(
+        tmp_path / "fresh", timestamp_utc=NOW_UTC - timedelta(minutes=2)
+    )
+    assert "DÉGRADÉ" not in fresh_profile.component_statuses["gamma"].status
+
+
+def test_empty_state_has_no_fabricated_numbers():
+    """Sans snapshot ni barres : aucun spot, aucune borne, aucun niveau inventé."""
+    from nqcockpit.config import load_config
+    from nqcockpit.profile.engine import build_day_profile
+
+    profile = build_day_profile(conn=None, config=load_config(), now_utc=NOW_UTC)
+
+    assert profile.spot_nq is None
+    assert profile.base_expected_move_pts is None
+    assert profile.key_levels == []
+    assert profile.scenarios == []
+    assert "DÉGRADÉ" in profile.component_statuses["gamma"].status
+    assert "Données indisponibles" in profile.component_statuses["gamma"].detail
 
 
 # ---------------------------------------------------------------------------

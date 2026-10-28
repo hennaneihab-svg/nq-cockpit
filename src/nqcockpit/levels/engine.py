@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -914,10 +915,16 @@ class LevelsEngine:
 
     def __init__(
         self,
-        output_dir: Path | str = Path("data/levels"),
+        output_dir: Path | str | None = None,
         db_path: Path | str | None = None,
     ) -> None:
-        self.output_dir = Path(output_dir)
+        # Défaut production inchangé ; NQ_LEVELS_OUTPUT_DIR permet d'isoler les tests.
+        resolved_output_dir = (
+            output_dir
+            if output_dir is not None
+            else os.getenv("NQ_LEVELS_OUTPUT_DIR", "data/levels")
+        )
+        self.output_dir = Path(resolved_output_dir)
         self.db_path = db_path
         self.output_dir.mkdir(parents=True, exist_ok=True)
 

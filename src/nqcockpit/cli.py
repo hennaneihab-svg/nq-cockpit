@@ -1877,7 +1877,12 @@ def _handle_profile(args: Any) -> int:
     print(sep)
     print("  NQ COCKPIT — PROFIL DE SÉANCE, SCÉNARIOS & DRAPEAUX NO-TRADE (P08)")
     print(f"  Horodatage : {profile.as_of_et} | {profile.as_of_algiers}")
-    print(f"  Séance     : {profile.target_date}  |  Spot NQ : {profile.spot_nq:.2f} pts")
+    spot_str = (
+        f"{profile.spot_nq:.2f} pts"
+        if profile.spot_nq is not None
+        else "N/A (données indisponibles)"
+    )
+    print(f"  Séance     : {profile.target_date}  |  Spot NQ : {spot_str}")
     print(f"  Statut     : {profile.status}")
     if profile.status_detail:
         print(f"  Détail     : {profile.status_detail}")
@@ -1931,7 +1936,11 @@ def _handle_profile(args: Any) -> int:
         em_cons_str = f"{profile.em_consumption_pct:.1f} %"
     else:
         em_cons_str = "N/A"
-    print(f"  Expected Move base  : {profile.base_expected_move_pts:.1f} pts"
+    if profile.base_expected_move_pts is not None:
+        em_base_str = f"{profile.base_expected_move_pts:.1f} pts"
+    else:
+        em_base_str = "N/A (données indisponibles)"
+    print(f"  Expected Move base  : {em_base_str}"
           f" | Consommé overnight : {em_cons_str}")
     if profile.overnight_range_pts is not None:
         on_range = f"{profile.overnight_range_pts:.1f} pts"

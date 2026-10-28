@@ -673,7 +673,10 @@ def render_cockpit():
         )
 
     with k4:
-        em_pts = f"{profile.base_expected_move_pts:.1f} pts"
+        if profile.base_expected_move_pts is not None:
+            em_pts = f"{profile.base_expected_move_pts:.1f} pts"
+        else:
+            em_pts = t("Données indisponibles", "Data unavailable")
         em_cons = (
             f"{profile.em_consumption_pct:.1f} %"
             if profile.em_consumption_pct is not None
@@ -709,8 +712,12 @@ def render_cockpit():
         display_status = re.sub(
             r"(DÉGRADÉ\s*[:—\-]\s*)+DÉGRADÉ", "DÉGRADÉ", c_val.status
         )
+        age_suffix = (
+            f" ({c_val.age_minutes:.0f} min)" if c_val.age_minutes is not None else ""
+        )
         chips_html.append(
-            f"<span class='{cls}'>{tr_text(c_val.name)} : {tr_text(display_status)}</span>"
+            f"<span class='{cls}'>{tr_text(c_val.name)} : "
+            f"{tr_text(display_status)}{age_suffix}</span>"
         )
     st.markdown("".join(chips_html), unsafe_allow_html=True)
     st.write("")
@@ -847,8 +854,13 @@ def render_cockpit():
             unsafe_allow_html=True,
         )
         spot_lbl = t("Spot NQ de référence :", "Reference NQ Spot:")
+        spot_val = (
+            f"{profile.spot_nq:.2f} pts"
+            if profile.spot_nq is not None
+            else t("Données indisponibles", "Data unavailable")
+        )
         st.caption(
-            f"{spot_lbl} <b>{profile.spot_nq:.2f} pts</b>",
+            f"{spot_lbl} <b>{spot_val}</b>",
             unsafe_allow_html=True,
         )
 
@@ -884,7 +896,12 @@ def render_cockpit():
                 use_container_width=True,
             )
         else:
-            st.warning(t("Aucun niveau clé disponible.", "No key levels available."))
+            st.warning(
+                t(
+                    "Aucun niveau clé disponible (données indisponibles).",
+                    "No key levels available (data unavailable).",
+                )
+            )
 
     with c_right:
         scen_hdr = t(

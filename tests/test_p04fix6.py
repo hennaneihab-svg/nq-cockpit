@@ -143,7 +143,9 @@ def test_live_basis_calculation_and_three_way_comparison(tmp_path):
     - Calcul des écarts live vs séance précédente, live vs parité, précédente vs parité
     - Détection de désalignement temporel (> 1 min) entraînant l'indisponibilité de la base live
     """
-    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
     now_utc = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
     spot_ndx = 20000.0
 
@@ -224,7 +226,9 @@ def test_cboe_distinct_age_metrics_and_stale_detection(tmp_path):
     """TÂCHE 3 : Vérifie que l'âge de la chaîne JSON et le retard des cotations
     d'options actives sont distincts et mesurés séparément.
     """
-    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
     now_utc = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
     chain_file_time = now_utc - timedelta(seconds=30)  # JSON publié il y a 0.5 min
     quote_time = now_utc - timedelta(minutes=15)  # Cotation retardée de 15 min
@@ -325,7 +329,9 @@ def test_straddle_diagnostic_serialization_to_dict(tmp_path):
         status=DataStatus.OK,
     )
 
-    engine = LevelsEngine(db_path=tmp_path / "nqcockpit_test.db")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
     snap = engine.compute_snapshot(
         chain=chain,
         nq_bars=[],
@@ -604,7 +610,9 @@ def test_p04fix6b_live_basis_anchored_on_spot_nq(tmp_path):
     from nqcockpit.data.models import Bar, DataStatus
     from nqcockpit.levels.engine import LevelsEngine
 
-    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
 
     t_spot_nq = datetime(2026, 9, 29, 14, 35, tzinfo=timezone.utc)
     t_ndx_earlier = datetime(2026, 9, 29, 14, 30, tzinfo=timezone.utc)
@@ -840,7 +848,9 @@ def test_p04fix6d_put_wall_global_degraded_when_absent(tmp_path):
     from nqcockpit.data.models import DataStatus
     from nqcockpit.levels.engine import LevelsEngine
 
-    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
     now_utc = datetime(2026, 9, 30, 14, 0, tzinfo=timezone.utc)
     spot_ndx = 20000.0
 
@@ -1026,7 +1036,9 @@ def test_p04fix6_explicit_16h_distance_and_degraded_basis(tmp_path):
     assert "DÉGRADÉ" in snap.label
 
     # Intégration complète via LevelsEngine.compute_snapshot
-    engine = LevelsEngine(output_dir=tmp_path / "levels")
+    engine = LevelsEngine(
+        output_dir=tmp_path / "levels", db_path=tmp_path / "nqcockpit_test.db"
+    )
     df_chain = pd.DataFrame(
         [
             {

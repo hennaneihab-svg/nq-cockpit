@@ -129,7 +129,7 @@ class DayProfile:
     as_of_algiers: str
     as_of_et: str
     target_date: str
-    spot_nq: float
+    spot_nq: float | None
 
     # Risque événementiel (P05/P06)
     event_risk_level: str  # "GREEN", "AMBER", "RED"
@@ -149,7 +149,7 @@ class DayProfile:
     distance_to_flip_pts: float | None
 
     # Expected move & consommation (P07)
-    base_expected_move_pts: float
+    base_expected_move_pts: float | None
     em_consumption_pct: float | None
 
     # Types de journée et justifications
