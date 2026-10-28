@@ -1688,21 +1688,14 @@ def _handle_amplitude(args: object) -> int:
         nq_bars = get_bars(conn, "NQ=F", "1m", limit=100)
         if nq_bars:
             spot_nq = nq_bars[-1].close
-            base_em = round(spot_nq * 0.011, 2)
         else:
             try:
                 from nqcockpit.macro.fetcher import fetch_yahoo_history
                 hist = fetch_yahoo_history("NQ=F", period="5d", interval="1m")
                 if not hist.empty:
                     spot_nq = float(hist["Close"].iloc[-1])
-                    base_em = round(spot_nq * 0.011, 2)
             except Exception:
                 pass
-
-    if spot_nq is None:
-        spot_nq = 20000.0
-    if base_em is None:
-        base_em = round(spot_nq * 0.011, 2)
 
     cur_days = conn.execute(
         """

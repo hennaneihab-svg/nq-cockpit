@@ -715,8 +715,9 @@ def build_day_profile(  # noqa: C901
     payload: dict[str, Any] = {}
 
     if conn is not None:
-        try:
-            row = conn.execute(
+
+        def _read_latest_snapshot_row():
+            return conn.execute(
                 """
                 SELECT spot, gamma_flip, call_wall, put_support, expected_move,
                        regime, source, status, created_at_utc, basis, synthetic_basis,
@@ -724,40 +725,62 @@ def build_day_profile(  # noqa: C901
                 FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
                 """
             ).fetchone()
-            if not row:
-                # Base vide lors du premier lancement : génération d'un snapshot initial à la volée
+
+        def _refresh_snapshot_from_sources() -> bool:
+            """Génère un snapshot frais (CBOE + barres). Retourne False en échec.
+
+            Aucune exception n'est propagée à l'UI : en cas d'échec, le snapshot
+            existant reste utilisé et sera marqué périmé via son âge.
+            """
+            try:
+                from nqcockpit.data.cboe import fetch_cboe_options_chain
+                from nqcockpit.data.db import insert_bars
+                from nqcockpit.data.fetcher import DataFetcher
+                from nqcockpit.levels.engine import LevelsEngine
+
+                f_live = DataFetcher()
+                live_nq = f_live.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
+                live_ndx = f_live.fetch_yahoo_bars("^NDX", interval="1m", period="1d")
+                if live_nq.bars:
+                    insert_bars(conn, live_nq.bars, "NQ=F", "1m", "yahoo", now_utc)
+                if live_ndx.bars:
+                    insert_bars(conn, live_ndx.bars, "^NDX", "1m", "yahoo", now_utc)
+
+                chain = fetch_cboe_options_chain()
+                engine = LevelsEngine()
+                engine.compute_snapshot(
+                    chain=chain,
+                    nq_bars=live_nq.bars or [],
+                    ndx_bars=live_ndx.bars or [],
+                    now_utc=now_utc,
+                    conn=conn,
+                )
+                return True
+            except Exception as exc:
+                log.warning("Échec rafraîchissement automatique du snapshot: %s", exc)
+                return False
+
+        try:
+            row = _read_latest_snapshot_row()
+
+            latest_snapshot_age: float | None = None
+            if row is not None and len(row) > 12 and row[12]:
                 try:
-                    from nqcockpit.data.cboe import fetch_cboe_options_chain
-                    from nqcockpit.data.db import insert_bars
-                    from nqcockpit.data.fetcher import DataFetcher
-                    from nqcockpit.levels.engine import LevelsEngine
-
-                    f_init = DataFetcher()
-                    live_nq = f_init.fetch_yahoo_bars("NQ=F", interval="1m", period="1d")
-                    live_ndx = f_init.fetch_yahoo_bars("^NDX", interval="1m", period="1d")
-                    if live_nq.bars:
-                        insert_bars(conn, live_nq.bars, "NQ=F", "1m", "yahoo", now_utc)
-                    if live_ndx.bars:
-                        insert_bars(conn, live_ndx.bars, "^NDX", "1m", "yahoo", now_utc)
-
-                    chain = fetch_cboe_options_chain()
-                    engine = LevelsEngine()
-                    engine.compute_snapshot(
-                        chain=chain,
-                        nq_bars=live_nq.bars or [],
-                        ndx_bars=live_ndx.bars or [],
-                        now_utc=now_utc,
+                    latest_ts = datetime.fromisoformat(str(row[12]))
+                    if latest_ts.tzinfo is None:
+                        latest_ts = latest_ts.replace(tzinfo=UTC)
+                    latest_snapshot_age = max(
+                        0.0, (now_utc - latest_ts).total_seconds() / 60.0
                     )
-                    row = conn.execute(
-                        """
-                        SELECT spot, gamma_flip, call_wall, put_support, expected_move,
-                               regime, source, status, created_at_utc, basis, synthetic_basis,
-                               payload_json, timestamp_utc
-                        FROM snapshots ORDER BY timestamp_utc DESC LIMIT 1
-                        """
-                    ).fetchone()
-                except Exception as exc:
-                    log.warning("Échec initialisation automatique du snapshot: %s", exc)
+                except ValueError:
+                    latest_snapshot_age = None
+
+            # Base vide ou dernier snapshot plus vieux que le seuil : rafraîchir.
+            needs_refresh = row is None or (
+                latest_snapshot_age is None or latest_snapshot_age > stale_thresh
+            )
+            if needs_refresh and _refresh_snapshot_from_sources():
+                row = _read_latest_snapshot_row()
 
             if row:
                 if len(row) > 11 and row[11]:

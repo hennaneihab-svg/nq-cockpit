@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,6 +22,39 @@ from nqcockpit.levels.models import LevelsSnapshot
 log = logging.getLogger(__name__)
 
 ALGIERS_TZ = ZoneInfo("Africa/Algiers")
+
+_scheduler_lock = threading.Lock()
+_scheduler_singleton: "LevelsScheduler | None" = None
+
+
+def _is_test_session() -> bool:
+    """Vrai pendant pytest : le planificateur ne doit jamais démarrer en tests."""
+    return "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST") is not None
+
+
+def start_levels_scheduler_once(
+    scheduler_factory: Callable[[], "LevelsScheduler"] | None = None,
+) -> bool:
+    """Démarre le planificateur une seule fois par process.
+
+    Utilisé au boot Streamlit : les reruns répétés ne relancent pas le planificateur.
+    Retourne True si cette appel l'a démarré, False sinon (déjà démarré, tests, échec).
+    """
+    global _scheduler_singleton
+    if _is_test_session():
+        return False
+    with _scheduler_lock:
+        if _scheduler_singleton is not None:
+            return False
+        factory = scheduler_factory or LevelsScheduler
+        try:
+            scheduler = factory()
+            scheduler.start()
+        except Exception as exc:
+            log.warning("Échec démarrage du planificateur de niveaux: %s", exc)
+            return False
+        _scheduler_singleton = scheduler
+        return True
 
 
 @dataclass

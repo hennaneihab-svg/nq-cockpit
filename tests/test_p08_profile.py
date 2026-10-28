@@ -375,11 +375,18 @@ def test_snapshot_levels_converted_from_ndx_to_nq(tmp_path: Path):
     assert levels["Expected Move Bas (-1σ)"].price == 20150.0
 
 
-def test_stale_snapshot_is_never_ok(tmp_path: Path):
+def test_stale_snapshot_is_never_ok(tmp_path: Path, monkeypatch):
     """Un snapshot plus vieux que levels.stale_data_minutes n'est jamais OK."""
     from datetime import timedelta
 
     from nqcockpit.config import load_config
+
+    def _offline(*args, **kwargs):
+        raise ConnectionError("sources indisponibles (test)")
+
+    # Le rafraîchissement automatique échoue : l'ancien snapshot doit rester, marqué STALE.
+    monkeypatch.setattr("nqcockpit.data.cboe.fetch_cboe_options_chain", _offline)
+    monkeypatch.setattr("nqcockpit.data.fetcher.DataFetcher.fetch_yahoo_bars", _offline)
 
     stale_minutes = float(load_config().levels.stale_data_minutes)
 

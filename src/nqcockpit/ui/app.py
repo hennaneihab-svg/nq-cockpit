@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from nqcockpit.config import load_config
+from nqcockpit.levels.scheduler import start_levels_scheduler_once
 from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_app
 from nqcockpit.ui.cockpit_page import render_cockpit
@@ -111,6 +112,8 @@ st.markdown(
 
 def main() -> None:
     """Point d'entrée principal de l'application multipage NQ Cockpit."""
+    # Un seul démarrage du planificateur par process (les reruns Streamlit le réutilisent).
+    start_levels_scheduler_once()
     config = load_config()
     tz_algiers = ZoneInfo(config.timezones.display)
     tz_ny = ZoneInfo(config.timezones.market)
