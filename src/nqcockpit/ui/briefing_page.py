@@ -16,8 +16,16 @@ from nqcockpit.ui.components import render_degraded_banner, render_status_badge
 from nqcockpit.ui.i18n import t, tr_text
 
 
-def render_briefing_page() -> None:
-    """Rendu complet de la page Briefing Pré-Séance."""
+def render_briefing_page(
+    embedded: bool = False, show_title: bool = True
+) -> None:
+    """Rendu complet de la page Briefing Pré-Séance.
+
+    Args:
+        embedded: affiche les contrôles de génération dans la page (et non la
+            barre latérale), pour l'intégration dans l'expander « Réglages ».
+        show_title: affiche le titre de page (désactivé en mode intégré).
+    """
     try:
         st.set_page_config(
             page_title=t(
@@ -29,40 +37,41 @@ def render_briefing_page() -> None:
     except StreamlitAPIException:
         pass
 
-    st.title(
-        t(
-            "BRIEFING PRÉ-SÉANCE CONSOLIDÉ",
-            "CONSOLIDATED PRE-SESSION BRIEFING",
+    if show_title:
+        st.title(
+            t(
+                "BRIEFING PRÉ-SÉANCE CONSOLIDÉ",
+                "CONSOLIDATED PRE-SESSION BRIEFING",
+            )
         )
-    )
-    st.caption(
-        t(
-            "Données agrégées sans prédiction ni biais directionnel — P02-P08 + P12",
-            "Aggregated data with zero prediction or directional bias — P02-P08 + P12",
+        st.caption(
+            t(
+                "Données agrégées sans prédiction ni biais directionnel — P02-P08 + P12",
+                "Aggregated data with zero prediction or directional bias — P02-P08 + P12",
+            )
         )
-    )
 
     # ---------------------------------------------------------------------------
-    # Sidebar / Options de génération
+    # Options de génération (barre latérale par défaut, page en mode intégré)
     # ---------------------------------------------------------------------------
-    st.sidebar.title(
-        t("[05] BRIEFING PRE-SEANCE", "[05] PRE-SESSION BRIEFING")
-    )
-    st.sidebar.markdown(
+    controls = st if embedded else st.sidebar
+    if not embedded:
+        controls.title(t("[05] BRIEFING PRE-SEANCE", "[05] PRE-SESSION BRIEFING"))
+    controls.markdown(
         t("### GÉNÉRATION DU BRIEFING", "### BRIEFING GENERATION")
     )
-    use_gemini = st.sidebar.checkbox(
+    use_gemini = controls.checkbox(
         t("Générer résumé IA (Gemini)", "Generate AI Summary (Gemini)"),
         value=False,
     )
-    use_telegram = st.sidebar.checkbox(
+    use_telegram = controls.checkbox(
         t(
             "Diffuser notification Telegram",
             "Broadcast Telegram Notification",
         ),
         value=False,
     )
-    dry_run = st.sidebar.checkbox(
+    dry_run = controls.checkbox(
         t("Mode Dry-run", "Dry-run Mode"), value=True
     )
 
@@ -70,7 +79,7 @@ def render_briefing_page() -> None:
     briefing_files = list(briefing_dir.glob("briefing_*.md")) if briefing_dir.exists() else []
     briefing_files.sort(reverse=True)
 
-    if st.sidebar.button(
+    if controls.button(
         t("Générer un nouveau briefing", "Generate New Briefing"),
         type="primary",
     ):
@@ -117,9 +126,9 @@ def render_briefing_page() -> None:
         st.warning(
             t(
                 "Aucun briefing généré dans cette session. "
-                "Cliquez sur « Générer un nouveau briefing » dans la barre latérale.",
+                "Cliquez sur « Générer un nouveau briefing » ci-dessus.",
                 "No briefing generated in this session. "
-                "Click 'Generate New Briefing' in the sidebar.",
+                "Click 'Generate New Briefing' above.",
             )
         )
         return

@@ -312,12 +312,13 @@ def test_cockpit_layout_has_no_nested_columns_beyond_two_levels() -> None:
 
 def test_macro_radar_uses_fluid_grid_not_fixed_columns() -> None:
     """Le radar macro utilise une grille CSS fluide, pas des colonnes fixes."""
-    from nqcockpit.ui import cockpit_page
+    from nqcockpit.ui import macro_page, sections
 
-    source = Path(cockpit_page.__file__).read_text(encoding="utf-8")
+    source = Path(sections.__file__).read_text(encoding="utf-8")
     assert "radar-grid" in source
     assert "repeat(auto-fit, minmax(" in source
-    assert "st.columns(3)" not in source
+    page_source = Path(macro_page.__file__).read_text(encoding="utf-8")
+    assert "st.columns(3)" not in page_source
 
 
 # ---------------------------------------------------------------------------

@@ -14,23 +14,38 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from nqcockpit.config import load_config
 from nqcockpit.levels.scheduler import start_levels_scheduler_once
-from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_app
 from nqcockpit.ui.cockpit_page import render_cockpit
 from nqcockpit.ui.components import render_page_safely
-from nqcockpit.ui.discipline_page import render_discipline_page
 from nqcockpit.ui.i18n import render_lang_selector, t
-from nqcockpit.ui.journal_page import render_journal_page
+from nqcockpit.ui.journal_discipline_page import render_journal_discipline_page
+from nqcockpit.ui.levels_page import render_levels_page
+from nqcockpit.ui.macro_page import render_macro_page
+from nqcockpit.ui.nav import (
+    active_page,
+    page_name,
+    render_sidebar_nav,
+)
+from nqcockpit.ui.settings_page import render_settings_page
 
 log = logging.getLogger(__name__)
+
+# One renderer per plain-language destination. The pre-session briefing is
+# embedded in Settings, so the historical briefing page is reused there.
+PAGE_RENDERERS = {
+    "today": render_cockpit,
+    "levels": render_levels_page,
+    "macro": render_macro_page,
+    "journal": render_journal_discipline_page,
+    "coaching": render_coaching_app,
+    "settings": render_settings_page,
+}
 
 # ---------------------------------------------------------------------------
 # Configuration Initiale Unique
@@ -109,6 +124,22 @@ st.markdown(
         font-weight: 500 !important;
         color: #CBD5E1 !important;
     }
+    /* Buttons stay neutral: colour is reserved for data status. */
+    .stButton > button[kind="primary"] {
+        background-color: #0F172A !important;
+        border: 1px solid #94A3B8 !important;
+        color: #F8FAFC !important;
+        font-weight: 700 !important;
+    }
+    .stButton > button[kind="secondary"] {
+        background-color: transparent !important;
+        border: 1px solid #334155 !important;
+        color: #E2E8F0 !important;
+    }
+    .stButton > button:hover {
+        border-color: #94A3B8 !important;
+        color: #F8FAFC !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -163,18 +194,18 @@ def _prewarm_cockpit_caches() -> bool:
 
 
 def main() -> None:
-    """Point d'entrée principal de l'application multipage NQ Cockpit."""
+    """Application entry point: sidebar navigation + one page at a time."""
     _ensure_file_logging()
-    # Un seul démarrage du planificateur par process (les reruns Streamlit le réutilisent).
+    # A single scheduler start per process (Streamlit reruns reuse it).
     start_levels_scheduler_once()
-    config = load_config()
-    tz_algiers = ZoneInfo(config.timezones.display)
-    tz_ny = ZoneInfo(config.timezones.market)
 
-    # Préchauffage des caches du cockpit (page par défaut) : progression immédiate
-    # au lieu d'un écran figé pendant les appels réseau de la première ouverture.
-    param_page = str(st.query_params.get("page", "")).lower()
-    if param_page in ["", "1", "cockpit"]:
+    # Deep links: ?page=today|levels|macro|journal|coaching|settings
+    # plus the historical section numbers (1-5).
+    query_page = str(st.query_params.get("page", ""))
+    page_key = active_page(query_page)
+
+    # Pre-warm only the default landing page (first run), so Today paints fast.
+    if page_key == "today":
         with st.spinner(
             t(
                 "Préchauffage des données de marché (première ouverture)…",
@@ -183,11 +214,8 @@ def main() -> None:
         ):
             _prewarm_cockpit_caches()
 
-    now_algiers = datetime.now(tz_algiers)
-    now_ny = datetime.now(tz_ny)
-
     # ---------------------------------------------------------------------------
-    # En-tête & Navigation Latérale Swetrix
+    # Sidebar: brand, language, then the six plain-language destinations.
     # ---------------------------------------------------------------------------
     st.sidebar.markdown(
         """
@@ -202,65 +230,19 @@ def main() -> None:
     with st.sidebar:
         render_lang_selector(key_prefix="sidebar_main")
 
-    algiers_lbl = t("Alger :", "Algiers:")
-    ny_lbl = t("New York :", "New York:")
-    st.sidebar.markdown(
-        f"""
-        <div class="sidebar-clock">
-            <b>{algiers_lbl}</b> {now_algiers.strftime('%Y-%m-%d %H:%M:%S')}<br>
-            <b>{ny_lbl}</b> {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ET
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    db_file = Path(config.data.db_path)
-    db_status_str = (
-        f"`{db_file.name}` (OK)"
-        if db_file.exists()
-        else t("`Base absente` (DÉGRADÉ)", "`Database missing` (DEGRADED)")
-    )
-    st.sidebar.caption(f"{t('Base SQLite', 'SQLite DB')} : {db_status_str}")
-    st.sidebar.markdown("---")
-
-    page_defs = [
-        (t("[01] COCKPIT LIVE", "[01] LIVE COCKPIT"), render_cockpit),
-        (t("[02] JOURNAL DE BORD", "[02] TRADE JOURNAL"), render_journal_page),
-        (t("[03] DISCIPLINE & SIZING", "[03] DISCIPLINE & SIZING"), render_discipline_page),
-        (t("[04] COACHING & ANALYTICS", "[04] COACHING & ANALYTICS"), render_coaching_app),
-        (t("[05] BRIEFING PRE-SEANCE", "[05] PRE-SESSION BRIEFING"), render_briefing_page),
-    ]
-
-    default_idx = 0
-    if param_page in ["1", "cockpit"]:
-        default_idx = 0
-    elif param_page in ["2", "journal"]:
-        default_idx = 1
-    elif param_page in ["3", "discipline"]:
-        default_idx = 2
-    elif param_page in ["4", "coaching"]:
-        default_idx = 3
-    elif param_page in ["5", "briefing"]:
-        default_idx = 4
-
-    choice_idx = st.sidebar.radio(
-        t("Navigation Sections", "Navigation"),
-        options=list(range(len(page_defs))),
-        index=default_idx,
-        format_func=lambda idx: page_defs[idx][0],
-    )
+    render_sidebar_nav(page_key)
 
     st.sidebar.markdown("---")
     st.sidebar.caption(
         t(
-            "NQ Cockpit P13 · Design System Swetrix · Strictement non-directionnel",
-            "NQ Cockpit P13 · Swetrix Design System · Strictly non-directional",
+            "Aide à la décision non-directionnelle · NQ Cockpit",
+            "Non-directional decision support · NQ Cockpit",
         )
     )
 
-    # Exécution du composant de la page choisie (toute exception est interceptée)
-    renderer = page_defs[choice_idx][1]
-    render_page_safely(renderer, page_defs[choice_idx][0])
+    # One renderer per destination; unexpected exceptions are caught and logged.
+    renderer = PAGE_RENDERERS[page_key]
+    render_page_safely(renderer, page_name(page_key))
 
 
 if __name__ == "__main__":

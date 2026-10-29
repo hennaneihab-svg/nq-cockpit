@@ -197,6 +197,297 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "Positioning context only — not a directional signal.",
         "fr": "Contexte de positionnement seulement — aucun signal directionnel.",
     },
+    # ------------------------------------------------------------------
+    # Nouvelle architecture d'information (Today / Levels / Macro / …)
+    # Tous les libellés visibles passent par ce dictionnaire en/fr.
+    # ------------------------------------------------------------------
+    "ui.nav.title": {"en": "Navigate", "fr": "Navigation"},
+    "ui.nav.today.name": {"en": "Today", "fr": "Aujourd'hui"},
+    "ui.nav.today.desc": {
+        "en": "What matters right now",
+        "fr": "Ce qui compte maintenant",
+    },
+    "ui.nav.levels.name": {"en": "Levels & Chart", "fr": "Niveaux et graphique"},
+    "ui.nav.levels.desc": {
+        "en": "Gamma levels and the NQ chart",
+        "fr": "Niveaux gamma et graphique NQ",
+    },
+    "ui.nav.macro.name": {"en": "Macro & News", "fr": "Macro et actualités"},
+    "ui.nav.macro.desc": {
+        "en": "Drivers, headlines and positioning",
+        "fr": "Moteurs, titres et positionnement",
+    },
+    "ui.nav.journal.name": {
+        "en": "Journal & Discipline",
+        "fr": "Journal et discipline",
+    },
+    "ui.nav.journal.desc": {
+        "en": "Log trades and check the rules",
+        "fr": "Noter les trades et vérifier les règles",
+    },
+    "ui.nav.coaching.name": {"en": "Coaching", "fr": "Coaching"},
+    "ui.nav.coaching.desc": {
+        "en": "Performance review and leaks",
+        "fr": "Bilan de performance et fuites",
+    },
+    "ui.nav.settings.name": {"en": "Settings", "fr": "Réglages"},
+    "ui.nav.settings.desc": {
+        "en": "Language, data and briefing",
+        "fr": "Langue, données et briefing",
+    },
+    "ui.hint.click_details": {
+        "en": "click for details",
+        "fr": "cliquez pour les détails",
+    },
+    "ui.hint.external": {
+        "en": "Click for details — opens the source in a new tab",
+        "fr": "Cliquez pour les détails — ouvre la source dans un nouvel onglet",
+    },
+    "ui.hint.download": {
+        "en": "Click to download the CSV file",
+        "fr": "Cliquez pour télécharger le fichier CSV",
+    },
+    # Termes techniques : nom + explication d'une phrase (infobulle « ? »)
+    "ui.term.call_wall": {"en": "Call Wall", "fr": "Call Wall"},
+    "ui.term.gamma_flip": {"en": "Gamma Flip", "fr": "Gamma Flip"},
+    "ui.term.put_support": {"en": "Put Support", "fr": "Put Support"},
+    "ui.term.expected_move": {"en": "Expected Move", "fr": "Expected Move"},
+    "ui.term.leveraged_funds": {"en": "Leveraged Funds", "fr": "Leveraged Funds"},
+    "ui.help.call_wall": {
+        "en": "The call strike with the most open interest; dealers often sell into it, so it can act as a ceiling.",
+        "fr": "Le strike call avec le plus d'intérêt ouvert ; les dealers y vendent souvent, ce qui peut faire plafond.",
+    },
+    "ui.help.gamma_flip": {
+        "en": "The price where dealer gamma changes sign, so the market's reaction to moves can flip.",
+        "fr": "Le prix où le gamma des dealers change de signe : la réaction du marché aux mouvements peut s'inverser.",
+    },
+    "ui.help.put_support": {
+        "en": "The put strike with the most open interest; dealers often buy there, so it can act as a floor.",
+        "fr": "Le strike put avec le plus d'intérêt ouvert ; les dealers y achètent souvent, ce qui peut faire plancher.",
+    },
+    "ui.help.expected_move": {
+        "en": "The day range implied by options at one standard deviation, expressed in NQ points.",
+        "fr": "L'amplitude journalière implicite des options à un écart-type, exprimée en points NQ.",
+    },
+    "ui.help.leveraged_funds": {
+        "en": "A CFTC category of speculative funds; the net long or short shows positioning, not direction.",
+        "fr": "Une catégorie de fonds spéculatifs de la CFTC ; le net long ou short montre le positionnement, pas la direction.",
+    },
+    # Page Today
+    "ui.today.spot": {"en": "NQ spot", "fr": "Spot NQ"},
+    "ui.today.freshness": {"en": "Data freshness", "fr": "Fraîcheur des données"},
+    "ui.today.window": {
+        "en": "Trading window (Algiers)",
+        "fr": "Fenêtre de trading (Alger)",
+    },
+    "ui.today.next_event": {
+        "en": "Next high-impact event",
+        "fr": "Prochain événement majeur",
+    },
+    "ui.today.no_event": {
+        "en": "No imminent Tier 1 event",
+        "fr": "Aucun événement Tier 1 imminent",
+    },
+    "ui.today.window_open": {
+        "en": "{name} {start}–{end} (Algiers) · open",
+        "fr": "{name} {start}–{end} (Alger) · ouverte",
+    },
+    "ui.today.window_next": {
+        "en": "{name} {start}–{end} (Algiers) · next",
+        "fr": "{name} {start}–{end} (Alger) · prochaine",
+    },
+    "ui.today.window_none": {
+        "en": "No trading window configured",
+        "fr": "Aucune fenêtre de trading configurée",
+    },
+    "ui.today.algiers_time": {"en": "Algiers {time}", "fr": "Alger {time}"},
+    "ui.today.read_title": {"en": "Today's read", "fr": "Lecture du jour"},
+    "ui.today.read.gamma_above": {
+        "en": "NQ spot is {dist} pts above the Gamma Flip ({flip}); gamma regime: {regime}.",
+        "fr": "Le spot NQ est {dist} pts au-dessus du Gamma Flip ({flip}) ; régime gamma : {regime}.",
+    },
+    "ui.today.read.gamma_below": {
+        "en": "NQ spot is {dist} pts below the Gamma Flip ({flip}); gamma regime: {regime}.",
+        "fr": "Le spot NQ est {dist} pts sous le Gamma Flip ({flip}) ; régime gamma : {regime}.",
+    },
+    "ui.today.read.gamma_missing": {
+        "en": "No data for the Gamma Flip; the gamma regime is unavailable.",
+        "fr": "Aucune donnée pour le Gamma Flip ; le régime gamma est indisponible.",
+    },
+    "ui.today.read.levels": {
+        "en": "{call_wall}; {put_support}; {expected_move}.",
+        "fr": "{call_wall} ; {put_support} ; {expected_move}.",
+    },
+    "ui.today.read.clause_level": {
+        "en": "{name} {value} is {dist} pts {side} spot",
+        "fr": "{name} {value} est à {dist} pts {side} du spot",
+    },
+    "ui.today.read.clause_level_missing": {
+        "en": "no data for {name}",
+        "fr": "aucune donnée pour {name}",
+    },
+    "ui.today.read.clause_em": {
+        "en": "daily Expected Move is {value} pts ({consumed}% used overnight)",
+        "fr": "l'Expected Move journalier est de {value} pts ({consumed} % consommés cette nuit)",
+    },
+    "ui.today.read.clause_em_no_consumed": {
+        "en": "daily Expected Move is {value} pts",
+        "fr": "l'Expected Move journalier est de {value} pts",
+    },
+    "ui.today.read.clause_em_missing": {
+        "en": "no data for Expected Move",
+        "fr": "aucune donnée pour l'Expected Move",
+    },
+    "ui.today.above": {"en": "above", "fr": "au-dessus"},
+    "ui.today.below": {"en": "below", "fr": "en-dessous"},
+    "ui.today.watch_title": {"en": "Watch next", "fr": "À surveiller ensuite"},
+    "ui.today.drivers_title": {
+        "en": "Key macro drivers",
+        "fr": "Moteurs macro clés",
+    },
+    "ui.today.levels_title": {"en": "Key levels", "fr": "Niveaux clés"},
+    "ui.today.hero_title": {
+        "en": "Session chart and levels",
+        "fr": "Graphique de séance et niveaux",
+    },
+    "ui.today.details_title": {"en": "More detail", "fr": "Plus de détails"},
+    "ui.today.more_on_page": {
+        "en": "Full lists live on the Macro & News and Levels & Chart pages.",
+        "fr": "Les listes complètes sont sur les pages Macro et actualités et Niveaux et graphique.",
+    },
+    "ui.today.risk": {"en": "risk", "fr": "risque"},
+    "ui.today.driver_row": {
+        "en": "{name}: {value}",
+        "fr": "{name} : {value}",
+    },
+    "ui.today.no_drivers": {
+        "en": "Macro radar unavailable — no driver is shown.",
+        "fr": "Radar macro indisponible — aucun moteur affiché.",
+    },
+    "ui.today.chart_missing": {
+        "en": "Chart unavailable: {error}",
+        "fr": "Graphique indisponible : {error}",
+    },
+    "ui.levels.value": {"en": "Value", "fr": "Valeur"},
+    "ui.levels.distance": {
+        "en": "Distance from spot (pts)",
+        "fr": "Distance au spot (pts)",
+    },
+    "ui.levels.reference": {
+        "en": "Distances are NQ points from the reference spot (positive = above).",
+        "fr": "Les distances sont en points NQ depuis le spot de référence (positif = au-dessus).",
+    },
+    "ui.levels.empty": {
+        "en": "No key level is available — no price is invented.",
+        "fr": "Aucun niveau clé disponible — aucun prix n'est inventé.",
+    },
+    "ui.levels.export": {
+        "en": "Export levels (CSV for TradingView / ATAS)",
+        "fr": "Exporter les niveaux (CSV TradingView / ATAS)",
+    },
+    "ui.levels.title": {"en": "Levels & Chart", "fr": "Niveaux et graphique"},
+    "ui.levels.desc": {
+        "en": "The session chart, exact gamma levels and conditional levels.",
+        "fr": "Le graphique de séance, les niveaux gamma exacts et les niveaux conditionnels.",
+    },
+    "ui.levels.scenarios": {
+        "en": "Scenario map — if/then levels (click for details)",
+        "fr": "Carte de scénarios — niveaux si/alors (cliquez pour les détails)",
+    },
+    "ui.expander.radar": {
+        "en": "Full macro radar — all six drivers (click for details)",
+        "fr": "Radar macro complet — les six moteurs (cliquez pour les détails)",
+    },
+    "ui.expander.news": {
+        "en": "News wire — latest headlines (click for details)",
+        "fr": "Fil d'actualités — derniers titres (cliquez pour les détails)",
+    },
+    "ui.expander.cot": {
+        "en": "CFTC positioning — Leveraged Funds (click for details)",
+        "fr": "Positionnement CFTC — Leveraged Funds (cliquez pour les détails)",
+    },
+    "ui.expander.health": {
+        "en": "Source health — every feed and its status (click for details)",
+        "fr": "Santé des sources — chaque flux et son statut (cliquez pour les détails)",
+    },
+    # Page Macro & News
+    "ui.macro.title": {"en": "Macro & News", "fr": "Macro et actualités"},
+    "ui.macro.desc": {
+        "en": "The six existing macro drivers, the live news wire and CFTC positioning.",
+        "fr": "Les six moteurs macro existants, le fil d'actualités et le positionnement CFTC.",
+    },
+    "ui.macro.drivers_title": {"en": "Macro radar", "fr": "Radar macro"},
+    "ui.macro.news_title": {"en": "News wire", "fr": "Fil d'actualités"},
+    "ui.macro.cot_title": {
+        "en": "CFTC positioning",
+        "fr": "Positionnement CFTC",
+    },
+    "ui.macro.health_title": {
+        "en": "Source health (click for details)",
+        "fr": "Santé des sources (cliquez pour les détails)",
+    },
+    # Journal & Discipline
+    "ui.journal.title": {
+        "en": "Journal & Discipline",
+        "fr": "Journal et discipline",
+    },
+    "ui.journal.desc": {
+        "en": "Log every trade and check the discipline gate before entering.",
+        "fr": "Noter chaque trade et vérifier la porte de discipline avant d'entrer.",
+    },
+    "ui.journal.tab_journal": {"en": "Trade journal", "fr": "Journal de bord"},
+    "ui.journal.tab_discipline": {
+        "en": "Discipline gate",
+        "fr": "Porte de discipline",
+    },
+    # Coaching
+    "ui.coaching.title": {"en": "Coaching", "fr": "Coaching"},
+    "ui.coaching.desc": {
+        "en": "Performance review, segmentation and the coaching report.",
+        "fr": "Bilan de performance, segmentation et rapport de coaching.",
+    },
+    # Settings
+    "ui.settings.title": {"en": "Settings", "fr": "Réglages"},
+    "ui.settings.desc": {
+        "en": "Language, data locations and the pre-session briefing.",
+        "fr": "Langue, emplacements des données et briefing pré-séance.",
+    },
+    "ui.settings.language": {
+        "en": "Interface language",
+        "fr": "Langue de l'interface",
+    },
+    "ui.settings.language_help": {
+        "en": "Applies immediately; English is the default (config ui.language).",
+        "fr": "S'applique immédiatement ; l'anglais est la langue par défaut (config ui.language).",
+    },
+    "ui.settings.data": {"en": "Data & storage", "fr": "Données et stockage"},
+    "ui.settings.db_path": {"en": "SQLite database", "fr": "Base SQLite"},
+    "ui.settings.config_path": {"en": "Configuration file", "fr": "Fichier de configuration"},
+    "ui.settings.db_exists": {"en": "present", "fr": "présente"},
+    "ui.settings.db_missing": {"en": "missing", "fr": "absente"},
+    "ui.settings.display_tz": {"en": "Display timezone", "fr": "Fuseau d'affichage"},
+    "ui.settings.market_tz": {"en": "Market timezone", "fr": "Fuseau du marché"},
+    "ui.settings.windows": {
+        "en": "Trading windows (Algiers)",
+        "fr": "Fenêtres de trading (Alger)",
+    },
+    "ui.settings.snapshots": {
+        "en": "Snapshot times (Algiers)",
+        "fr": "Heures de snapshot (Alger)",
+    },
+    "ui.settings.briefing": {
+        "en": "Pre-session briefing (click for details)",
+        "fr": "Briefing pré-séance (cliquez pour les détails)",
+    },
+    "ui.settings.briefing_note": {
+        "en": "Optional generation of the existing pre-session briefing.",
+        "fr": "Génération optionnelle du briefing pré-séance existant.",
+    },
+    "ui.settings.about": {"en": "About", "fr": "À propos"},
+    "ui.settings.disclaimer": {
+        "en": "Decision support only: no order execution and no directional bias.",
+        "fr": "Aide à la décision uniquement : aucune exécution d'ordre, aucun biais directionnel.",
+    },
 }
 
 # Codes de statut que les moteurs ont le droit de renvoyer.
@@ -320,7 +611,7 @@ def render_lang_selector(key_prefix: str = "global") -> str:
         "background:#0f172a;border:1px solid #334155;border-radius:4px;"
         "padding:4px 10px;margin-bottom:6px;font-family:JetBrains Mono,monospace;font-size:0.74rem;'>"
         f"<span style='color:#94a3b8;'>{t('LANGUE ACTIVE', 'ACTIVE LANGUAGE')}</span>"
-        f"<span style='color:#00e676;font-weight:700;'>"
+        f"<span style='color:#e2e8f0;font-weight:700;'>"
         f"{'🇫🇷 FRANÇAIS (FR)' if lang == 'FR' else '🇬🇧 ENGLISH (EN)'}</span>"
         "</div>"
     )
