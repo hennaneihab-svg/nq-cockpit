@@ -1659,6 +1659,7 @@ def _handle_amplitude(args: object) -> int:
     """Gestionnaire de la commande 'amplitude' (P07)."""
     import json as _json
     from datetime import datetime, timezone
+    from pathlib import Path
     from zoneinfo import ZoneInfo
 
     from nqcockpit.config import load_config
@@ -1725,7 +1726,12 @@ def _handle_amplitude(args: object) -> int:
     )
 
     record_daily_forecast(forecast, conn)
-    cal_rep = build_calibration_report(conn, config=cfg, now_utc=now_utc)
+    calibration_output = (
+        Path("reports/calibration.md") if getattr(args, "report", False) else None
+    )
+    cal_rep = build_calibration_report(
+        conn, config=cfg, now_utc=now_utc, output_path=calibration_output
+    )
     conn.close()
 
     as_json = getattr(args, "json", False)
@@ -1823,7 +1829,8 @@ def _handle_amplitude(args: object) -> int:
     print(f"  Écart à la cible         : {m1.coverage_gap_pct:+.1f} %")
     bs_str = f"{m1.brier_score:.4f}" if m1.brier_score is not None else "N/A"
     print(f"  Brier score              : {bs_str}")
-    print("  Rapport généré           : reports/calibration.md")
+    if calibration_output is not None:
+        print(f"  Rapport généré           : {calibration_output}")
     print(sep)
 
     return 0

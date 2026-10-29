@@ -8,14 +8,13 @@ Couvre :
 - Contexte COT CFTC sans biais directionnel (test_cot_positioning_no_directional_bias)
 - Définition figée des types de journée (test_day_type_classification)
 - Séparation amplitude vs calibration (test_amplitude_forecast_calibration_separation)
-- Génération du rapport reports/calibration.md (test_build_calibration_report)
+- Génération opt-in du rapport de calibration (test_build_calibration_report)
 """
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from nqcockpit.config import AppConfig, DayTypesConfig
@@ -306,7 +305,7 @@ def test_amplitude_forecast_calibration_separation():
 
 
 def test_build_calibration_report(tmp_path):
-    """Vérifie la génération du rapport reports/calibration.md."""
+    """Vérifie la génération du rapport, sur un chemin explicite (pas le fichier versionné)."""
     app_cfg = _make_dummy_app_config()
 
     # Connexion DB temporaire avec table forecasts
@@ -344,11 +343,13 @@ def test_build_calibration_report(tmp_path):
     )
     conn.commit()
 
-    report = build_calibration_report(conn, config=app_cfg)
+    report = build_calibration_report(
+        conn, config=app_cfg, output_path=tmp_path / "calibration.md"
+    )
     conn.close()
 
     assert report.metrics_1sigma.total_forecasts == 1
     assert report.metrics_1sigma.covered_count == 1
     assert report.metrics_1sigma.observed_coverage_pct == 100.0
     assert "JAMAIS d'ajustement non prouvé" in report.markdown_content
-    assert Path("reports/calibration.md").exists()
+    assert (tmp_path / "calibration.md").exists()

@@ -488,11 +488,32 @@ def export_levels_to_csv(
     levels: list[KeyLevel],
     filepath: Path | str | None = None,
     now_utc: datetime | None = None,
+    snapshot_timestamp_utc: str | None = None,
+    snapshot_age_minutes: float | None = None,
+    basis_ndx_nq: float | None = None,
 ) -> str:
-    """Exporte les niveaux clés en format CSV standard compatible TradingView et ATAS."""
+    """Exporte les niveaux clés en format CSV standard compatible TradingView et ATAS.
+
+    Le snapshot de référence est tracé explicitement (UTC, Alger, âge, basis NDX→NQ)
+    sans jamais inventer de valeur : une donnée absente est écrite « N/A ».
+    """
     if now_utc is None:
         now_utc = datetime.now(UTC)
     alg_str = now_utc.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+    snap_algiers = "N/A"
+    snap_utc = snapshot_timestamp_utc or "N/A"
+    if snapshot_timestamp_utc:
+        try:
+            snap_dt = datetime.fromisoformat(snapshot_timestamp_utc)
+            if snap_dt.tzinfo is None:
+                snap_dt = snap_dt.replace(tzinfo=UTC)
+            snap_algiers = snap_dt.astimezone(TZ_ALGIERS).strftime(_ALGIERS_FMT)
+        except ValueError:
+            snap_algiers = "N/A"
+    snap_age = (
+        f"{snapshot_age_minutes:.0f}" if snapshot_age_minutes is not None else "N/A"
+    )
+    basis_str = f"{basis_ndx_nq:.2f}" if basis_ndx_nq is not None else "N/A"
 
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
@@ -505,6 +526,10 @@ def export_levels_to_csv(
         "Type",
         "Source",
         "Updated_Algiers",
+        "Snapshot_UTC",
+        "Snapshot_Algiers",
+        "Snapshot_Age_Min",
+        "Basis_NDX_to_NQ",
         "Description",
     ])
 
@@ -518,6 +543,10 @@ def export_levels_to_csv(
             lvl.level_type,
             lvl.source,
             alg_str,
+            snap_utc,
+            snap_algiers,
+            snap_age,
+            basis_str,
             lvl.description,
         ])
 
@@ -698,6 +727,8 @@ def build_day_profile(  # noqa: C901
     basis_anomaly = False
     basis_anomaly_detail = ""
     snapshot_age_min: float | None = None
+    snapshot_timestamp_utc: str | None = None
+    basis_ndx_nq: float | None = None
 
     stale_thresh = 30.0
     if hasattr(config, "levels") and hasattr(config.levels, "stale_data_minutes"):
@@ -792,6 +823,7 @@ def build_day_profile(  # noqa: C901
                         payload = {}
 
                 basis_val = float(row[9]) if row[9] is not None else None
+                basis_ndx_nq = basis_val
                 synth_val = float(row[10]) if row[10] is not None else None
                 if basis_val is not None and synth_val is not None:
                     if abs(basis_val - synth_val) > 100.0:
@@ -823,6 +855,7 @@ def build_day_profile(  # noqa: C901
                     em_low_nq = spot_nq - base_em / 2.0
 
                 if len(row) > 12 and row[12]:
+                    snapshot_timestamp_utc = str(row[12])
                     try:
                         snap_ts = datetime.fromisoformat(str(row[12]))
                         if snap_ts.tzinfo is None:
@@ -1085,4 +1118,7 @@ def build_day_profile(  # noqa: C901
         component_statuses=component_statuses,
         status=profile_status,
         status_detail=profile_status_detail,
+        snapshot_timestamp_utc=snapshot_timestamp_utc,
+        snapshot_age_minutes=snapshot_age_min,
+        basis_ndx_nq=basis_ndx_nq,
     )

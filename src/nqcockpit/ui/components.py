@@ -8,9 +8,14 @@ Fournit des composants réutilisables basés sur le design system Swetrix :
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+
 import streamlit as st
 
 from nqcockpit.ui.i18n import t, tr_text
+
+log = logging.getLogger(__name__)
 
 # Palette sémantique extraite de Swetrix (Badge.tsx & Text.tsx en mode sombre)
 STATUS_COLORS = {
@@ -70,6 +75,31 @@ STATUS_COLORS = {
         "bg": "rgba(129, 140, 248, 0.10)",
     },
 }
+
+
+def render_page_safely(renderer: Callable[[], None], page_label: str) -> bool:
+    """Exécute le rendu d'une page en interceptant toute exception imprévue.
+
+    L'utilisateur voit un message court via ``st.error`` (jamais de traceback brut) ;
+    la traceback complète est écrite dans le fichier de log via ``log.exception``.
+
+    Returns:
+        True si le rendu s'est terminé, False si une exception a été interceptée.
+    """
+    try:
+        renderer()
+        return True
+    except Exception:
+        log.exception("Exception non gérée lors du rendu de la page %r", page_label)
+        st.error(
+            t(
+                "Erreur interne lors du rendu de cette page. "
+                "Le détail technique est consigné dans les logs.",
+                "Internal error while rendering this page. "
+                "Technical details were written to the logs.",
+            )
+        )
+        return False
 
 
 def render_status_badge(status: str, label: str = "") -> None:

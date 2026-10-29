@@ -97,7 +97,7 @@ def _parse_ff_date(date_str: str) -> tuple[datetime | None, str, DataStatus]:
         return None, "", DataStatus.DEGRADED
 
 
-def _fetch_ff_json(url: str, timeout: int = 10) -> list[dict]:
+def _fetch_ff_json(url: str, timeout: int = 5) -> list[dict]:
     """Fetch le JSON ForexFactory."""
     try:
         req = urllib.request.Request(
@@ -116,7 +116,7 @@ def fetch_forexfactory_events(
     nextweek_url: str,
     now_utc: datetime | None = None,
     horizon_days: int = 14,
-    timeout: int = 10,
+    timeout: int = 5,
 ) -> tuple[list[CalendarEvent], DataStatus, str]:
     """Fetch les événements USD à fort impact depuis ForexFactory.
 

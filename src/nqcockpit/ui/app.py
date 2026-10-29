@@ -23,6 +23,7 @@ from nqcockpit.levels.scheduler import start_levels_scheduler_once
 from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_app
 from nqcockpit.ui.cockpit_page import render_cockpit
+from nqcockpit.ui.components import render_page_safely
 from nqcockpit.ui.discipline_page import render_discipline_page
 from nqcockpit.ui.i18n import render_lang_selector, t
 from nqcockpit.ui.journal_page import render_journal_page
@@ -110,8 +111,18 @@ st.markdown(
 )
 
 
+@st.cache_resource
+def _ensure_file_logging() -> bool:
+    """Configure une seule fois les logs fichier (tracebacks complets consultables)."""
+    from nqcockpit.logging import setup_logging
+
+    setup_logging()
+    return True
+
+
 def main() -> None:
     """Point d'entrée principal de l'application multipage NQ Cockpit."""
+    _ensure_file_logging()
     # Un seul démarrage du planificateur par process (les reruns Streamlit le réutilisent).
     start_levels_scheduler_once()
     config = load_config()
@@ -194,9 +205,9 @@ def main() -> None:
         )
     )
 
-    # Exécution du composant de la page choisie
+    # Exécution du composant de la page choisie (toute exception est interceptée)
     renderer = page_defs[choice_idx][1]
-    renderer()
+    render_page_safely(renderer, page_defs[choice_idx][0])
 
 
 if __name__ == "__main__":

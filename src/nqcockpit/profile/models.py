@@ -174,6 +174,11 @@ class DayProfile:
     status: str = "OK"
     status_detail: str = ""
 
+    # Traçabilité du snapshot de niveaux utilisé (export CSV)
+    snapshot_timestamp_utc: str | None = None
+    snapshot_age_minutes: float | None = None
+    basis_ndx_nq: float | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "as_of_utc": self.as_of_utc,
@@ -214,4 +219,7 @@ class DayProfile:
             },
             "status": self.status,
             "status_detail": self.status_detail,
+            "snapshot_timestamp_utc": self.snapshot_timestamp_utc,
+            "snapshot_age_minutes": self.snapshot_age_minutes,
+            "basis_ndx_nq": self.basis_ndx_nq,
         }

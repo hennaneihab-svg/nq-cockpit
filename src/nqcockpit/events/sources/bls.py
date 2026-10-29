@@ -124,7 +124,7 @@ def _make_utc(
     return naive.astimezone(UTC), f"table versionnée BLS ({h:02d}:{m:02d} ET)", DataStatus.OK
 
 
-def _check_bls_reachable(base_url: str, timeout: int = 8) -> bool:
+def _check_bls_reachable(base_url: str, timeout: int = 5) -> bool:
     """Tente d'accéder à une page BLS pour détecter le blocage géographique."""
     try:
         req = urllib.request.Request(
@@ -142,7 +142,7 @@ def fetch_bls_events(
     base_url: str,
     now_utc: datetime | None = None,
     horizon_days: int = 14,
-    timeout: int = 8,
+    timeout: int = 5,
 ) -> tuple[list[CalendarEvent], DataStatus, str]:
     """Fetch les événements BLS sur l'horizon donné.
 

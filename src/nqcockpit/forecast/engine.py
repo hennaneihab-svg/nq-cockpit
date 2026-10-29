@@ -242,8 +242,13 @@ def build_calibration_report(
     conn: sqlite3.Connection,
     config: AppConfig,
     now_utc: datetime | None = None,
+    output_path: Path | str | None = None,
 ) -> CalibrationReport:
-    """Construit le rapport de calibration et génère le fichier reports/calibration.md."""
+    """Construit le rapport de calibration.
+
+    L'écriture sur disque est opt-in : sans ``output_path``, aucun fichier n'est créé
+    (évite de réécrire reports/calibration.md à chaque test ou démarrage).
+    """
     if now_utc is None:
         now_utc = datetime.now(UTC)
 
@@ -360,10 +365,11 @@ def build_calibration_report(
     md_lines.append("")
     md_content = "\n".join(md_lines)
 
-    # Sauvegarde sur disque dans reports/calibration.md
-    report_path = Path("reports/calibration.md")
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(md_content, encoding="utf-8")
+    # Sauvegarde optionnelle (explicite) sur disque
+    if output_path is not None:
+        report_path = Path(output_path)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(md_content, encoding="utf-8")
 
     return CalibrationReport(
         generated_at_utc=now_utc,

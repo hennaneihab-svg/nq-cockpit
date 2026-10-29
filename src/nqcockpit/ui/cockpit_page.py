@@ -22,12 +22,15 @@ from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.config import load_config
 from nqcockpit.macro.news_radar import (
+    MacroNewsRadar,
     MacroRadarCard,
     NewsWireItem,
+    NewsWireReport,
     fetch_live_news_wire,
     fetch_macro_news_radar,
 )
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
+from nqcockpit.profile.models import DayProfile
 from nqcockpit.ui.i18n import get_lang, t, toggle_lang, tr_text
 
 log = logging.getLogger(__name__)
@@ -35,6 +38,39 @@ log = logging.getLogger(__name__)
 TZ_ALGIERS = ZoneInfo("Africa/Algiers")
 TZ_ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_day_profile_cached(db_path_str: str) -> DayProfile:
+    """Construit le profil de séance avec un cache de 60 s.
+
+    La clé de cache est le chemin de la base de données. Tant que le TTL n'est pas
+    expiré, aucun appel réseau (BLS, ForexFactory, CFTC, CBOE) n'est refait : les
+    clics UI restent donc instantanés après le premier chargement.
+    """
+    from nqcockpit.data.db import apply_migrations, get_db_connection
+
+    cfg = load_config()
+    conn = get_db_connection(Path(db_path_str))
+    try:
+        apply_migrations(conn)
+        return build_day_profile(
+            conn=conn, config=cfg, now_utc=datetime.now(timezone.utc)
+        )
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_macro_radar_cached() -> MacroNewsRadar:
+    """Radar macro mis en cache 60 s : aucun appel réseau à chaque clic UI."""
+    return fetch_macro_news_radar()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_news_wire_cached(max_items_per_source: int = 4) -> NewsWireReport:
+    """Fil d'actualités mis en cache 60 s : aucun appel RSS à chaque clic UI."""
+    return fetch_live_news_wire(max_items_per_source=max_items_per_source)
 
 
 def _render_wire_item_html(item: NewsWireItem, delay_idx: int) -> str:
@@ -495,18 +531,12 @@ def render_cockpit():
         unsafe_allow_html=True,
     )
 
-    # Chargement de la configuration et des données de profil
+    # Chargement de la configuration et des données de profil (cache 60 s)
     cfg = load_config()
     db_path = Path(cfg.data.db_path)
-    from nqcockpit.data.db import apply_migrations, get_db_connection
-
-    conn = get_db_connection(db_path)
-    apply_migrations(conn)
 
     now_utc = datetime.now(timezone.utc)
-    profile = build_day_profile(conn=conn, config=cfg, now_utc=now_utc)
-    if conn:
-        conn.close()
+    profile = load_day_profile_cached(str(db_path))
 
     # En-tête : Titre, Horodatages multi-fuseaux & Bouton de langue instantané
     col_t1, col_t2, col_t3 = st.columns([2.2, 1.1, 0.7])
@@ -743,7 +773,7 @@ def render_cockpit():
     )
 
     try:
-        macro_radar = fetch_macro_news_radar()
+        macro_radar = load_macro_radar_cached()
         cards = macro_radar.as_list()
 
         # Rangée 1 (3 fenêtres)
@@ -799,7 +829,7 @@ def render_cockpit():
     )
 
     try:
-        wire_report = fetch_live_news_wire(max_items_per_source=4)
+        wire_report = load_news_wire_cached(max_items_per_source=4)
         if wire_report.degraded_sources:
             deg_reasons_html = " · ".join(
                 tr_text(s) for s in wire_report.degraded_sources
@@ -884,7 +914,15 @@ def render_cockpit():
                 })
             st.dataframe(table_data, use_container_width=True, hide_index=True)
 
-            csv_str = tr_text(export_levels_to_csv(profile.key_levels))
+            csv_str = tr_text(
+                export_levels_to_csv(
+                    profile.key_levels,
+                    now_utc=now_utc,
+                    snapshot_timestamp_utc=profile.snapshot_timestamp_utc,
+                    snapshot_age_minutes=profile.snapshot_age_minutes,
+                    basis_ndx_nq=profile.basis_ndx_nq,
+                )
+            )
             st.download_button(
                 label=t(
                     "Exporter les Niveaux (CSV TradingView / ATAS)",

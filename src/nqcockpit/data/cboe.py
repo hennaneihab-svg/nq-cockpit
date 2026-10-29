@@ -416,7 +416,7 @@ def parse_cboe_payload(raw: dict, fetched_at_utc: datetime) -> CboeChainSnapshot
 
 def fetch_cboe_options_chain(
     cboe_symbol: str = "_NDX",
-    timeout: int = 30,
+    timeout: int = 5,
     cache: DiskCache | None = None,
     max_cache_age_seconds: float = 60.0,
     force_reload: bool = False,
