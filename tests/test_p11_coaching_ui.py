@@ -43,6 +43,14 @@ def mock_config() -> AppConfig:
     return load_config()
 
 
+@pytest.fixture(autouse=True)
+def _force_english_ui(monkeypatch):
+    """Libellés EN déterministes (langue par défaut configurée, ui.language=EN)."""
+    import nqcockpit.ui.i18n as i18n
+
+    monkeypatch.setattr(i18n, "get_lang", lambda: "EN")
+
+
 def _make_dummy_trade(
     trade_id: str,
     session_date: str,
@@ -109,7 +117,7 @@ def test_build_equity_curve_empty():
     fig = build_equity_curve_figure([])
     assert fig is not None
     assert len(fig.data) == 0
-    assert any("Aucun trade" in str(ann.text) for ann in fig.layout.annotations)
+    assert any("No trades available" in str(ann.text) for ann in fig.layout.annotations)
 
 
 def test_build_equity_curve_with_trades_and_tilt(mock_config: AppConfig):
@@ -132,17 +140,17 @@ def test_build_equity_curve_with_trades_and_tilt(mock_config: AppConfig):
 
     # Vérification trace équité
     trace_equity = fig.data[0]
-    assert trace_equity.name == "R Cumulé"
+    assert trace_equity.name == "Cumulative R"
     assert list(trace_equity.y) == [1.5, 0.5, 2.5]
     assert len(trace_equity.x) == 3
 
     # Vérification trace tilt
     trace_tilt = fig.data[1]
-    assert trace_tilt.name == "Alertes de Tilt"
+    assert trace_tilt.name == "Tilt Alerts"
     assert len(trace_tilt.x) == 1
     assert trace_tilt.x[0] == "#2 (2026-09-01)"
     assert trace_tilt.y[0] == 0.5
-    assert "Alerte Tilt : série_pertes" in trace_tilt.hovertext[0]
+    assert "Tilt Alert : série_pertes" in trace_tilt.hovertext[0]
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +163,7 @@ def test_build_segmentation_figure_empty():
     fig = build_segmentation_figure({}, title="Test Seg", by_label="Label")
     assert fig is not None
     assert len(fig.data) == 0
-    assert any("Aucun segment" in str(ann.text) for ann in fig.layout.annotations)
+    assert any("No segments available" in str(ann.text) for ann in fig.layout.annotations)
 
 
 def test_build_segmentation_figure_populated():
@@ -173,7 +181,7 @@ def test_build_segmentation_figure_populated():
     # BREAKOUT a 2 trades (suffisant pour min_samples=2)
     # PULLBACK a 1 trade (n < seuil)
     assert any("BREAKOUT" in str(lbl) for lbl in bar_trace.y)
-    assert any("(n < seuil)" in str(lbl) for lbl in bar_trace.y if "PULLBACK" in str(lbl))
+    assert any("(n < threshold)" in str(lbl) for lbl in bar_trace.y if "PULLBACK" in str(lbl))
 
 
 # ---------------------------------------------------------------------------

@@ -54,8 +54,12 @@ def _sample_trade(idx: int = 1, r_val: float = 1.5, compliant: bool = True) -> T
 
 
 def test_lang_state_and_toggle() -> None:
-    """Vérifie le basculement FR <-> EN et la fonction t(fr, en)."""
+    """Vérifie le basculement EN (défaut config) <-> FR et la fonction t(fr, en)."""
     st.session_state.pop(LANG_SESSION_KEY, None)
+    assert get_lang() == "EN"  # config.yaml : ui.language = "EN"
+    assert t("Bonjour", "Hello") == "Hello"
+
+    toggle_lang()
     assert get_lang() == "FR"
     assert t("Bonjour", "Hello") == "Bonjour"
 
@@ -63,14 +67,10 @@ def test_lang_state_and_toggle() -> None:
     assert get_lang() == "EN"
     assert t("Bonjour", "Hello") == "Hello"
 
-    toggle_lang()
+    set_lang("fr")
     assert get_lang() == "FR"
-    assert t("Bonjour", "Hello") == "Bonjour"
-
-    set_lang("en")
-    assert get_lang() == "EN"
     set_lang("INVALID")
-    assert get_lang() == "FR"
+    assert get_lang() == "EN"
 
 
 def test_tr_text_preserves_french_when_lang_is_fr() -> None:
@@ -128,11 +128,12 @@ def test_components_bilingual_rendering() -> None:
         try:
             render_status_badge("DEGRADED", "CBOE delayed")
             html_call = mock_md.call_args[0][0]
-            assert "DEGRADED" in html_call
+            assert "Degraded" in html_call
+            assert "SYSTEM //" not in html_call
 
             render_degraded_banner(["gex: DEGRADED (CBOE error)"])
             banner_call = mock_md.call_args[0][0]
-            assert "[SOURCE HEALTH WARNING — DEGRADED STATUS]" in banner_call
+            assert "[SOURCE HEALTH WARNING]" in banner_call
         finally:
             set_lang("FR")
 

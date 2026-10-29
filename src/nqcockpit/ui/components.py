@@ -13,9 +13,21 @@ from collections.abc import Callable
 
 import streamlit as st
 
-from nqcockpit.ui.i18n import t, tr_text
+from nqcockpit.profile.models import ComponentHealth
+from nqcockpit.ui.i18n import (
+    label,
+    normalize_status_code,
+    status_kind,
+    status_label,
+    t,
+    tr_text,
+)
 
 log = logging.getLogger(__name__)
+
+# Classe CSS par couleur sémantique : vert OK, ambre périmé/dégradé,
+# rouge uniquement quand aucune donnée n'est disponible.
+STATUS_CSS_CLASSES = {"ok": "chip-ok", "warn": "chip-degraded", "error": "chip-error"}
 
 # Palette sémantique extraite de Swetrix (Badge.tsx & Text.tsx en mode sombre)
 STATUS_COLORS = {
@@ -102,9 +114,45 @@ def render_page_safely(renderer: Callable[[], None], page_label: str) -> bool:
         return False
 
 
+def badge_html(code: str, text: str | None = None) -> str:
+    """Badge court coloré par code de statut (jamais de mot brut anxiogène).
+
+    Vert pour ``OK``, ambre pour périmé/dégradé/no-trade, rouge pour ``NO_DATA``.
+    """
+    css = STATUS_CSS_CLASSES.get(status_kind(code), "chip-degraded")
+    return f"<span class='{css}'><b>{text or status_label(code)}</b></span>"
+
+
+def _health_reason(health: ComponentHealth) -> str:
+    """Motif d'une ligne : clé i18n d'abord, puis diagnostic amont brut."""
+    params = dict(health.reason_params)
+    if "level" in params:
+        params["level"] = label(f"risk.{params['level']}", str(params["level"]))
+    if health.reason_key:
+        reason = label(health.reason_key, **params)
+    elif health.source_message:
+        reason = tr_text(health.source_message)
+    else:
+        reason = health.detail
+    if health.age_minutes is not None:
+        age = f"{health.age_minutes:.0f} min"
+        reason = f"{reason} · {age}" if reason else age
+    return reason
+
+
+def health_badge_html(health: ComponentHealth) -> str:
+    """Badge de santé d'un composant source + motif sur une ligne (sans phrase brute)."""
+    name = label(health.name, default=health.name)
+    reason = _health_reason(health)
+    reason_html = (
+        f" <span class='chip-reason'>{reason}</span>" if reason else ""
+    )
+    return f"{badge_html(health.status)} <span class='chip-name'>{name}</span>{reason_html}"
+
+
 def render_status_badge(status: str, label: str = "") -> None:
-    """Affiche un badge de statut au format Swetrix (rounded-md, ring-1, fond translucide)."""
-    norm_status = status.upper().strip()
+    """Badge de statut court (libellé simple), sans code brut « SYSTEM // … »."""
+    norm_status = normalize_status_code(status)
     cfg = STATUS_COLORS.get(
         norm_status,
         {
@@ -122,6 +170,7 @@ def render_status_badge(status: str, label: str = "") -> None:
         if label
         else ""
     )
+    text = status_label(norm_status)
 
     html = f"""
     <div style="
@@ -138,7 +187,7 @@ def render_status_badge(status: str, label: str = "") -> None:
         letter-spacing: 0.02em;
         margin-bottom: 6px;
     ">
-        {label_part}SYSTEM // {tr_text(norm_status)}
+        {label_part}{text}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
@@ -153,8 +202,8 @@ def render_degraded_banner(warnings: list[str]) -> None:
         [f"<li style='margin-bottom: 2px;'>{tr_text(w)}</li>" for w in warnings]
     )
     banner_title = t(
-        "[AVERTISSEMENT DE SANTÉ DES SOURCES — STATUT DÉGRADÉ]",
-        "[SOURCE HEALTH WARNING — DEGRADED STATUS]",
+        "[AVERTISSEMENT DE SANTÉ DES SOURCES]",
+        "[SOURCE HEALTH WARNING]",
     )
     html = f"""
     <div style="

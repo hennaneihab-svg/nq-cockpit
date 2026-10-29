@@ -10,21 +10,282 @@ via un simple bouton.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 import streamlit as st
 
 LANG_SESSION_KEY = "lang"
 SUPPORTED_LANGS = ("FR", "EN")
-DEFAULT_LANG = "FR"
+DEFAULT_LANG = "EN"
+
+# ---------------------------------------------------------------------------
+# Dictionnaire unique en/fr des codes de statut, libellés et motifs affichés.
+# Les moteurs ne renvoient que des codes (OK / DEGRADED / STALE / NO_DATA) :
+# toute la mise en mots se fait ici, jamais dans le moteur.
+# ---------------------------------------------------------------------------
+LABELS: dict[str, dict[str, str]] = {
+    # Codes de statut (badges courts, sans mot anxiogène brut)
+    "status.OK": {"en": "OK", "fr": "OK"},
+    "status.DEGRADED": {"en": "Degraded", "fr": "Dégradé"},
+    "status.STALE": {"en": "Stale", "fr": "Périmé"},
+    "status.NO_DATA": {"en": "No data", "fr": "Aucune donnée"},
+    "status.BLOCKED": {"en": "No-trade", "fr": "No-trade"},
+    "status.ACTIVE": {"en": "No-trade", "fr": "No-trade"},
+    "status.INACTIVE": {"en": "Clear", "fr": "Dégagé"},
+    # Niveaux de risque événementiel
+    "risk.GREEN": {"en": "Low", "fr": "Faible"},
+    "risk.AMBER": {"en": "Elevated", "fr": "Vigilance"},
+    "risk.RED": {"en": "Critical", "fr": "Critique"},
+    # Régime gamma
+    "gamma.POSITIVE_GAMMA": {"en": "Positive gamma", "fr": "Gamma positif"},
+    "gamma.NEGATIVE_GAMMA": {"en": "Negative gamma", "fr": "Gamma négatif"},
+    "gamma.NEUTRAL": {"en": "Neutral gamma", "fr": "Gamma neutre"},
+    "gamma.INDISPONIBLE": {"en": "Unavailable", "fr": "Indisponible"},
+    # Composants source
+    "component.events": {
+        "en": "Events calendar (P05/P06)",
+        "fr": "Calendrier Événements (P05/P06)",
+    },
+    "component.macro": {
+        "en": "Macro & cross-asset context (P07)",
+        "fr": "Contexte Macro & Cross-Asset (P07)",
+    },
+    "component.overnight": {
+        "en": "Overnight NQ CME (P07)",
+        "fr": "Overnight NQ CME (P07)",
+    },
+    "component.gamma": {
+        "en": "NDX gamma & options levels (P04)",
+        "fr": "Niveaux Gamma & Options NDX (P04)",
+    },
+    # Motifs d'une ligne (jamais de texte moteur en français)
+    "reason.events_risk": {
+        "en": "Event risk {level}",
+        "fr": "Risque événementiel {level}",
+    },
+    "reason.radar_unreachable": {
+        "en": "Event radar unreachable",
+        "fr": "Radar événements inaccessible",
+    },
+    "reason.macro_ok": {"en": "Macro snapshot OK", "fr": "Snapshot macro OK"},
+    "reason.macro_degraded": {
+        "en": "Macro sources degraded",
+        "fr": "Sources macro dégradées",
+    },
+    "reason.macro_failed": {
+        "en": "Macro calculation failed",
+        "fr": "Échec du calcul macro",
+    },
+    "reason.overnight_ok": {
+        "en": "Overnight range {range_pts} pts",
+        "fr": "Range nuit = {range_pts} pts",
+    },
+    "reason.overnight_unavailable": {
+        "en": "Overnight quotes unavailable",
+        "fr": "Cotations overnight indisponibles",
+    },
+    "reason.overnight_failed": {
+        "en": "Overnight calculation failed",
+        "fr": "Échec du calcul overnight",
+    },
+    "reason.no_snapshot": {
+        "en": "No options snapshot available",
+        "fr": "Aucun snapshot d'options disponible",
+    },
+    "reason.snapshot_stale": {
+        "en": "Options snapshot {age_min} min old (limit {limit_min} min)",
+        "fr": "Snapshot d'options de {age_min} min (seuil {limit_min} min)",
+    },
+    "reason.source_degraded": {
+        "en": "Options source degraded",
+        "fr": "Source options dégradée",
+    },
+    "reason.source_delayed": {
+        "en": "Source {source} delayed or market closed",
+        "fr": "Source {source} différée ou marché fermé",
+    },
+    "reason.p09_missing": {
+        "en": "P09 loss tracking unavailable (non-blocking)",
+        "fr": "Suivi des pertes P09 indisponible (non bloquant)",
+    },
+    # Drapeaux no-trade : libellés courts
+    "flag.EVENT_RED": {
+        "en": "Tier 1 event window",
+        "fr": "Fenêtre événement Tier 1",
+    },
+    "flag.WALL_COMPRESSION": {
+        "en": "Gamma walls too close",
+        "fr": "Murs gamma trop proches",
+    },
+    "flag.STALE_DATA": {"en": "Market data stale", "fr": "Données de marché périmées"},
+    "flag.ABNORMAL_BASIS": {
+        "en": "Abnormal NDX/NQ basis",
+        "fr": "Base NDX/NQ anormale",
+    },
+    "flag.DAILY_LOSS_LIMIT": {
+        "en": "Daily loss limit",
+        "fr": "Limite de perte journalière",
+    },
+    "no_trade.allowed_title": {
+        "en": "Trading allowed (conditional)",
+        "fr": "Trading autorisé (sous conditions)",
+    },
+    "no_trade.blocked_title": {
+        "en": "No-trade flag active",
+        "fr": "Drapeau no-trade actif",
+    },
+    "no_trade.allowed_reason": {
+        "en": "No blocking flag. Kill Zones and max 2 trades/day still apply.",
+        "fr": "Aucun drapeau bloquant. Kill Zones et max 2 trades/jour s'appliquent.",
+    },
+    "no_trade.blocked_reason": {
+        "en": "Trading suspended until the flag clears.",
+        "fr": "Trading suspendu jusqu'à la levée du drapeau.",
+    },
+    # Graphique NQ (bougies depuis SQLite)
+    "chart.title": {
+        "en": "NQ=F — latest session (1m)",
+        "fr": "NQ=F — dernière séance (1m)",
+    },
+    "chart.caption": {
+        "en": "Candlesticks built from local SQLite bars (NQ=F, 1m, ET calendar day). "
+        "Horizontal lines are the latest gamma levels.",
+        "fr": "Bougies construites depuis les barres SQLite locales "
+        "(NQ=F, 1m, journée calendaire ET). Les lignes horizontales sont les "
+        "derniers niveaux gamma.",
+    },
+    "chart.empty_no_bars": {
+        "en": "No chart data — no NQ=F bars stored yet.",
+        "fr": "Aucune donnée de graphique — aucune barre NQ=F en base.",
+    },
+    "chart.empty_with_last": {
+        "en": "No chart data — last stored bar: {last_bar}.",
+        "fr": "Aucune donnée de graphique — dernière barre en base : {last_bar}.",
+    },
+    "chart.gamma_flip": {"en": "Gamma flip", "fr": "Gamma flip"},
+    "chart.call_wall": {"en": "Call wall", "fr": "Call wall"},
+    "chart.put_support": {"en": "Put support", "fr": "Put support"},
+    "chart.xaxis": {"en": "Time (ET)", "fr": "Heure (ET)"},
+    "chart.yaxis": {"en": "NQ price (pts)", "fr": "Prix NQ (pts)"},
+    # Positionnement CFTC COT (rapport financier désagrégé)
+    "cot.title": {
+        "en": "CFTC positioning — Leveraged Funds (NDX futures)",
+        "fr": "Positionnement CFTC — Leveraged Funds (futures NDX)",
+    },
+    "cot.category": {
+        "en": "Category: Leveraged Funds (CFTC disaggregated financial futures)",
+        "fr": "Catégorie : Leveraged Funds (rapport financier désagrégé CFTC)",
+    },
+    "cot.contract": {"en": "Contract: {contract}", "fr": "Contrat : {contract}"},
+    "cot.report_date": {
+        "en": "Report date: {date}",
+        "fr": "Date du relevé : {date}",
+    },
+    "cot.net": {
+        "en": "Net position: {net} contracts",
+        "fr": "Position nette : {net} contrats",
+    },
+    "cot.long_short": {
+        "en": "Long {long} / Short {short}",
+        "fr": "Long {long} / Short {short}",
+    },
+    "cot.no_data": {
+        "en": "No CFTC report available — no position is shown.",
+        "fr": "Aucun rapport CFTC disponible — aucune position affichée.",
+    },
+    "cot.note": {
+        "en": "Positioning context only — not a directional signal.",
+        "fr": "Contexte de positionnement seulement — aucun signal directionnel.",
+    },
+}
+
+# Codes de statut que les moteurs ont le droit de renvoyer.
+STATUS_CODES: tuple[str, ...] = ("OK", "DEGRADED", "STALE", "NO_DATA")
+
+# Code de statut -> couleur sémantique : vert OK, ambre périmé/dégradé,
+# rouge uniquement quand la source n'a aucune donnée.
+STATUS_KINDS: dict[str, str] = {
+    "OK": "ok",
+    "DEGRADED": "warn",
+    "STALE": "warn",
+    "NO_DATA": "error",
+    "ACTIVE": "warn",
+    "INACTIVE": "ok",
+    "BLOCKED": "warn",
+}
+
+# Anciens statuts texte encore émis par des modules non migrés : normalisés.
+_LEGACY_STATUS_CODES: dict[str, str] = {
+    "DÉGRADÉ": "DEGRADED",
+    "DEGRADE": "DEGRADED",
+    "PÉRIMÉ": "STALE",
+    "PERIME": "STALE",
+    "INDISPONIBLE": "NO_DATA",
+    "ACTIF": "ACTIVE",
+    "INACTIF": "INACTIVE",
+    "BLOQUÉ": "BLOCKED",
+    "BLOQUE": "BLOCKED",
+}
+
+
+def normalize_status_code(code: str | None) -> str:
+    """Ramène un statut hétérogène à un code canonique (jamais de phrase)."""
+    raw = str(code or "").strip().upper()
+    if not raw:
+        return "NO_DATA"
+    if raw in STATUS_CODES:
+        return raw
+    return _LEGACY_STATUS_CODES.get(raw, raw)
+
+
+@lru_cache(maxsize=1)
+def configured_default_lang() -> str:
+    """Langue par défaut lue depuis config.yaml (`ui.language`), une seule valeur."""
+    try:
+        from nqcockpit.config import load_config
+
+        lang = str(load_config().ui.language).upper()
+    except Exception:
+        return DEFAULT_LANG
+    return lang if lang in SUPPORTED_LANGS else DEFAULT_LANG
 
 
 def get_lang() -> str:
-    """Retourne la langue active ('FR' ou 'EN') depuis la session Streamlit."""
+    """Langue active : choix de session s'il existe, sinon config `ui.language`."""
+    default = configured_default_lang()
     try:
-        lang = str(st.session_state.get(LANG_SESSION_KEY, DEFAULT_LANG)).upper()
-        return lang if lang in SUPPORTED_LANGS else DEFAULT_LANG
+        lang = str(st.session_state.get(LANG_SESSION_KEY, default)).upper()
+        return lang if lang in SUPPORTED_LANGS else default
     except Exception:
-        return DEFAULT_LANG
+        return default
+
+
+def label(key: str, default: str | None = None, **params: object) -> str:
+    """Traduit une clé du dictionnaire LABELS dans la langue active.
+
+    Une clé absente renvoie ``default`` (ou la clé elle-même) : jamais de vide.
+    """
+    entry = LABELS.get(key)
+    if not entry:
+        return default if default is not None else key
+    text = entry.get(get_lang().lower()) or entry.get("en") or key
+    if params:
+        try:
+            return text.format(**params)
+        except (KeyError, IndexError, ValueError):
+            return text
+    return text
+
+
+def status_label(code: str | None) -> str:
+    """Libellé court d'un code de statut, dans la langue active."""
+    norm = normalize_status_code(code)
+    return label(f"status.{norm}", default=norm)
+
+
+def status_kind(code: str | None) -> str:
+    """Couleur sémantique d'un statut : 'ok', 'warn' ou 'error'."""
+    return STATUS_KINDS.get(normalize_status_code(code), "warn")
 
 
 def set_lang(lang: str) -> None:

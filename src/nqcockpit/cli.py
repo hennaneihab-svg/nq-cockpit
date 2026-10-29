@@ -1645,9 +1645,10 @@ def _handle_macro(args: object) -> int:
     net_str = f"{cot.non_commercial_net:,d}" if cot.non_commercial_net is not None else "N/A"
     chg_str = f"{cot.change_net_1w:+,d}" if cot.change_net_1w is not None else "N/A"
     cot_pct = f"{cot.percentile_1y:.1f} %" if cot.percentile_1y is not None else "N/A"
+    print(f"  Catégorie        : {cot.category_label} (rapport financier désagrégé CFTC)")
     print(f"  Contrat          : {cot.contract_name}")
     print(f"  Date du relevé   : {cot.report_date} (mardi de relevé)")
-    print(f"  Position nette   : {net_str} contrats (Spéculateurs non-commerciaux)")
+    print(f"  Position nette   : {net_str} contrats ({cot.category_label})")
     print(f"  Variation 1 sem. : {chg_str} contrats | Percentile 1 an : {cot_pct}")
     print(f"  Statut COT       : [{cot.status}] {cot.source}")
     print(f"  NOTE             : {cot.note}")
@@ -1901,7 +1902,7 @@ def _handle_profile(args: Any) -> int:
     for flag in nt.all_flags:
         if flag.triggered:
             icon = "🔴 ACTIF    "
-        elif "DÉGRADÉ" in flag.status:
+        elif flag.status == "DEGRADED":
             icon = "🟡 DÉGRADÉ  "
         else:
             icon = "🟢 INACTIF  "
@@ -1913,9 +1914,20 @@ def _handle_profile(args: Any) -> int:
     # --- SANTÉ DES COMPOSANTS ---
     print("  SANTÉ DES COMPOSANTS (statut individuel — aucun masquage)")
     print(sub)
+    component_labels_fr = {
+        "component.events": "Calendrier Événements (P05/P06)",
+        "component.macro": "Contexte Macro & Cross-Asset (P07)",
+        "component.overnight": "Overnight NQ CME (P07)",
+        "component.gamma": "Niveaux Gamma & Options NDX (P04)",
+    }
     for _c_key, c_val in profile.component_statuses.items():
-        icon = "🟢" if "DÉGRADÉ" not in c_val.status else "🔴"
-        print(f"  {icon} {c_val.name}")
+        if c_val.status == "NO_DATA":
+            icon = "⚪"
+        elif c_val.status == "OK":
+            icon = "🟢"
+        else:
+            icon = "🟡"
+        print(f"  {icon} {component_labels_fr.get(c_val.name, c_val.name)}")
         print(f"     Statut  : {c_val.status}")
         if c_val.detail:
             print(f"     Détail  : {c_val.detail}")

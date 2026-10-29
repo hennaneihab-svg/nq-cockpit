@@ -141,9 +141,8 @@ def test_gamma_component_health_degraded_status_formatting(tmp_path) -> None:
     profile = build_day_profile(conn=conn)
     gamma_health = profile.component_statuses.get("gamma")
     assert gamma_health is not None
+    assert gamma_health.status == "DEGRADED"
     assert "DÉGRADÉ: DÉGRADÉ" not in gamma_health.status
-    assert "DÉGRADÉ : DÉGRADÉ" not in gamma_health.status
-    assert gamma_health.status.startswith("DÉGRADÉ: ")
-    assert "Retard cotations CBOE" in gamma_health.status
+    assert "Retard cotations CBOE" in gamma_health.source_message
     conn.close()
 

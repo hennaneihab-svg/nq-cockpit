@@ -73,7 +73,7 @@ def evaluate_no_trade_flags(  # noqa: C901
         code=NoTradeFlagCode.EVENT_RED,
         title="Événement RED / Tampon post-événement",
         triggered=is_event_red,
-        status="ACTIF" if is_event_red else "INACTIF",
+        status="ACTIVE" if is_event_red else "INACTIVE",
         reason=event_reason,
         severity="BLOCKING",
         source_module="P05-P06 Events/Playbook",
@@ -103,7 +103,7 @@ def evaluate_no_trade_flags(  # noqa: C901
         code=NoTradeFlagCode.WALL_COMPRESSION,
         title="Compression entre murs gamma",
         triggered=is_wall_compressed,
-        status="ACTIF" if is_wall_compressed else "INACTIF",
+        status="ACTIVE" if is_wall_compressed else "INACTIVE",
         reason=wall_reason,
         severity="BLOCKING",
         source_module="P04 Levels",
@@ -126,7 +126,7 @@ def evaluate_no_trade_flags(  # noqa: C901
                 f"{c_name} périmé ({c_health.age_minutes:.1f}m > "
                 f"{stale_data_minutes:.0f}m)"
             )
-        elif "périmé" in c_health.status.lower() or "stale" in c_health.status.lower():
+        elif c_health.status == "STALE":
             is_stale = True
             stale_reasons.append(f"{c_name}: {c_health.status}")
 
@@ -139,7 +139,7 @@ def evaluate_no_trade_flags(  # noqa: C901
         code=NoTradeFlagCode.STALE_DATA,
         title="Donnée de marché périmée",
         triggered=is_stale,
-        status="ACTIF" if is_stale else "INACTIF",
+        status="ACTIVE" if is_stale else "INACTIVE",
         reason=stale_reason_str,
         severity="BLOCKING",
         source_module="Toutes sources (P04-P07)",
@@ -158,7 +158,7 @@ def evaluate_no_trade_flags(  # noqa: C901
         code=NoTradeFlagCode.ABNORMAL_BASIS,
         title="Base NDX/NQ anormale",
         triggered=basis_anomaly,
-        status="ACTIF" if basis_anomaly else "INACTIF",
+        status="ACTIVE" if basis_anomaly else "INACTIVE",
         reason=basis_reason_str,
         severity="BLOCKING",
         source_module="P04 Basis",
@@ -172,19 +172,19 @@ def evaluate_no_trade_flags(  # noqa: C901
     if daily_loss_r is not None:
         if daily_loss_r <= -daily_loss_limit_r:
             is_loss_limit_hit = True
-            loss_status = "ACTIF"
+            loss_status = "ACTIVE"
             loss_reason = (
                 f"Limite de perte journalière atteinte "
                 f"({daily_loss_r:.1f}R <= -{daily_loss_limit_r:.1f}R)"
             )
         else:
-            loss_status = "INACTIF"
+            loss_status = "INACTIVE"
             loss_reason = (
                 f"Pertes du jour sous contrôle "
                 f"({daily_loss_r:.1f}R > -{daily_loss_limit_r:.1f}R)"
             )
     else:
-        loss_status = "DÉGRADÉ: module P09 (journal) non encore livré — non bloquant"
+        loss_status = "DEGRADED"
         loss_reason = (
             "Suivi des pertes P09 non disponible (statut dégradé sans blocage du trading)"
         )
@@ -204,18 +204,12 @@ def evaluate_no_trade_flags(  # noqa: C901
 
     is_allowed = len(blocking_flags) == 0
     if is_allowed:
-        overall_status = "AUTORISÉ (sous conditions de setup)"
-        summary_text = (
-            "Aucun drapeau bloquant actif. Respecter impérativement les règles "
-            "de Kill Zone et la limite de 2 trades/jour."
-        )
+        overall_status = "ALLOWED"
+        summary_text = "no_blocking_flag"
     else:
-        overall_status = "NO-TRADE ACTIF"
-        flag_details = " | ".join(
-            f"{f.code.value} ({f.reason})" for f in blocking_flags
-        )
-        summary_text = (
-            f"{len(blocking_flags)} drapeau(x) bloquant(s) actif(s) : {flag_details}"
+        overall_status = "NO_TRADE"
+        summary_text = "blocking_flags: " + ", ".join(
+            f.code.value for f in blocking_flags
         )
 
     return NoTradeAssessment(
@@ -621,17 +615,21 @@ def build_day_profile(  # noqa: C901
             is_red_window = True
 
         component_statuses["events"] = ComponentHealth(
-            name="Calendrier Événements (P05/P06)",
-            status="OK" if radar.risk_level else "DÉGRADÉ",
-            detail=f"Risque {event_risk_level} ({radar.reason})",
+            name="component.events",
+            status="OK",
+            reason_key="reason.events_risk",
+            reason_params={"level": event_risk_level},
+            source_message=str(getattr(radar, "reason", "") or ""),
+            detail=f"next_tier1={next_t1_event}" if next_t1_event else "",
             timestamp_utc=as_of_utc_str,
         )
     except Exception as exc:
         log.warning("Impossible de charger le radar événements : %s", exc)
         component_statuses["events"] = ComponentHealth(
-            name="Calendrier Événements (P05/P06)",
-            status="DÉGRADÉ: radar inaccessible",
-            detail=str(exc),
+            name="component.events",
+            status="DEGRADED",
+            reason_key="reason.radar_unreachable",
+            source_message=str(exc),
             timestamp_utc=as_of_utc_str,
         )
 
@@ -642,6 +640,7 @@ def build_day_profile(  # noqa: C901
     overnight_high = None
     overnight_low = None
     vol_regime = "VOLATILITÉ NORMALE"
+    cot_payload: dict[str, Any] | None = None
     try:
         from nqcockpit.macro.engine import compute_macro_snapshot
 
@@ -674,41 +673,78 @@ def build_day_profile(  # noqa: C901
                 vol_regime = "VOLATILITÉ NORMALE"
 
         if macro_snap.status == "OK":
-            c_status = "OK"
+            macro_health_status = "OK"
+            macro_reason_key = "reason.macro_ok"
+            macro_source_msg = ""
         else:
-            c_status = f"DÉGRADÉ: {macro_snap.status_detail}"
+            macro_health_status = "DEGRADED"
+            macro_reason_key = "reason.macro_degraded"
+            macro_source_msg = str(macro_snap.status_detail or "")
 
         component_statuses["macro"] = ComponentHealth(
-            name="Contexte Macro & Cross-Asset (P07)",
-            status=c_status,
+            name="component.macro",
+            status=macro_health_status,
+            reason_key=macro_reason_key,
+            source_message=macro_source_msg,
             detail=f"VIX={vix_val}, VXN={vxn_val}",
             timestamp_utc=as_of_utc_str,
         )
         if overnight_range is not None:
-            on_st = "OK"
-            on_det = f"Range nuit = {overnight_range} pts"
+            overnight_health = ComponentHealth(
+                name="component.overnight",
+                status="OK",
+                reason_key="reason.overnight_ok",
+                reason_params={"range_pts": overnight_range},
+                detail=f"overnight_range={overnight_range} pts",
+                timestamp_utc=as_of_utc_str,
+            )
         else:
-            on_st = "DÉGRADÉ: cours indisponibles"
-            on_det = "N/A"
+            overnight_health = ComponentHealth(
+                name="component.overnight",
+                status="NO_DATA",
+                reason_key="reason.overnight_unavailable",
+                timestamp_utc=as_of_utc_str,
+            )
 
-        component_statuses["overnight"] = ComponentHealth(
-            name="Overnight NQ CME (P07)",
-            status=on_st,
-            detail=on_det,
-            timestamp_utc=as_of_utc_str,
-        )
+        component_statuses["overnight"] = overnight_health
+
+        # 4. Positionnement CFTC COT (contexte seulement, aucun signal)
+        try:
+            cot = macro_snap.cot
+            if not cot.report_date:
+                cot_status = "NO_DATA"
+            elif str(cot.status).upper() == "OK":
+                cot_status = "OK"
+            else:
+                cot_status = "DEGRADED"
+            cot_payload = {
+                "category_label": getattr(cot, "category_label", ""),
+                "contract_name": cot.contract_name or "",
+                "report_date": cot.report_date or "",
+                "net": cot.non_commercial_net,
+                "long": cot.non_commercial_long,
+                "short": cot.non_commercial_short,
+                "percentile_1y": cot.percentile_1y,
+                "status": cot_status,
+                "source": cot.source or "",
+                "source_message": str(cot.status_detail or ""),
+            }
+        except Exception:
+            cot_payload = None
     except Exception as exc:
         log.warning("Impossible de charger le snapshot macro : %s", exc)
         component_statuses["macro"] = ComponentHealth(
-            name="Contexte Macro & Cross-Asset (P07)",
-            status="DÉGRADÉ: échec calcul macro",
-            detail=str(exc),
+            name="component.macro",
+            status="DEGRADED",
+            reason_key="reason.macro_failed",
+            source_message=str(exc),
             timestamp_utc=as_of_utc_str,
         )
         component_statuses["overnight"] = ComponentHealth(
-            name="Overnight NQ CME (P07)",
-            status="DÉGRADÉ: échec overnight",
-            detail=str(exc),
+            name="component.overnight",
+            status="DEGRADED",
+            reason_key="reason.overnight_failed",
+            source_message=str(exc),
             timestamp_utc=as_of_utc_str,
         )
 
@@ -868,6 +904,8 @@ def build_day_profile(  # noqa: C901
 
                 if snap_status == "OK":
                     g_status = "OK"
+                    g_reason_key = ""
+                    g_source_msg = ""
                 else:
                     deg_reason = ""
                     anomalies = payload.get("anomalies") or []
@@ -895,24 +933,34 @@ def build_day_profile(  # noqa: C901
                         deg_reason = f"source {snap_source} différée ou marché fermé"
 
                     deg_reason = deg_reason.replace("DÉGRADÉ", "").strip(" :-·")
-                    g_status = f"DÉGRADÉ: {deg_reason}" if deg_reason else "DÉGRADÉ"
+                    g_status = "DEGRADED"
+                    g_reason_key = "reason.source_degraded"
+                    g_source_msg = deg_reason
 
                 # Statut honnête : un snapshot plus vieux que le seuil n'est jamais OK
                 if snapshot_age_min is not None and snapshot_age_min > stale_thresh:
-                    g_status = (
-                        f"DÉGRADÉ: snapshot périmé ({snapshot_age_min:.0f} min > "
-                        f"{stale_thresh:.0f} min)"
-                    )
+                    g_status = "STALE"
+                    g_reason_key = "reason.snapshot_stale"
+                    g_source_msg = ""
+                    g_reason_params = {
+                        "age_min": f"{snapshot_age_min:.0f}",
+                        "limit_min": f"{stale_thresh:.0f}",
+                    }
+                else:
+                    g_reason_params = {}
 
                 g_detail = (
-                    f"Spot={spot_nq:.1f}, Flip={gamma_flip}, "
-                    f"CW={call_wall}, PS={put_support}"
+                    f"spot={spot_nq:.1f}, flip={gamma_flip}, "
+                    f"call_wall={call_wall}, put_support={put_support}"
                     if spot_nq is not None
-                    else "Spot=N/A (snapshot sans spot)"
+                    else "spot=N/A"
                 )
                 component_statuses["gamma"] = ComponentHealth(
-                    name="Niveaux Gamma & Options NDX (P04)",
+                    name="component.gamma",
                     status=g_status,
+                    reason_key=g_reason_key,
+                    reason_params=g_reason_params,
+                    source_message=g_source_msg,
                     detail=g_detail,
                     age_minutes=snapshot_age_min,
                     timestamp_utc=str(row[8]),
@@ -922,9 +970,10 @@ def build_day_profile(  # noqa: C901
 
     if "gamma" not in component_statuses:
         component_statuses["gamma"] = ComponentHealth(
-            name="Niveaux Gamma & Options NDX (P04)",
-            status="DÉGRADÉ: aucun snapshot disponible",
-            detail="Données indisponibles (Data unavailable)",
+            name="component.gamma",
+            status="NO_DATA",
+            reason_key="reason.no_snapshot",
+            detail="spot=N/A",
             timestamp_utc=as_of_utc_str,
         )
 
@@ -1079,15 +1128,13 @@ def build_day_profile(  # noqa: C901
         base_em_pts=base_em,
     )
 
-    is_any_degraded = any("DÉGRADÉ" in c.status for c in component_statuses.values())
-    profile_status = "DÉGRADÉ" if is_any_degraded else "OK"
+    is_any_degraded = any(not c.is_ok for c in component_statuses.values())
+    profile_status = "DEGRADED" if is_any_degraded else "OK"
     degraded_list = [
-        f"{k} ({v.status})"
-        for k, v in component_statuses.items()
-        if "DÉGRADÉ" in v.status
+        f"{k}={v.status}" for k, v in component_statuses.items() if not v.is_ok
     ]
     if degraded_list:
-        profile_status_detail = f"Composants dégradés : {', '.join(degraded_list)}"
+        profile_status_detail = f"degraded_components: {', '.join(degraded_list)}"
     else:
         profile_status_detail = ""
 
@@ -1121,4 +1168,8 @@ def build_day_profile(  # noqa: C901
         snapshot_timestamp_utc=snapshot_timestamp_utc,
         snapshot_age_minutes=snapshot_age_min,
         basis_ndx_nq=basis_ndx_nq,
+        gamma_flip_nq=gamma_flip,
+        call_wall_nq=call_wall,
+        put_support_nq=put_support,
+        cot=cot_payload,
     )

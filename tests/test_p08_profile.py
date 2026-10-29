@@ -177,7 +177,7 @@ def test_no_trade_flag_p09_degraded():
     )
     loss_flag = next(f for f in assessment.all_flags if f.code == NoTradeFlagCode.DAILY_LOSS_LIMIT)
     assert loss_flag.triggered is False
-    assert "DÉGRADÉ" in loss_flag.status
+    assert loss_flag.status == "DEGRADED"
     # Non-bloquant : il ne bloque pas le trading si tout le reste est OK
     assert loss_flag not in assessment.blocking_flags
 
@@ -298,8 +298,8 @@ def test_day_profile_structure():
     assert len(profile.component_statuses) > 0
     for key, comp in profile.component_statuses.items():
         assert comp.status != "", f"Composant {key} a un statut vide"
-    assert "DÉGRADÉ" in profile.component_statuses["gamma"].status
-    assert "Données indisponibles" in profile.component_statuses["gamma"].detail
+    assert profile.component_statuses["gamma"].status == "NO_DATA"
+    assert profile.component_statuses["gamma"].reason_key == "reason.no_snapshot"
 
     # No-trade a toujours les 5 drapeaux
     assert len(profile.no_trade.all_flags) == 5
@@ -394,16 +394,16 @@ def test_stale_snapshot_is_never_ok(tmp_path: Path, monkeypatch):
         tmp_path / "stale", timestamp_utc=NOW_UTC - timedelta(minutes=stale_minutes + 60)
     )
     gamma_stale = stale_profile.component_statuses["gamma"]
-    assert "DÉGRADÉ" in gamma_stale.status
-    assert "périmé" in gamma_stale.status
+    assert gamma_stale.status == "STALE"
+    assert gamma_stale.reason_key == "reason.snapshot_stale"
     assert gamma_stale.age_minutes is not None
     assert gamma_stale.age_minutes > stale_minutes
-    assert stale_profile.status == "DÉGRADÉ"
+    assert stale_profile.status == "DEGRADED"
 
     fresh_profile = _profile_with_snapshot(
         tmp_path / "fresh", timestamp_utc=NOW_UTC - timedelta(minutes=2)
     )
-    assert "DÉGRADÉ" not in fresh_profile.component_statuses["gamma"].status
+    assert fresh_profile.component_statuses["gamma"].status == "OK"
 
 
 def test_empty_state_has_no_fabricated_numbers():
@@ -417,8 +417,8 @@ def test_empty_state_has_no_fabricated_numbers():
     assert profile.base_expected_move_pts is None
     assert profile.key_levels == []
     assert profile.scenarios == []
-    assert "DÉGRADÉ" in profile.component_statuses["gamma"].status
-    assert "Données indisponibles" in profile.component_statuses["gamma"].detail
+    assert profile.component_statuses["gamma"].status == "NO_DATA"
+    assert profile.component_statuses["gamma"].reason_key == "reason.no_snapshot"
 
 
 # ---------------------------------------------------------------------------

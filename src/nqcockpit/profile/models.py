@@ -15,10 +15,12 @@ from typing import Any
 
 
 class ComponentStatus(str, Enum):
-    """Statut de santé d'un composant source."""
+    """Codes de statut de santé d'un composant source (traduits côté UI)."""
 
     OK = "OK"
-    DEGRADED = "DÉGRADÉ"
+    DEGRADED = "DEGRADED"
+    STALE = "STALE"
+    NO_DATA = "NO_DATA"
 
 
 class NoTradeFlagCode(str, Enum):
@@ -33,13 +35,32 @@ class NoTradeFlagCode(str, Enum):
 
 @dataclass
 class ComponentHealth:
-    """Santé détaillée d'un composant de données."""
+    """Santé détaillée d'un composant de données.
 
-    name: str
-    status: str  # "OK" ou "DÉGRADÉ: <cause>"
-    detail: str = ""
+    Le moteur ne renvoie jamais de phrase française : ``name`` est une clé i18n
+    (``component.gamma``), ``status`` un code (``OK``, ``DEGRADED``, ``STALE``,
+    ``NO_DATA``) et ``reason_key``/``reason_params`` le motif à mettre en mots
+    dans la couche UI (voir ``nqcockpit.ui.i18n.LABELS``).
+    ``source_message`` conserve le diagnostic brut de la source amont : il est
+    affiché tel quel via la couche de traduction et ne décide jamais du statut.
+    """
+
+    name: str  # clé i18n ("component.gamma") ou libellé déjà résolu
+    status: str = "OK"  # code : OK | DEGRADED | STALE | NO_DATA
+    detail: str = ""  # valeurs techniques neutres (ex: "VIX=16.2")
     age_minutes: float | None = None
     timestamp_utc: str | None = None
+    reason_key: str = ""
+    reason_params: dict[str, Any] = field(default_factory=dict)
+    source_message: str = ""
+
+    @property
+    def is_ok(self) -> bool:
+        return self.status == "OK"
+
+    @property
+    def is_no_data(self) -> bool:
+        return self.status == "NO_DATA"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -179,6 +200,14 @@ class DayProfile:
     snapshot_age_minutes: float | None = None
     basis_ndx_nq: float | None = None
 
+    # Niveaux NQ explicites (aucun niveau déduit par correspondance de libellé)
+    gamma_flip_nq: float | None = None
+    call_wall_nq: float | None = None
+    put_support_nq: float | None = None
+
+    # Positionnement CFTC COT (rapport financier désagrégé : Leveraged Funds)
+    cot: dict[str, Any] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "as_of_utc": self.as_of_utc,
@@ -222,4 +251,10 @@ class DayProfile:
             "snapshot_timestamp_utc": self.snapshot_timestamp_utc,
             "snapshot_age_minutes": self.snapshot_age_minutes,
             "basis_ndx_nq": self.basis_ndx_nq,
+            "levels_nq": {
+                "gamma_flip": self.gamma_flip_nq,
+                "call_wall": self.call_wall_nq,
+                "put_support": self.put_support_nq,
+            },
+            "cot": self.cot,
         }

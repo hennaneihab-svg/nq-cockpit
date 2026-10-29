@@ -96,16 +96,25 @@ class CotPositioning:
     """Date du relevé CFTC (mardi précédent)."""
 
     contract_name: str = ""
-    """Nom du contrat (ex: 'NASDAQ-100 CONSOLIDATED - CME')."""
+    """Nom du contrat tel qu'imprimé dans le rapport (ex: 'NASDAQ-100 CONSOLIDATED')."""
+
+    category_label: str = "Leveraged Funds"
+    """Catégorie réelle du rapport désagrégé CFTC : « Leveraged Funds ».
+
+    Le rapport financial_lf.htm (Traders in Financial Futures) publie la
+    ventilation désagrégée ; les champs historiquement nommés
+    ``non_commercial_*`` contiennent donc les positions **Leveraged Funds**,
+    et non la catégorie « non-commercial » du rapport legacy.
+    """
 
     non_commercial_long: int | None = None
-    """Positions longues des spéculateurs (non-commercials)."""
+    """Positions longues de la catégorie Leveraged Funds (champ historique)."""
 
     non_commercial_short: int | None = None
-    """Positions courtes des spéculateurs."""
+    """Positions courtes de la catégorie Leveraged Funds (champ historique)."""
 
     non_commercial_net: int | None = None
-    """Position nette = Long - Short."""
+    """Position nette Leveraged Funds = Long - Short."""
 
     change_net_1w: int | None = None
     """Variation de la position nette sur une semaine."""
@@ -114,7 +123,7 @@ class CotPositioning:
     """Percentile historique 1 an de la position nette (0 à 100 %)."""
 
     status: str = "OK"
-    """'OK' | 'DÉGRADÉ: <raison>'."""
+    """'OK' | 'DÉGRADÉ: <raison>' (statut technique du fetch, normalisé côté UI)."""
 
     status_detail: str = ""
 

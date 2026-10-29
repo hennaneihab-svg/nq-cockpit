@@ -168,6 +168,14 @@ class BriefingConfig:
 
 
 @dataclass(frozen=True)
+class UiConfig:
+    """Présentation : une seule valeur bascule la langue par défaut de l'UI."""
+
+    language: str = "EN"
+    """Langue par défaut de l'interface : 'EN' ou 'FR' (le bouton UI reste maître)."""
+
+
+@dataclass(frozen=True)
 class AppConfig:
     timezones: TimezoneConfig
     trading_windows_algiers: list[TradingWindowConfig]
@@ -184,6 +192,7 @@ class AppConfig:
     macro: MacroConfig = field(default_factory=MacroConfig)
     forecast: ForecastConfig = field(default_factory=ForecastConfig)
     briefing: BriefingConfig = field(default_factory=BriefingConfig)
+    ui: UiConfig = field(default_factory=UiConfig)
 
 
 
@@ -594,6 +603,15 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         gemini_model=str(raw_briefing.get("gemini_model", "gemini-2.5-flash")),
     )
 
+    # 15. UI : langue par défaut (bascule unique, le bouton de session prime)
+    raw_ui = data.get("ui", {})
+    if not isinstance(raw_ui, dict):
+        raw_ui = {}
+    ui_language = str(raw_ui.get("language", "EN")).upper()
+    if ui_language not in ("EN", "FR"):
+        raise ConfigError("ui.language must be 'EN' or 'FR'.")
+    ui_cfg = UiConfig(language=ui_language)
+
     return AppConfig(
         timezones=timezones,
         trading_windows_algiers=trading_windows,
@@ -610,5 +628,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         macro=macro_cfg,
         forecast=forecast_cfg,
         briefing=briefing_cfg,
+        ui=ui_cfg,
     )
 

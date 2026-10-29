@@ -112,7 +112,7 @@ def test_stale_snapshot_triggers_single_refresh(tmp_path: Path, monkeypatch):
     assert count == 2  # ancien snapshot conservé + snapshot frais
     assert datetime.fromisoformat(latest_ts) == NOW_UTC
     assert profile.spot_nq is not None
-    assert "périmé" not in profile.component_statuses["gamma"].status
+    assert profile.component_statuses["gamma"].status != "STALE"
 
 
 def test_failed_refresh_keeps_old_snapshot_as_stale(tmp_path: Path, monkeypatch):
@@ -134,10 +134,10 @@ def test_failed_refresh_keeps_old_snapshot_as_stale(tmp_path: Path, monkeypatch)
 
     gamma = profile.component_statuses["gamma"]
     assert count == 1  # aucune nouvelle ligne, aucune exception levée
-    assert "DÉGRADÉ" in gamma.status
-    assert "périmé" in gamma.status
+    assert gamma.status == "STALE"
+    assert gamma.reason_key == "reason.snapshot_stale"
     assert gamma.age_minutes is not None and gamma.age_minutes > 30.0
-    assert profile.status == "DÉGRADÉ"
+    assert profile.status == "DEGRADED"
 
 
 def test_scheduler_starts_once_per_process(monkeypatch):

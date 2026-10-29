@@ -31,7 +31,9 @@ from nqcockpit.macro.news_radar import (
 )
 from nqcockpit.profile.engine import build_day_profile, export_levels_to_csv
 from nqcockpit.profile.models import DayProfile
-from nqcockpit.ui.i18n import get_lang, t, toggle_lang, tr_text
+from nqcockpit.ui.chart import build_session_chart, load_latest_session_bars
+from nqcockpit.ui.components import badge_html, health_badge_html
+from nqcockpit.ui.i18n import get_lang, label, status_label, t, toggle_lang, tr_text
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +75,25 @@ def load_news_wire_cached(max_items_per_source: int = 4) -> NewsWireReport:
     return fetch_live_news_wire(max_items_per_source=max_items_per_source)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def load_chart_bars_cached(db_path_str: str) -> tuple[list, datetime | None]:
+    """Barres 1m NQ=F de la dernière séance + horodatage de la dernière barre.
+
+    Lecture locale uniquement (table ``bars``), cache 60 s. Table vide ou base
+    absente : ``([], None)`` — le graphique affiche alors son état vide.
+    """
+    path = Path(db_path_str)
+    if not path.exists():
+        return [], None
+    from nqcockpit.data.db import get_db_connection
+
+    conn = get_db_connection(path)
+    try:
+        return load_latest_session_bars(conn)
+    finally:
+        conn.close()
+
+
 def _render_wire_item_html(item: NewsWireItem, delay_idx: int) -> str:
     """Génère le fragment HTML d'une dépêche d'actualité en direct."""
     dot_title = t("Dépêche récente", "Recent wire item")
@@ -99,15 +120,16 @@ def _render_wire_item_html(item: NewsWireItem, delay_idx: int) -> str:
 
 def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
     """Génère le fragment HTML d'une carte macro avec ses animations et statuts."""
-    deg_badge_txt = t("[DÉGRADÉ]", "[DEGRADED]")
     if card.is_ok:
         status_pill_cls = "pill-ok"
+        status_text = status_label("OK")
         dot_title = t("Donnée active en direct", "Active live data")
         dot_html = f'<span class="live-dot" title="{dot_title}"></span>'
         deg_card_cls = ""
         alert_html = ""
     else:
         status_pill_cls = "pill-deg"
+        status_text = status_label("DEGRADED")
         dot_title = t("Flux dégradé ou clôture différée", "Degraded feed or delayed close")
         dot_html = f'<span class="deg-dot" title="{dot_title}"></span>'
         deg_card_cls = "degraded"
@@ -119,7 +141,7 @@ def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
             clean_reason = "Source indisponible ou marché fermé"
         alert_html = (
             f'<div class="news-alert">'
-            f"<b>{deg_badge_txt}</b> {tr_text(clean_reason)}"
+            f"{badge_html('DEGRADED')} {tr_text(clean_reason)}"
             f"</div>"
         )
 
@@ -132,7 +154,7 @@ def _render_radar_card_html(card: MacroRadarCard, delay_idx: int) -> str:
         f'<div class="news-card animate-enter delay-{delay_idx} {deg_card_cls}">'
         f'<div class="news-card-header">'
         f'<span class="news-card-title">{tr_text(card.category)} · {tr_text(card.title)}</span>'
-        f'<span class="news-pill {status_pill_cls}">{dot_html}{tr_text(card.status)}</span>'
+        f'<span class="news-pill {status_pill_cls}">{dot_html}{status_text}</span>'
         f'</div>'
         f'<div class="news-body">'
         f'<div class="news-kpi refresh-flash">{tr_text(card.main_value)}</div>'
@@ -322,8 +344,8 @@ def render_cockpit():
             color: var(--text-primary);
         }
         .status-banner-notrade {
-            background-color: var(--status-notrade-bg);
-            border: 1px solid var(--status-notrade-border);
+            background-color: var(--status-deg-bg);
+            border: 1px solid var(--status-deg-border);
             border-radius: 6px;
             padding: 12px 16px;
             margin-bottom: 16px;
@@ -356,6 +378,67 @@ def render_cockpit():
             display: inline-block;
             margin-right: 6px;
             margin-bottom: 4px;
+        }
+        .chip-error {
+            background-color: var(--status-notrade-bg);
+            border: 1px solid var(--status-notrade-border);
+            color: var(--status-notrade-text);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: ui-monospace, monospace;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-right: 6px;
+            margin-bottom: 4px;
+        }
+        .chip-name {
+            color: var(--text-primary);
+            font-size: 0.76rem;
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        .chip-reason {
+            color: var(--text-secondary);
+            font-family: -apple-system, system-ui, sans-serif;
+            font-size: 0.74rem;
+            font-weight: 500;
+            overflow-wrap: anywhere;
+        }
+
+        /* Radar macro : grille fluide, aucune colonne imbriquée, aucun chevauchement */
+        .radar-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+            align-items: stretch;
+        }
+        .radar-grid .news-card {
+            margin-bottom: 0;
+            height: 100%;
+            min-width: 0;
+        }
+        .news-card-title,
+        .news-kpi,
+        .news-desc,
+        .news-footer,
+        .news-alert {
+            overflow-wrap: anywhere;
+        }
+
+        /* Positionnement CFTC COT */
+        .cot-card {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+        }
+        .cot-line {
+            font-family: ui-monospace, monospace;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
         }
 
         /* Scénarios */
@@ -585,22 +668,13 @@ def render_cockpit():
     # 1. BANDEAU DE STATUT EN 5 SECONDES : AUTORISÉ OU NO-TRADE
     # -----------------------------------------------------------------------
     if profile.no_trade.is_trading_allowed:
-        allowed_title = t(
-            "SYSTEM // TRADING AUTORISÉ (SOUS CONDITIONS)",
-            "SYSTEM // TRADING AUTHORIZED (CONDITIONAL)",
-        )
-        allowed_sub = t(
-            "Aucun drapeau bloquant actif. Respecter impérativement les Kill Zones d'Alger "
-            "(15h30–17h00 / 17h00–18h30) et la règle de max 2 trades/jour.",
-            "No active blocking flags. Strictly respect Algiers Kill Zones "
-            "(15:30–17:00 / 17:00–18:30) and the max 2 trades/day rule.",
-        )
+        allowed_title = label("no_trade.allowed_title")
+        allowed_sub = label("no_trade.allowed_reason")
         st.markdown(
             f"""
             <div class="status-banner-allowed animate-enter delay-0">
-                <span style="font-family: monospace; font-weight: 700; color: #10B981;">
-                    {allowed_title}
-                </span><br>
+                {badge_html("OK")}
+                <span style="font-weight: 700;">{allowed_title}</span><br>
                 <span style="font-size: 0.82rem; color: #94A3B8;">
                     {allowed_sub}
                 </span>
@@ -610,27 +684,22 @@ def render_cockpit():
         )
     else:
         reasons_list = [
-            f"<li><b>{f.code.value}</b> : {tr_text(f.reason)}</li>"
+            f"<li><b>{label(f'flag.{f.code.value}', default=f.title)}</b>"
+            f" — {tr_text(f.reason)}</li>"
             for f in profile.no_trade.blocking_flags
         ]
         reasons_html = "".join(reasons_list)
         cnt = profile.no_trade.active_flags_count
-        notrade_title = t(
-            f"SYSTEM // DRAPEAU NO-TRADE ACTIF ({cnt})",
-            f"SYSTEM // ACTIVE NO-TRADE FLAG ({cnt})",
-        )
-        notrade_sub = t(
-            "Trading strictement suspendu :",
-            "Trading strictly suspended:",
-        )
+        notrade_badge = badge_html("BLOCKED", f"{label('status.BLOCKED')} ({cnt})")
+        notrade_title = label("no_trade.blocked_title")
+        notrade_sub = label("no_trade.blocked_reason")
         st.markdown(
             f"""
             <div class="status-banner-notrade animate-enter delay-0">
-                <span style="font-family: monospace; font-weight: 700; color: #EF4444;">
-                    {notrade_title}
-                </span><br>
+                {notrade_badge}
+                <span style="font-weight: 700;">{notrade_title}</span><br>
                 <span style="font-size: 0.82rem; color: #94A3B8;">
-                    <b>{notrade_sub}</b>
+                    {notrade_sub}
                     <ul style="margin: 4px 0 0 0; padding-left: 20px;">{reasons_html}</ul>
                 </span>
             </div>
@@ -654,12 +723,15 @@ def render_cockpit():
             color_ev = "#EF4444"
         k1_title = t("Prochain Événement Tier 1", "Next Tier 1 Event")
         risk_lbl = t("Risque", "Risk")
+        risk_value = label(
+            f"risk.{profile.event_risk_level}", profile.event_risk_level
+        )
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-1">
                 <div class="kpi-title">{k1_title}</div>
                 <div class="kpi-value refresh-flash" style="color: {color_ev};">{cd_text}</div>
-                <div class="kpi-sub">{ev_title} ({risk_lbl} {profile.event_risk_level})</div>
+                <div class="kpi-sub">{ev_title} ({risk_lbl} {risk_value})</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -674,12 +746,13 @@ def render_cockpit():
         )
         k2_title = t("Régime Gamma (P04)", "Gamma Regime (P04)")
         k2_sub = t("Distance au Flip :", "Distance to Flip:")
+        gamma_label = label(f"gamma.{profile.gamma_regime}", profile.gamma_regime)
         st.markdown(
             f"""
             <div class="kpi-card animate-enter delay-2">
                 <div class="kpi-title">{k2_title}</div>
                 <div class="kpi-value refresh-flash" style="color: {g_color};">
-                    {profile.gamma_regime}
+                    {gamma_label}
                 </div>
                 <div class="kpi-sub">{k2_sub} <b>{dist_f}</b></div>
             </div>
@@ -726,7 +799,40 @@ def render_cockpit():
         )
 
     # -----------------------------------------------------------------------
-    # 3. BANDEAU DE SANTÉ DÉCOMPOSÉ DES SOURCES (AUCUN MASQUAGE)
+    # 3. GRAPHIQUE NQ DU JOUR (BOUGIES DEPUIS SQLITE) — AUCUN CADRE VIDE
+    # -----------------------------------------------------------------------
+    st.write("")
+    chart_hdr = label("chart.title")
+    st.markdown(
+        f'<div class="section-header">{chart_hdr}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(label("chart.caption"))
+    try:
+        session_bars, last_bar_utc = load_chart_bars_cached(str(db_path))
+        session_chart = build_session_chart(
+            session_bars,
+            gamma_flip=profile.gamma_flip_nq,
+            call_wall=profile.call_wall_nq,
+            put_support=profile.put_support_nq,
+            last_bar_utc=last_bar_utc,
+        )
+        if session_chart.figure is not None:
+            st.plotly_chart(session_chart.figure, use_container_width=True)
+        else:
+            # État vide explicite (et horodatage de la dernière barre si elle existe).
+            st.info(session_chart.message)
+    except Exception as exc:
+        log.warning("Échec affichage graphique NQ: %s", exc)
+        st.warning(
+            t(
+                f"Graphique indisponible : {exc}",
+                f"Chart unavailable: {exc}",
+            )
+        )
+
+    # -----------------------------------------------------------------------
+    # 4. BANDEAU DE SANTÉ DÉCOMPOSÉ DES SOURCES (AUCUN MASQUAGE)
     # -----------------------------------------------------------------------
     health_hdr = t("SANTÉ DES COMPOSANTS SOURCES", "SOURCE COMPONENT HEALTH")
     st.markdown(
@@ -735,21 +841,10 @@ def render_cockpit():
         f"{health_hdr}</div>",
         unsafe_allow_html=True,
     )
-    chips_html = []
-    for _c_key, c_val in profile.component_statuses.items():
-        is_deg = "DÉGRADÉ" in c_val.status
-        cls = "chip-degraded" if is_deg else "chip-ok"
-        display_status = re.sub(
-            r"(DÉGRADÉ\s*[:—\-]\s*)+DÉGRADÉ", "DÉGRADÉ", c_val.status
-        )
-        age_suffix = (
-            f" ({c_val.age_minutes:.0f} min)" if c_val.age_minutes is not None else ""
-        )
-        chips_html.append(
-            f"<span class='{cls}'>{tr_text(c_val.name)} : "
-            f"{tr_text(display_status)}{age_suffix}</span>"
-        )
-    st.markdown("".join(chips_html), unsafe_allow_html=True)
+    chips_html = "".join(
+        health_badge_html(health) for health in profile.component_statuses.values()
+    )
+    st.markdown(chips_html, unsafe_allow_html=True)
     st.write("")
 
     # -----------------------------------------------------------------------
@@ -776,34 +871,70 @@ def render_cockpit():
         macro_radar = load_macro_radar_cached()
         cards = macro_radar.as_list()
 
-        # Rangée 1 (3 fenêtres)
-        r1_c1, r1_c2, r1_c3 = st.columns(3)
-        with r1_c1:
-            st.markdown(_render_radar_card_html(cards[0], delay_idx=5), unsafe_allow_html=True)
-        with r1_c2:
-            st.markdown(_render_radar_card_html(cards[1], delay_idx=6), unsafe_allow_html=True)
-        with r1_c3:
-            st.markdown(_render_radar_card_html(cards[2], delay_idx=7), unsafe_allow_html=True)
-
-        # Rangée 2 (3 fenêtres)
-        r2_c1, r2_c2, r2_c3 = st.columns(3)
-        with r2_c1:
-            st.markdown(_render_radar_card_html(cards[3], delay_idx=8), unsafe_allow_html=True)
-        with r2_c2:
-            st.markdown(_render_radar_card_html(cards[4], delay_idx=9), unsafe_allow_html=True)
-        with r2_c3:
-            st.markdown(_render_radar_card_html(cards[5], delay_idx=10), unsafe_allow_html=True)
+        # Grille fluide : 6 cartes identiques, auto-ajustées de 1 à 3 colonnes
+        # selon la largeur (aucune colonne Streamlit imbriquée, pas de troncature).
+        radar_cards_html = "".join(
+            _render_radar_card_html(card, delay_idx=5 + idx)
+            for idx, card in enumerate(cards[:6])
+        )
+        st.markdown(
+            f'<div class="radar-grid">{radar_cards_html}</div>',
+            unsafe_allow_html=True,
+        )
 
     except Exception as exc:
         log.warning("Échec affichage radar macro: %s", exc)
         err_lbl = t(
-            f"[DÉGRADÉ] Radar macro inaccessible : {exc}",
-            f"[DEGRADED] Macro radar unreachable: {exc}",
+            f"Radar macro inaccessible : {exc}",
+            f"Macro radar unreachable: {exc}",
         )
         st.markdown(
-            f'<div class="chip-degraded">{err_lbl}</div>',
+            f"<div>{badge_html('DEGRADED')} {err_lbl}</div>",
             unsafe_allow_html=True,
         )
+
+    # -----------------------------------------------------------------------
+    # 4A. POSITIONNEMENT CFTC COT — CATÉGORIE « LEVERAGED FUNDS »
+    # -----------------------------------------------------------------------
+    st.write("")
+    cot_hdr = label("cot.title")
+    st.markdown(
+        f'<div class="section-header" style="font-size: 0.88rem;">{cot_hdr}</div>',
+        unsafe_allow_html=True,
+    )
+    cot = profile.cot or {}
+    if not cot.get("report_date"):
+        st.markdown(
+            f"<div class='cot-card'>{badge_html('NO_DATA')} "
+            f"<span class='cot-line'>{label('cot.no_data')}</span></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        def _num(value: object) -> str:
+            return f"{value:,}" if isinstance(value, int | float) else "N/A"
+
+        cot_status = str(cot.get("status") or "NO_DATA")
+        net_str = _num(cot.get("net"))
+        long_short = label(
+            "cot.long_short",
+            long=_num(cot.get("long")),
+            short=_num(cot.get("short")),
+        )
+        cot_lines = [
+            label("cot.category"),
+            label("cot.contract", contract=cot.get("contract_name") or "N/A"),
+            label("cot.report_date", date=cot.get("report_date") or "N/A"),
+            f"{label('cot.net', net=net_str)} · {long_short}",
+        ]
+        if cot.get("source_message"):
+            cot_lines.append(tr_text(str(cot["source_message"])))
+        cot_body = "<br>".join(cot_lines)
+        st.markdown(
+            f"<div class='cot-card'>{badge_html(cot_status)} "
+            f"<span class='cot-line'>{cot_body}</span></div>",
+            unsafe_allow_html=True,
+        )
+    st.caption(label("cot.note"))
 
     # -----------------------------------------------------------------------
     # 4B. FIL EN DIRECT DES ACTUALITÉS & COMMUNIQUÉS OFFICIELS (LIVE WIRE)
@@ -835,11 +966,12 @@ def render_cockpit():
                 tr_text(s) for s in wire_report.degraded_sources
             )
             deg_lbl = t(
-                f"<b>[DÉGRADÉ]</b> Sources dégradées dans le fil : {deg_reasons_html}",
-                f"<b>[DEGRADED]</b> Degraded wire sources: {deg_reasons_html}",
+                f"Sources dégradées dans le fil : {deg_reasons_html}",
+                f"Degraded wire sources: {deg_reasons_html}",
             )
             st.markdown(
-                f'<div class="news-alert" style="margin-bottom: 10px;">{deg_lbl}</div>',
+                f'<div class="news-alert" style="margin-bottom: 10px;">'
+                f"{badge_html('DEGRADED')} {deg_lbl}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -853,21 +985,21 @@ def render_cockpit():
                     )
         else:
             empty_wire_msg = t(
-                "[DÉGRADÉ] Aucun communiqué reçu (flux RSS Fed & Google News inaccessibles).",
-                "[DEGRADED] No releases received (Fed & Google News RSS feeds unreachable).",
+                "Aucun communiqué reçu (flux RSS Fed & Google News inaccessibles).",
+                "No releases received (Fed & Google News RSS feeds unreachable).",
             )
             st.markdown(
-                f'<div class="chip-degraded">{empty_wire_msg}</div>',
+                f"<div>{badge_html('DEGRADED')} {empty_wire_msg}</div>",
                 unsafe_allow_html=True,
             )
     except Exception as exc:
         log.warning("Échec affichage fil d'actualités: %s", exc)
         err_wire = t(
-            f"[DÉGRADÉ] Fil d'actualités indisponible : {exc}",
-            f"[DEGRADED] News wire unavailable: {exc}",
+            f"Fil d'actualités indisponible : {exc}",
+            f"News wire unavailable: {exc}",
         )
         st.markdown(
-            f'<div class="chip-degraded">{err_wire}</div>',
+            f"<div>{badge_html('DEGRADED')} {err_wire}</div>",
             unsafe_allow_html=True,
         )
 

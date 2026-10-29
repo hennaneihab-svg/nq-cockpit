@@ -1,3 +1,5 @@
+ui:
+  language: "EN"      # langue par defaut de l'interface : EN ou FR (bascule unique)
 timezones:
   display: Africa/Algiers
   market: America/New_York
@@ -71,7 +73,7 @@ macro:
     vix_symbol: "^VIX"
     vxn_symbol: "^VXN"
     nq_symbol: "NQ=F"
-    cot_url: "https://www.cftc.gov/dea/newcot/FinFutFutures.txt"
+    cot_url: "https://www.cftc.gov/dea/futures/financial_lf.htm"
     cot_contract_name: "NASDAQ-100 CONSOLIDATED - CHICAGO MERCANTILE EXCHANGE"
 forecast:
   min_calibration_sessions: 60
