@@ -187,11 +187,9 @@ class MT5Client:
         self.disconnect()
 
     def __repr__(self) -> str:
-        login_display = str(self.login) if self.login else "None"
-        server_display = self.server or "None"
+        # Aucun identifiant affiché : conformité « jamais de login dans l'UI ni les logs ».
         return (
-            f"MT5Client(login={login_display}, server={server_display}, "
-            f"connected={self._is_connected}, read_only=True)"
+            f"MT5Client(login=***, server=***, connected={self._is_connected}, read_only=True)"
         )
 
     # -----------------------------------------------------------------------
@@ -270,7 +268,7 @@ class MT5Client:
                     mt5.shutdown()
                     self._is_connected = False
                     login_err = (
-                        f"Échec d'authentification MT5 pour le compte {self.login} ({code}: {msg})"
+                        f"Échec d'authentification MT5 ({code}: {msg})"
                     )
                     return MT5Status(
                         status="DÉGRADÉ",

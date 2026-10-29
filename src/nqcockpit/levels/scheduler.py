@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -22,6 +23,9 @@ from nqcockpit.levels.models import LevelsSnapshot
 log = logging.getLogger(__name__)
 
 ALGIERS_TZ = ZoneInfo("Africa/Algiers")
+
+# Backoff des relances de snapshot : 30 s, 60 s puis 120 s, ensuite cycle normal.
+RETRY_BACKOFF_SECONDS: tuple[int, ...] = (30, 60, 120)
 
 _scheduler_lock = threading.Lock()
 _scheduler_singleton: "LevelsScheduler | None" = None
@@ -185,6 +189,36 @@ class LevelsScheduler:
         self.last_snapshot = snap
         return snap
 
+    def trigger_snapshot_with_retry(self) -> LevelsSnapshot | None:
+        """Exécute un snapshot et relance en cas d'échec (30 s, 60 s, 120 s).
+
+        Après la dernière relance, le cycle normal reprend : aucune relance infinie.
+        Chaque tentative échouée est journalisée.
+        """
+        max_attempts = len(RETRY_BACKOFF_SECONDS) + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.trigger_snapshot()
+            except Exception as exc:  # noqa: BLE001 - on relance puis on abandonne proprement
+                if attempt >= max_attempts:
+                    log.error(
+                        "Snapshot de niveaux abandonné après %d tentatives: %s",
+                        attempt,
+                        exc,
+                    )
+                    return None
+                delay = RETRY_BACKOFF_SECONDS[attempt - 1]
+                log.warning(
+                    "Échec du snapshot de niveaux (tentative %d/%d): %s — "
+                    "nouvelle tentative dans %d s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+        return None
+
     def start(self) -> None:
         """Démarre le planificateur selon la configuration en America/New_York."""
         cfg = load_config()
@@ -196,7 +230,7 @@ class LevelsScheduler:
                 hour = int(parts[0])
                 minute = int(parts[1])
                 self.scheduler.add_job(
-                    self.trigger_snapshot,
+                    self.trigger_snapshot_with_retry,
                     "cron",
                     hour=hour,
                     minute=minute,

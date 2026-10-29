@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import importlib.util
+import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 KNOWN_SECRET_KEYS = (
     "FRED_API_KEY",
@@ -18,6 +23,13 @@ KNOWN_SECRET_KEYS = (
     "MT5_SERVER",
     "MT5_PATH",
 )
+
+# Coffre système facultatif : keyring n'est jamais ajouté aux dépendances.
+KEYRING_SERVICE = "nqcockpit"
+KEYRING_MT5_PASSWORD_KEY = "mt5_password"
+
+_mt5_fallback_warning_emitted = False
+_mt5_fallback_warning_lock = threading.Lock()
 
 
 def load_environment(env_path: str | Path | None = None) -> bool:
@@ -140,6 +152,80 @@ def update_env_file(updates: dict[str, str], env_path: str | Path | None = None)
     return True
 
 
+def _keyring_backend() -> Any | None:
+    """Returns the already-installed keyring module, or None (no new dependency)."""
+    try:
+        if importlib.util.find_spec("keyring") is None:
+            return None
+        import keyring
+
+        return keyring
+    except Exception:  # noqa: BLE001 - keyring absent/cassé : repli sur .env
+        return None
+
+
+def _read_keyring_password(backend: Any) -> str | None:
+    """Reads the MT5 password through an already-resolved keyring backend."""
+    try:
+        value = backend.get_password(KEYRING_SERVICE, KEYRING_MT5_PASSWORD_KEY)
+    except Exception as exc:  # noqa: BLE001 - backend keyring indisponible
+        logger.warning(
+            "Keyring indisponible pour MT5 (%s) : aucun mot de passe lu.",
+            type(exc).__name__,
+        )
+        return None
+    return value.strip() if value and value.strip() else None
+
+
+def store_keyring_password(password: str) -> bool:
+    """Stores the MT5 password in the OS keyring when keyring is installed."""
+    backend = _keyring_backend()
+    if backend is None or not password:
+        return False
+    try:
+        backend.set_password(KEYRING_SERVICE, KEYRING_MT5_PASSWORD_KEY, password)
+        return True
+    except Exception as exc:  # noqa: BLE001 - écriture keyring refusée
+        logger.warning(
+            "Écriture du mot de passe MT5 dans le keyring impossible (%s).",
+            type(exc).__name__,
+        )
+        return False
+
+
+def _warn_plaintext_fallback_once() -> None:
+    """Logs a single clear warning when the MT5 password is read from plain-text .env."""
+    global _mt5_fallback_warning_emitted
+    with _mt5_fallback_warning_lock:
+        if _mt5_fallback_warning_emitted:
+            return
+        _mt5_fallback_warning_emitted = True
+    logger.warning(
+        "Mot de passe MT5 lu depuis .env en clair : keyring n'est pas installé. "
+        "Installez keyring puis stockez le mot de passe hors du fichier "
+        "(commande documentée dans le README, section MetaTrader 5). "
+        "Le mot de passe n'est jamais journalisé."
+    )
+
+
+def get_mt5_password(env_path: str | Path | None = None) -> str:
+    """Resolves the MT5 password: OS keyring when installed, else .env fallback.
+
+    Dès que keyring est installé, .env n'est plus lu pour le mot de passe (le secret
+    doit être dans le coffre système). Le fallback .env ne sert qu'aux environnements
+    sans keyring et journalise un avertissement unique. La valeur n'est jamais loggée.
+    """
+    if env_path is not None:
+        load_environment(env_path)
+    backend = _keyring_backend()
+    if backend is not None:
+        return _read_keyring_password(backend) or ""
+    env_secret = get_key("MT5_PASSWORD", "") or ""
+    if env_secret:
+        _warn_plaintext_fallback_once()
+    return env_secret
+
+
 def get_mt5_credentials(env_path: str | Path | None = None) -> dict[str, Any]:
     """Returns MT5 configured credentials status with masked password information.
 
@@ -159,7 +245,7 @@ def get_mt5_credentials(env_path: str | Path | None = None) -> dict[str, Any]:
         "server": get_key("MT5_SERVER", "") or "",
         "path": get_key("MT5_PATH", "") or "",
         "broker_tz": get_key("MT5_BROKER_TZ", "UTC") or "UTC",
-        "has_password": has_key("MT5_PASSWORD"),
+        "has_password": bool(get_mt5_password()),
     }
 
 
@@ -176,7 +262,7 @@ def get_mt5_raw_credentials(env_path: str | Path | None = None) -> dict[str, Any
 
     return {
         "login": login_val,
-        "password": get_key("MT5_PASSWORD", "") or "",
+        "password": get_mt5_password(),
         "server": get_key("MT5_SERVER", "") or "",
         "path": get_key("MT5_PATH", "") or "",
         "broker_tz": get_key("MT5_BROKER_TZ", "UTC") or "UTC",
@@ -191,22 +277,30 @@ def save_mt5_credentials(
     broker_tz: str = "UTC",
     env_path: str | Path | None = None,
 ) -> bool:
-    """Saves MT5 credentials to .env file preserving all other variables and comments.
+    """Saves MT5 credentials: password to the keyring when available, else .env fallback.
 
-    If password is empty and MT5_PASSWORD already exists, the existing password
-    is preserved. Never logs secret values.
+    If password is empty and a password already exists, it is preserved.
+    Never logs secret values.
     """
     updates: dict[str, str] = {
         "MT5_LOGIN": str(login).strip(),
         "MT5_SERVER": str(server).strip(),
     }
     cleaned_pw = str(password).strip()
-    if cleaned_pw:
+    if cleaned_pw and store_keyring_password(cleaned_pw):
+        # Secret désormais dans le coffre système : retirer le clair du fichier .env.
+        updates["MT5_PASSWORD"] = ""
+    elif cleaned_pw:
+        _warn_plaintext_fallback_once()
         updates["MT5_PASSWORD"] = cleaned_pw
     else:
-        existing_pw = os.getenv("MT5_PASSWORD")
-        if existing_pw is not None:
-            updates["MT5_PASSWORD"] = existing_pw
+        if _keyring_backend() is not None:
+            # Keyring disponible : purger tout mot de passe resté en clair dans .env.
+            updates["MT5_PASSWORD"] = ""
+        else:
+            existing_pw = os.getenv("MT5_PASSWORD")
+            if existing_pw is not None:
+                updates["MT5_PASSWORD"] = existing_pw
 
     if path is not None and str(path).strip():
         updates["MT5_PATH"] = str(path).strip()

@@ -619,7 +619,10 @@ def render_cockpit():
     db_path = Path(cfg.data.db_path)
 
     now_utc = datetime.now(timezone.utc)
-    profile = load_day_profile_cached(str(db_path))
+    with st.spinner(
+        t("Chargement du profil de séance…", "Loading session profile…")
+    ):
+        profile = load_day_profile_cached(str(db_path))
 
     # En-tête : Titre, Horodatages multi-fuseaux & Bouton de langue instantané
     col_t1, col_t2, col_t3 = st.columns([2.2, 1.1, 0.7])
@@ -868,7 +871,8 @@ def render_cockpit():
     )
 
     try:
-        macro_radar = load_macro_radar_cached()
+        with st.spinner(t("Chargement du radar macro…", "Loading macro radar…")):
+            macro_radar = load_macro_radar_cached()
         cards = macro_radar.as_list()
 
         # Grille fluide : 6 cartes identiques, auto-ajustées de 1 à 3 colonnes
@@ -960,7 +964,10 @@ def render_cockpit():
     )
 
     try:
-        wire_report = load_news_wire_cached(max_items_per_source=4)
+        with st.spinner(
+            t("Chargement du fil d'actualités…", "Loading news wire…")
+        ):
+            wire_report = load_news_wire_cached(max_items_per_source=4)
         if wire_report.degraded_sources:
             deg_reasons_html = " · ".join(
                 tr_text(s) for s in wire_report.degraded_sources

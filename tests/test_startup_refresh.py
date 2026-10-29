@@ -169,6 +169,55 @@ def test_scheduler_never_starts_during_tests(monkeypatch):
     assert scheduler_mod.start_levels_scheduler_once(_factory) is False
 
 
+def test_scheduler_retry_backoff_then_waits_next_cycle(monkeypatch, caplog):
+    """Échec répété : relances 30/60/120 s puis abandon propre (cycle normal ensuite)."""
+    import logging
+
+    import nqcockpit.levels.scheduler as scheduler_mod
+
+    scheduler = scheduler_mod.LevelsScheduler.__new__(scheduler_mod.LevelsScheduler)
+    attempts = {"count": 0}
+
+    def _fail() -> None:
+        attempts["count"] += 1
+        raise ConnectionError("CBOE indisponible (test)")
+
+    sleeps: list[int] = []
+    monkeypatch.setattr(scheduler, "trigger_snapshot", _fail)
+    monkeypatch.setattr(scheduler_mod.time, "sleep", sleeps.append)
+
+    with caplog.at_level(logging.WARNING):
+        assert scheduler.trigger_snapshot_with_retry() is None
+
+    assert attempts["count"] == 4  # tentative initiale + 3 relances
+    assert sleeps == [30, 60, 120]
+    retries = [r for r in caplog.records if "nouvelle tentative" in r.message]
+    assert len(retries) == 3
+
+
+def test_scheduler_retry_recovers_before_exhaustion(monkeypatch):
+    """Un échec transitoire est absorbé par la première relance (30 s)."""
+    import nqcockpit.levels.scheduler as scheduler_mod
+
+    scheduler = scheduler_mod.LevelsScheduler.__new__(scheduler_mod.LevelsScheduler)
+    expected = object()
+    calls = {"count": 0}
+
+    def _flaky():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("transitoire")
+        return expected
+
+    sleeps: list[int] = []
+    monkeypatch.setattr(scheduler, "trigger_snapshot", _flaky)
+    monkeypatch.setattr(scheduler_mod.time, "sleep", sleeps.append)
+
+    assert scheduler.trigger_snapshot_with_retry() is expected
+    assert calls["count"] == 2
+    assert sleeps == [30]
+
+
 def test_none_values_do_not_crash_cockpit_render():
     """Spot/EM/niveaux à None : la page Cockpit s'affiche sans exception."""
     from streamlit.testing.v1 import AppTest

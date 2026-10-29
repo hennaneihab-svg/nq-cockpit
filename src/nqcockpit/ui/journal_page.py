@@ -321,11 +321,13 @@ def render_journal_page() -> None:
         st.info(
             t(
                 "Conformément à la règle R9, l'intégration MetaTrader 5 fonctionne **strictement "
-                "en lecture seule** (aucun passage d'ordre). Les identifiants sont stockés "
-                "exclusivement dans votre fichier local .env (hors Git).",
+                "en lecture seule** (aucun passage d'ordre). Le mot de passe est stocké dans le "
+                "trousseau système (keyring) s'il est installé, sinon en repli dans votre fichier "
+                "local .env (hors Git) avec un avertissement dans les logs.",
                 "In accordance with Rule R9, MetaTrader 5 integration operates in **strictly "
-                "read-only mode** (zero order execution). Credentials are stored "
-                "exclusively in your local .env file (excluded from Git).",
+                "read-only mode** (zero order execution). The password is stored in the OS "
+                "keyring when installed, otherwise as a fallback in your local .env file "
+                "(excluded from Git) with a warning in the logs.",
             )
         )
 
@@ -346,10 +348,8 @@ def render_journal_page() -> None:
                 srv_str = status.server or t("Serveur standard", "Standard server")
                 st.success(
                     t(
-                        f"**[STATUT MT5 · OK]** Connecté au compte "
-                        f"{status.account_login} ({srv_str})",
-                        f"**[MT5 STATUS · OK]** Connected to account "
-                        f"{status.account_login} ({srv_str})",
+                        f"**[STATUT MT5 · OK]** Connecté au terminal MT5 ({srv_str})",
+                        f"**[MT5 STATUS · OK]** Connected to the MT5 terminal ({srv_str})",
                     )
                 )
                 acc = client.get_account_info()
@@ -405,43 +405,55 @@ def render_journal_page() -> None:
 
             with st.expander(
                 t(
-                    "⚙️ Configuration des identifiants MT5 (.env)",
-                    "⚙️ MT5 Credentials Configuration (.env)",
+                    "⚙️ Configuration des identifiants MT5 (keyring / .env)",
+                    "⚙️ MT5 Credentials Configuration (keyring / .env)",
                 ),
                 expanded=not status.is_ok,
             ):
                 st.caption(
                     t(
-                        "Les identifiants sont écrits directement dans le fichier .env "
-                        "sans modifier les autres variables.",
-                        "Credentials are written directly to the .env file "
-                        "without modifying other environment variables.",
+                        "Le mot de passe est écrit dans le trousseau système (keyring) s'il est "
+                        "installé, sinon en repli dans .env sans modifier les autres variables. "
+                        "Le numéro de compte n'est jamais réaffiché.",
+                        "The password is written to the OS keyring when installed, otherwise "
+                        "falls back to .env without modifying other variables. "
+                        "The account number is never displayed again.",
                     )
                 )
                 creds = get_mt5_credentials()
-                login_default = creds.get("login") or ""
                 server_default = creds.get("server") or ""
                 path_default = creds.get("path") or ""
                 tz_default = creds.get("broker_tz") or "UTC"
 
                 cfg_login = st.text_input(
                     t("Numéro de compte (Login)", "Account Number (Login)"),
-                    value=str(login_default) if login_default else "",
+                    value="",
                 )
+                if creds.get("login"):
+                    st.caption(
+                        t(
+                            "Un numéro de compte est déjà configuré (non affiché). "
+                            "Laissez vide pour le conserver.",
+                            "An account number is already configured (hidden). "
+                            "Leave blank to keep it.",
+                        )
+                    )
                 cfg_password = st.text_input(
                     t("Mot de passe (masqué)", "Password (masked)"),
                     type="password",
                     help=t(
-                        "Stocké uniquement dans .env. Jamais loggé ni réaffiché en clair.",
-                        "Stored only in .env. Never logged or displayed in plain text.",
+                        "Stocké dans le keyring s'il est installé, sinon repli .env. "
+                        "Jamais loggé ni réaffiché en clair.",
+                        "Stored in the keyring when installed, otherwise .env fallback. "
+                        "Never logged or displayed in plain text.",
                     ),
                 )
                 if creds.get("has_password"):
                     st.caption(
                         t(
-                            "🔒 Un mot de passe est déjà enregistré dans .env. "
+                            "🔒 Un mot de passe est déjà enregistré. "
                             "Laissez ce champ vide pour le conserver.",
-                            "🔒 A password is already saved in .env. "
+                            "🔒 A password is already saved. "
                             "Leave this field blank to keep it.",
                         )
                     )
@@ -475,7 +487,8 @@ def render_journal_page() -> None:
                     ),
                     type="primary",
                 ):
-                    if not cfg_login or not cfg_server:
+                    existing_login = creds.get("login")
+                    if not cfg_server or (not cfg_login and not existing_login):
                         st.error(
                             t(
                                 "Le numéro de compte et le serveur broker sont obligatoires.",
@@ -484,7 +497,7 @@ def render_journal_page() -> None:
                         )
                     else:
                         saved = save_mt5_credentials(
-                            login=cfg_login,
+                            login=cfg_login or existing_login,
                             password=cfg_password,
                             server=cfg_server,
                             path=cfg_path,
@@ -503,9 +516,9 @@ def render_journal_page() -> None:
                             else:
                                 st.warning(
                                     t(
-                                        f"Identifiants enregistrés dans .env. "
+                                        f"Identifiants enregistrés. "
                                         f"Statut MT5 : {re_status.reason}",
-                                        f"Credentials saved in .env. "
+                                        f"Credentials saved. "
                                         f"MT5 Status: {tr_text(re_status.reason)}",
                                     )
                                 )

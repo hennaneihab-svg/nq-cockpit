@@ -37,6 +37,19 @@ Conçu selon des principes stricts :
    ```
    *Note : L'outil fonctionne immédiatement sans aucune clé payante.*
 
+### MetaTrader 5 — mot de passe hors du fichier .env (optionnel)
+
+Si `keyring` est déjà installé dans l'environnement, le mot de passe MT5 est lu dans le coffre
+système (jamais dans `.env`). Commande unique pour l'enregistrer :
+
+```bash
+python -c "import keyring; keyring.set_password('nqcockpit', 'mt5_password', '<MOT_DE_PASSE_MT5>')"
+```
+
+Sans `keyring` (aucune dépendance ajoutée par le projet), repli explicite sur `MT5_PASSWORD`
+dans `.env` avec un avertissement unique dans `logs/nqcockpit.log`. Le login et le mot de passe
+ne sont jamais affichés dans l'interface ni journalisés.
+
 ---
 
 ## Démarrage Rapide

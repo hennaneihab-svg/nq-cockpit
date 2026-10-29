@@ -12,6 +12,8 @@ Design System extrait de Swetrix (Analytics Dashboard) :
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -27,6 +29,8 @@ from nqcockpit.ui.components import render_page_safely
 from nqcockpit.ui.discipline_page import render_discipline_page
 from nqcockpit.ui.i18n import render_lang_selector, t
 from nqcockpit.ui.journal_page import render_journal_page
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration Initiale Unique
@@ -120,6 +124,44 @@ def _ensure_file_logging() -> bool:
     return True
 
 
+@st.cache_resource(show_spinner=False)
+def _prewarm_cockpit_caches() -> bool:
+    """Préchauffe une seule fois les caches 60 s du cockpit (première ouverture).
+
+    Les chargements indépendants (profil, radar, fil) partent en parallèle : le
+    premier rendu lit ensuite les caches, au lieu de refaire les appels réseau.
+    Une erreur de préchauffage est journalisée et n'empêche pas l'affichage :
+    la page montre son statut DÉGRADÉ habituel.
+    """
+    from nqcockpit.ui.cockpit_page import (
+        load_chart_bars_cached,
+        load_day_profile_cached,
+        load_macro_radar_cached,
+        load_news_wire_cached,
+    )
+
+    db_path = str(Path(load_config().data.db_path))
+    loaders = {
+        "profil de séance": lambda: load_day_profile_cached(db_path),
+        "radar macro": load_macro_radar_cached,
+        "fil d'actualités": lambda: load_news_wire_cached(max_items_per_source=4),
+    }
+    with ThreadPoolExecutor(max_workers=len(loaders)) as pool:
+        futures = {pool.submit(loader): name for name, loader in loaders.items()}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:  # noqa: BLE001 - un cache manquant ne bloque pas l'app
+                log.warning("Préchauffage %s incomplet: %s", futures[future], exc)
+
+    # Après le profil (qui peut insérer des barres) pour lire la séance la plus fraîche.
+    try:
+        load_chart_bars_cached(db_path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Préchauffage graphique incomplet: %s", exc)
+    return True
+
+
 def main() -> None:
     """Point d'entrée principal de l'application multipage NQ Cockpit."""
     _ensure_file_logging()
@@ -128,6 +170,18 @@ def main() -> None:
     config = load_config()
     tz_algiers = ZoneInfo(config.timezones.display)
     tz_ny = ZoneInfo(config.timezones.market)
+
+    # Préchauffage des caches du cockpit (page par défaut) : progression immédiate
+    # au lieu d'un écran figé pendant les appels réseau de la première ouverture.
+    param_page = str(st.query_params.get("page", "")).lower()
+    if param_page in ["", "1", "cockpit"]:
+        with st.spinner(
+            t(
+                "Préchauffage des données de marché (première ouverture)…",
+                "Pre-warming market data (first run)…",
+            )
+        ):
+            _prewarm_cockpit_caches()
 
     now_algiers = datetime.now(tz_algiers)
     now_ny = datetime.now(tz_ny)
@@ -178,7 +232,6 @@ def main() -> None:
     ]
 
     default_idx = 0
-    param_page = str(st.query_params.get("page", "")).lower()
     if param_page in ["1", "cockpit"]:
         default_idx = 0
     elif param_page in ["2", "journal"]:
