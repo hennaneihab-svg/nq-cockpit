@@ -406,6 +406,10 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "CFTC positioning — Leveraged Funds (click for details)",
         "fr": "Positionnement CFTC — Leveraged Funds (cliquez pour les détails)",
     },
+    "ui.expander.scenarios": {
+        "en": "Conditional scenarios",
+        "fr": "Scénarios conditionnels",
+    },
     "ui.expander.health": {
         "en": "Source health — every feed and its status (click for details)",
         "fr": "Santé des sources — chaque flux et son statut (cliquez pour les détails)",
@@ -1089,6 +1093,18 @@ _SUBSTRING_REPLACEMENTS_FR_TO_EN: list[tuple[str, str]] = [
     ("Série de pertes consécutives maîtrisée (max ", "Controlled consecutive loss streak (max "),
     (") — bonne gestion de la perte.", ") — solid loss management."),
     ("Porter le taux de conformité de ", "Increase compliance rate from "),
+    # Derniers mots français résiduels dans le briefing (mode EN uniquement).
+    # Placés en fin de liste pour ne pas casser les motifs plus spécifiques.
+    ("INDISPONIBLE", "Unavailable"),
+    ("Indisponible", "Unavailable"),
+    ("indisponible", "unavailable"),
+    (" dans ", " in "),
+    ("dans ", "in "),
+    ("Prochain ", "Next "),
+    ("prochain ", "next "),
+    ("Prochaine ", "Next "),
+    ("Aucun ", "No "),
+    ("Aucune ", "No "),
 ]
 
 _HEADLINE_EN_TO_FR: list[tuple[str, str]] = [

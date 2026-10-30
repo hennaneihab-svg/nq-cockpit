@@ -287,7 +287,7 @@ div[data-testid="stExpander"] summary {
     display: flex;
     justify-content: space-between;
     gap: var(--space-2);
-    align-items: baseline;
+    align-items: flex-start;
     padding: var(--space-1) 0;
     border-bottom: 1px solid var(--border-subtle);
     font-size: var(--font-body);
@@ -297,15 +297,25 @@ div[data-testid="stExpander"] summary {
     border-bottom: none;
 }
 
+/* Label keeps a real column width: never squeezed to one character per line. */
 .driver-name {
+    flex: 0 1 auto;
+    min-width: 12rem;
     color: var(--text-secondary);
-    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-wrap: normal;
+    white-space: normal;
 }
 
+/* The earnings list wraps normally instead of forcing its own width. */
 .driver-value {
+    flex: 1 1 auto;
+    min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
     text-align: right;
-    white-space: nowrap;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 /* Macro radar: fluid grid, no fixed columns, no hover button look. */
@@ -546,6 +556,44 @@ div[data-testid="stExpander"] summary {
     font-size: var(--font-small);
     color: var(--text-secondary);
     overflow-wrap: anywhere;
+}
+
+/* Source health: one source per line, with breathing room around each row. */
+.health-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.health-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--border-subtle);
+    line-height: 1.5;
+}
+
+.health-row:last-child {
+    border-bottom: none;
+}
+
+.health-row .chip-ok,
+.health-row .chip-degraded,
+.health-row .chip-error {
+    margin-right: 0;
+    margin-bottom: 0;
+}
+
+.health-row .chip-name {
+    font-weight: 700;
+    margin-right: 0;
+}
+
+.health-row .chip-reason {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -1117,11 +1165,14 @@ def render_cot(cot: dict | None) -> None:
 
 
 def render_health(profile: DayProfile) -> None:
-    """Existing per-component health badges, never hidden."""
-    chips = "".join(
-        health_badge_html(health) for health in profile.component_statuses.values()
+    """Existing per-component health badges, one source per line, never hidden."""
+    rows = "".join(
+        f'<div class="health-row">{health_badge_html(health)}</div>'
+        for health in profile.component_statuses.values()
     )
-    st.markdown(chips or badge_html("NO_DATA"), unsafe_allow_html=True)
+    if not rows:
+        rows = f'<div class="health-row">{badge_html("NO_DATA")}</div>'
+    st.markdown(f'<div class="health-list">{rows}</div>', unsafe_allow_html=True)
 
 
 def render_scenarios(profile: DayProfile) -> None:

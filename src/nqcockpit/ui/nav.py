@@ -8,12 +8,33 @@ English and French versions without rendering Streamlit.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 
 import streamlit as st
 
 from nqcockpit.ui.i18n import label
 
 NAV_STATE_KEY = "nav_page"
+
+# Spacing-only styling: the description belongs to the button directly above it
+# (tight gap) while the next button starts after a clearly larger gap.
+NAV_CSS = """
+<style>
+section[data-testid="stSidebar"] div[data-testid="stButton"] {
+    margin-bottom: 0;
+}
+section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.nav-desc) {
+    margin-top: -10px;
+    margin-bottom: 14px;
+}
+section[data-testid="stSidebar"] .nav-desc {
+    margin: 0 2px;
+    color: #94A3B8;
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+</style>
+"""
 
 
 @dataclass(frozen=True)
@@ -105,8 +126,9 @@ def active_page(query_value: str | None) -> str:
 
 def render_sidebar_nav(active_key: str) -> str:
     """Six clearly clickable buttons, each with its description underneath."""
+    st.sidebar.markdown(NAV_CSS, unsafe_allow_html=True)
     st.sidebar.markdown(
-        f'<div class="nav-title">{label("ui.nav.title")}</div>',
+        f'<div class="nav-title">{escape(label("ui.nav.title"))}</div>',
         unsafe_allow_html=True,
     )
     for spec in PAGES:
@@ -118,7 +140,10 @@ def render_sidebar_nav(active_key: str) -> str:
             use_container_width=True,
             type="primary" if is_active else "secondary",
         )
-        st.sidebar.caption(label(spec.desc_key))
+        st.sidebar.markdown(
+            f'<div class="nav-desc">{escape(label(spec.desc_key))}</div>',
+            unsafe_allow_html=True,
+        )
         if clicked and not is_active:
             set_page(spec.key)
             st.rerun()

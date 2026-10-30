@@ -6,6 +6,8 @@ avec intégration des statuts d'intégrité, avertissements DÉGRADÉ et sorties
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import streamlit as st
@@ -13,7 +15,99 @@ from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.briefing.engine import generate_briefing
 from nqcockpit.ui.components import render_degraded_banner, render_status_badge
-from nqcockpit.ui.i18n import t, tr_text
+from nqcockpit.ui.i18n import get_lang, t, tr_text
+
+# GitHub alert directives emitted by the briefing engine: rendered as native
+# Streamlit boxes so the raw "[!WARNING]" token never reaches the browser.
+_ALERT_DIRECTIVE_RE = re.compile(
+    r"^\s*>\s*\[!(WARNING|NOTE|TIP|IMPORTANT|CAUTION)\]\s*$", re.IGNORECASE
+)
+
+# "### Scénarios Conditionnels :" / "### Conditional Scenarios:" followed only
+# by blank lines: the empty body becomes one muted line instead of blank space.
+_SCENARIO_HEADING_RE = re.compile(
+    r"(?m)^(?P<heading>###[ \t]+"
+    r"(?:Scénarios Conditionnels|Conditional Scenarios)"
+    r"[ \t]*:?[ \t]*)\n"
+    r"(?:[ \t]*\n)*"
+    r"(?=(?:#{1,3}[ \t]|---[ \t]*$|\Z))"
+)
+
+_EMPTY_SCENARIO_MESSAGE = {
+    "EN": "_No conditional scenarios for this session._",
+    "FR": "_Aucun scénario conditionnel pour cette séance._",
+}
+
+
+@dataclass(frozen=True)
+class BriefingBlock:
+    """One display block: plain Markdown or a GitHub alert kind."""
+
+    kind: str
+    text: str
+
+
+def ensure_empty_scenario_message(markdown: str, lang: str) -> str:
+    """Replace an empty conditional-scenarios section with one muted line."""
+    message = _EMPTY_SCENARIO_MESSAGE.get(
+        "EN" if str(lang).upper() == "EN" else "FR",
+        _EMPTY_SCENARIO_MESSAGE["EN"],
+    )
+    return _SCENARIO_HEADING_RE.sub(
+        lambda match: f"{match.group('heading')}\n\n{message}\n\n", markdown
+    )
+
+
+def prepare_briefing_markdown(markdown: str) -> str:
+    """Translate at display level, then fill the empty scenarios section."""
+    text = tr_text(markdown)
+    return ensure_empty_scenario_message(text, get_lang())
+
+
+def parse_briefing_blocks(markdown: str) -> list[BriefingBlock]:
+    """Split rendered text into Markdown runs and alert boxes, in order."""
+    blocks: list[BriefingBlock] = []
+    buffer: list[str] = []
+
+    def flush_markdown() -> None:
+        text = "\n".join(buffer).strip("\n")
+        if text.strip():
+            blocks.append(BriefingBlock("markdown", text))
+        buffer.clear()
+
+    lines = markdown.splitlines()
+    index = 0
+    while index < len(lines):
+        match = _ALERT_DIRECTIVE_RE.match(lines[index])
+        if not match:
+            buffer.append(lines[index])
+            index += 1
+            continue
+        flush_markdown()
+        kind = match.group(1).upper()
+        index += 1
+        body: list[str] = []
+        while index < len(lines) and lines[index].lstrip().startswith(">"):
+            body.append(re.sub(r"^\s*>\s?", "", lines[index]).rstrip())
+            index += 1
+        text = "\n".join(body).strip()
+        if text:
+            blocks.append(BriefingBlock(kind, text))
+    flush_markdown()
+    return blocks
+
+
+def render_briefing_markdown(markdown: str) -> None:
+    """Render the briefing with native alert boxes and no raw alert tokens."""
+    for block in parse_briefing_blocks(prepare_briefing_markdown(markdown)):
+        if block.kind == "markdown":
+            st.markdown(block.text)
+        elif block.kind == "WARNING":
+            st.warning(block.text)
+        elif block.kind == "CAUTION":
+            st.error(block.text)
+        else:  # NOTE / TIP / IMPORTANT
+            st.info(block.text)
 
 
 def render_briefing_page(
@@ -119,7 +213,7 @@ def render_briefing_page(
             )
         ):
             content = briefing_files[0].read_text(encoding="utf-8")
-            st.markdown(tr_text(content))
+            render_briefing_markdown(content)
             return
 
     if not briefing:
@@ -157,7 +251,7 @@ def render_briefing_page(
     # ---------------------------------------------------------------------------
     # Affichage du Markdown complet
     # ---------------------------------------------------------------------------
-    st.markdown(tr_text(briefing.markdown_briefing))
+    render_briefing_markdown(briefing.markdown_briefing)
 
     if briefing.output_path:
         st.caption(
