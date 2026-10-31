@@ -34,6 +34,7 @@ from nqcockpit.profile.models import (
     NoTradeFlag,
     NoTradeFlagCode,
 )
+from nqcockpit.ui import tv_widgets
 from nqcockpit.ui.chart import build_session_chart
 from nqcockpit.ui.cockpit_page import TodayData
 from nqcockpit.ui.i18n import LABELS
@@ -366,7 +367,7 @@ def test_terminal_renders_without_data() -> None:
     assert "No upcoming" not in markdown
 
 
-def test_terminal_chart_symbol_picker_has_three_options() -> None:
+def test_terminal_chart_symbol_picker_lists_verified_options() -> None:
     data = _data(_profile())
     app = AppTest.from_function(_terminal_script, args=(data,), default_timeout=60)
     app.run()
@@ -376,8 +377,8 @@ def test_terminal_chart_symbol_picker_has_three_options() -> None:
     labels = [box.label for box in app.selectbox]
     assert "Symbol" in labels
     box = next(box for box in app.selectbox if box.label == "Symbol")
-    assert list(box.options) == ["NASDAQ:NDX", "CAPITALCOM:US100", "CME_MINI:NQ1!"]
-    assert box.value == "NASDAQ:NDX"
+    assert list(box.options) == list(tv_widgets.NQ_SYMBOL_OPTIONS)
+    assert box.value == tv_widgets.DEFAULT_NQ_SYMBOL
     # The widget embeds a real TradingView script URL.
     from nqcockpit.ui import terminal_page
 

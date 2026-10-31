@@ -18,8 +18,28 @@ WIDGET_BACKGROUND = "#0B1220"
 
 _EMBED_BASE_URL = "https://s3.tradingview.com/external-embedding/"
 
-NQ_SYMBOL_OPTIONS = ("NASDAQ:NDX", "CAPITALCOM:US100", "CME_MINI:NQ1!")
-DEFAULT_NQ_SYMBOL = "NASDAQ:NDX"
+NQ_SYMBOL_OPTIONS = (
+    "CAPITALCOM:US100",
+    "FOREXCOM:NSXUSD",
+    "PEPPERSTONE:NAS100",
+    "OANDA:NAS100USD",
+    "CME_MINI:NQ1!",
+    "NASDAQ:QQQ",
+)
+DEFAULT_NQ_SYMBOL = "CAPITALCOM:US100"
+
+# Références macro du bandeau de cotations : symboles candidats du widget
+# gratuit (à confirmer côté navigateur), avec des libellés lisibles.
+QUOTE_SYMBOLS: tuple[dict[str, str], ...] = (
+    {"name": "FOREXCOM:NSXUSD", "displayName": "Nasdaq 100"},
+    {"name": "FOREXCOM:SPXUSD", "displayName": "S&P 500"},
+    {"name": "TVC:VIX", "displayName": "VIX"},
+    {"name": "TVC:DXY", "displayName": "US Dollar Index"},
+    {"name": "TVC:US10Y", "displayName": "US 10Y"},
+    {"name": "TVC:US02Y", "displayName": "US 2Y"},
+    {"name": "AMEX:SPY", "displayName": "SPY"},
+    {"name": "NASDAQ:QQQ", "displayName": "QQQ"},
+)
 
 
 def build_widget_html(script_name: str, config: dict[str, Any], height: int) -> str:
@@ -38,12 +58,12 @@ def build_widget_html(script_name: str, config: dict[str, Any], height: int) -> 
     body = json.dumps(config, ensure_ascii=False)
     return (
         "<style>"
-        f"html,body{{margin:0;padding:0;background:{WIDGET_BACKGROUND};}}"
+        f"html,body{{margin:0;padding:0;height:100%;background:{WIDGET_BACKGROUND};}}"
         "</style>"
         '<div class="tradingview-widget-container" '
         f'style="height:{height}px;width:100%;background:{WIDGET_BACKGROUND};">'
         '<div class="tradingview-widget-container__widget" '
-        'style="height:100%;width:100%;"></div>'
+        f'style="height:{height}px;width:100%;"></div>'
         '<script type="text/javascript" '
         f'src="{_EMBED_BASE_URL}{script_name}" async>'
         f"{body}"
@@ -62,7 +82,7 @@ def render_widget(html: str, height: int) -> None:
         html: Le HTML autonome produit par un helper de ce module.
         height: Hauteur de l'iframe en pixels.
     """
-    st.iframe(html, height=height)
+    st.iframe(html, height=height, width="stretch")
 
 
 def advanced_chart_html(
@@ -85,7 +105,7 @@ def advanced_chart_html(
         Le HTML du widget.
     """
     config: dict[str, Any] = {
-        "autosize": True,
+        "autosize": False,
         "symbol": symbol,
         "interval": interval,
         "timezone": timezone,
@@ -93,6 +113,7 @@ def advanced_chart_html(
         "style": "1",
         "locale": locale,
         "width": "100%",
+        "height": height,
         "allow_symbol_change": True,
         "hide_side_toolbar": False,
         "support_host": "https://www.tradingview.com",
@@ -177,16 +198,23 @@ def technical_analysis_html(
     return build_widget_html("embed-widget-technical-analysis.js", config, height)
 
 
-def market_quotes_html(locale: str = "en", height: int = 420) -> str:
+def market_quotes_html(
+    locale: str = "en",
+    height: int = 420,
+    symbols: list[dict[str, str]] | None = None,
+) -> str:
     """Bandeau de cotations des références macro du cockpit.
 
     Args:
         locale: Langue de l'interface du widget.
         height: Hauteur du conteneur en pixels.
+        symbols: Remplace la liste par défaut (utile pour valider un symbole
+            isolément) ; chaque entrée porte ``name`` et ``displayName``.
 
     Returns:
         Le HTML du widget.
     """
+    group_symbols = list(symbols) if symbols is not None else list(QUOTE_SYMBOLS)
     config: dict[str, Any] = {
         "width": "100%",
         "height": height,
@@ -194,13 +222,7 @@ def market_quotes_html(locale: str = "en", height: int = 420) -> str:
             {
                 "name": "Références",
                 "originalName": "Références",
-                "symbols": [
-                    {"name": "NASDAQ:NDX", "displayName": "NDX"},
-                    {"name": "CME_MINI:ES1!", "displayName": "ES1!"},
-                    {"name": "CBOE:VIX", "displayName": "VIX"},
-                    {"name": "TVC:DXY", "displayName": "DXY"},
-                    {"name": "TVC:US10Y", "displayName": "US10Y"},
-                ],
+                "symbols": group_symbols,
             }
         ],
         "colorTheme": "dark",

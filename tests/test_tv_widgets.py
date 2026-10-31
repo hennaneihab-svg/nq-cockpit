@@ -24,7 +24,8 @@ def _parse(html: str) -> tuple[str, dict[str, Any]]:
 
 def test_default_symbol_is_an_option() -> None:
     assert tv_widgets.DEFAULT_NQ_SYMBOL in tv_widgets.NQ_SYMBOL_OPTIONS
-    assert len(tv_widgets.NQ_SYMBOL_OPTIONS) == 3
+    assert len(tv_widgets.NQ_SYMBOL_OPTIONS) >= 2
+    assert all(":" in symbol for symbol in tv_widgets.NQ_SYMBOL_OPTIONS)
 
 
 def test_advanced_chart_html() -> None:
@@ -38,7 +39,7 @@ def test_advanced_chart_html() -> None:
     src, config = _parse(html)
     assert src.endswith("embed-widget-advanced-chart.js")
     assert src.startswith("https://s3.tradingview.com/external-embedding/")
-    assert config["symbol"] == "NASDAQ:NDX"
+    assert config["symbol"] == tv_widgets.DEFAULT_NQ_SYMBOL
     assert config["theme"] == "dark"
     assert config["interval"] == "5"
     assert config["timezone"] == "America/New_York"
@@ -48,6 +49,8 @@ def test_advanced_chart_html() -> None:
     assert config["hide_side_toolbar"] is False
     assert config["support_host"] == "https://www.tradingview.com"
     assert config["width"] == "100%"
+    assert config["height"] == 500
+    assert config["autosize"] is False
     assert "height:500px" in html
     assert "tradingview-widget-container__widget" in html
     assert tv_widgets.WIDGET_BACKGROUND in html
@@ -112,7 +115,14 @@ def test_market_quotes_html() -> None:
     assert config["locale"] == "fr"
     assert config["width"] == "100%"
     symbols = [item["name"] for group in config["symbolsGroups"] for item in group["symbols"]]
-    assert symbols == ["NASDAQ:NDX", "CME_MINI:ES1!", "CBOE:VIX", "TVC:DXY", "TVC:US10Y"]
+    assert symbols == [item["name"] for item in tv_widgets.QUOTE_SYMBOLS]
+    assert symbols
+    assert all(":" in symbol for symbol in symbols)
+    assert all(
+        item["displayName"].strip()
+        for group in config["symbolsGroups"]
+        for item in group["symbols"]
+    )
     assert "height:380px" in html
 
 
@@ -128,6 +138,8 @@ def test_build_widget_html_generic() -> None:
     assert config["colorTheme"] == "dark"
     assert config["locale"] == "en"
     assert "height:300px" in html
+    assert html.count("height:300px") >= 2
+    assert "height:100%;width:100%" not in html
     assert 'class="tradingview-widget-container__widget"' in html
 
 
@@ -168,6 +180,8 @@ def test_render_widget_uses_supported_streamlit_api() -> None:
 
     source = inspect.getsource(tv_widgets.render_widget)
     assert "st.iframe(" in source
+    assert "height=height" in source
+    assert 'width="stretch"' in source
     assert "components.html" not in source
 
 
