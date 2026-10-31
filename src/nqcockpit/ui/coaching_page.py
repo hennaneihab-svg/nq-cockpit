@@ -117,6 +117,9 @@ COACHING_CSS = """
     margin-bottom: 2px;
 }
 .coach-sub { color: #94A3B8; font-size: 0.8rem; margin-bottom: 12px; }
+.coach-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.coach-title-row .sample-badge { margin: 0; }
+.scroll-box { max-height: 440px; overflow-y: auto; padding-right: 4px; }
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
@@ -286,6 +289,8 @@ def build_equity_curve_figure(
     trades: list[TradeEntry],
     tilt_alerts: list | None = None,
     config: AppConfig | None = None,
+    show_violations: bool = True,
+    show_tilt: bool = True,
 ) -> go.Figure:
     """Courbe d'équité en R cumulé chronologique avec drawdown et marqueurs."""
     fig = go.Figure()
@@ -398,7 +403,7 @@ def build_equity_curve_figure(
         )
 
     # 4. Trades en violation de règle (ambre).
-    if violated_ids:
+    if show_violations and violated_ids:
         vx = [xs[i] for i, p in enumerate(points) if p.trade_id in violated_ids]
         vy = [p.cum_r for p in points if p.trade_id in violated_ids]
         fig.add_trace(
@@ -419,7 +424,7 @@ def build_equity_curve_figure(
         )
 
     # 5. Alertes de tilt (rouge).
-    if tilt_ids:
+    if show_tilt and tilt_ids:
         tx = [xs[i] for i, p in enumerate(points) if p.trade_id in tilt_ids]
         ty = [p.cum_r for p in points if p.trade_id in tilt_ids]
         fig.add_trace(
@@ -753,6 +758,7 @@ def _render_streak_tilt(trades: list[TradeEntry], config: AppConfig) -> None:
         if not tilt_alerts:
             st.info(t("Aucune alerte de tilt détectée.", "No tilt alert detected."))
         else:
+            items: list[str] = []
             for alert in tilt_alerts:
                 involved = [tr for tr in ordered if tr.trade_id in set(alert.trades_involved)]
                 last = involved[-1] if involved else None
@@ -769,14 +775,17 @@ def _render_streak_tilt(trades: list[TradeEntry], config: AppConfig) -> None:
                                 f"({tr.session_date})"
                             )
                         followup_html = " · ".join(pieces)
-                st.markdown(
+                items.append(
                     f"<div class='insight'>"
                     f"<b>{alert.session_date}</b> — {tr_text(alert.pattern_type)}<br>"
                     f"<span style='color:{MUTED}'>{tr_text(alert.reason)}</span><br>"
                     f"{t('Trade(s) suivant(s)', 'Following trade(s)')} : {followup_html}"
-                    "</div>",
-                    unsafe_allow_html=True,
+                    "</div>"
                 )
+            st.markdown(
+                "<div class='scroll-box'>" + "".join(items) + "</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _confidence_html(confidence: str) -> str:
@@ -891,14 +900,6 @@ def render_coaching_app() -> None:
     conn = get_ui_db(db_path_str)
     all_trades = load_trades(conn)
 
-    st.markdown(
-        '<div class="coach-title">COACHING // '
-        f'{t("ANALYSE DE PERFORMANCE", "PERFORMANCE ANALYTICS")}</div>'
-        f'<div class="coach-sub">{t("Base", "Database")} : {Path(db_path_str).name} · '
-        f"{len(all_trades)} {t('trades', 'trades')}</div>",
-        unsafe_allow_html=True,
-    )
-
     # -----------------------------------------------------------------------
     # Filtres en haut : chaque panneau se met à jour ensemble
     # -----------------------------------------------------------------------
@@ -948,6 +949,17 @@ def render_coaching_app() -> None:
     total_r = sum(tr.r_realized for tr in filtered)
     current_streak = current_loss_streak(filtered)
 
+    # --- En-tête : titre + badge de taille d'échantillon ---
+    title_text = t("ANALYSE DE PERFORMANCE", "PERFORMANCE ANALYTICS")
+    header_html = (
+        '<div class="coach-title-row">'
+        f'<span class="coach-title">COACHING // {title_text}</span>'
+        f"{_sample_badge(len(filtered), min_required)}"
+        "</div>"
+        f'<div class="coach-sub">{t("Base", "Database")} : {Path(db_path_str).name}</div>'
+    )
+    st.markdown(header_html, unsafe_allow_html=True)
+
     st.markdown("---")
     if not filtered:
         st.info(
@@ -958,8 +970,6 @@ def render_coaching_app() -> None:
                 "as soon as trades are recorded.",
             )
         )
-
-    st.markdown(_sample_badge(len(filtered), min_required), unsafe_allow_html=True)
 
     # --- KPI ---
     expectancy = stats.expectancy_r if stats.expectancy_r is not None else stats.raw_mean_r
@@ -1041,8 +1051,27 @@ def render_coaching_app() -> None:
         "Équité en R (unités de risque)",
         "Equity in R (risk units)",
     )
+    eq1, eq2 = st.columns([1, 1])
+    with eq1:
+        show_violations = st.toggle(
+            t("Marqueurs de violation", "Rule-violation markers"),
+            value=True,
+            key="coaching_show_violations",
+        )
+    with eq2:
+        show_tilt = st.toggle(
+            t("Marqueurs de tilt", "Tilt markers"),
+            value=True,
+            key="coaching_show_tilt",
+        )
     st.plotly_chart(
-        build_equity_curve_figure(filtered, tilt_alerts, config),
+        build_equity_curve_figure(
+            filtered,
+            tilt_alerts,
+            config,
+            show_violations=show_violations,
+            show_tilt=show_tilt,
+        ),
         use_container_width=True,
     )
 
@@ -1054,15 +1083,16 @@ def render_coaching_app() -> None:
         "Cells below the sample threshold are muted.",
     )
     cells = aggregate_heatmap(filtered)
+    qualified_cells = {k: c for k, c in cells.items() if c.n >= HEATMAP_MIN_CELL_SAMPLES}
     hcol1, hcol2 = st.columns([3, 1])
     with hcol1:
         st.plotly_chart(build_heatmap_figure(filtered), use_container_width=True)
     with hcol2:
-        if cells:
-            best_key = max(cells, key=lambda k: cells[k].expectancy_r)
-            worst_key = min(cells, key=lambda k: cells[k].expectancy_r)
-            best = cells[best_key]
-            worst = cells[worst_key]
+        if qualified_cells:
+            best_key = max(qualified_cells, key=lambda k: qualified_cells[k].expectancy_r)
+            worst_key = min(qualified_cells, key=lambda k: qualified_cells[k].expectancy_r)
+            best = qualified_cells[best_key]
+            worst = qualified_cells[worst_key]
             st.markdown(
                 "<div class='insight'>"
                 f"<div class='kpi-label'>{t('Meilleure heure', 'Best hour')}</div>"
@@ -1084,14 +1114,27 @@ def render_coaching_app() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.info(t("Aucune donnée horaire.", "No hourly data."))
+            not_enough = t(
+                "Pas assez de données pour une heure fiable.",
+                "Not enough data for a reliable hour.",
+            )
+            st.markdown(
+                f"<span style='color:{MUTED}'>{not_enough}</span>",
+                unsafe_allow_html=True,
+            )
 
     # --- 4. Table des setups + barres par régime ---
     _section("SETUP & RÉGIME // PERFORMANCE PAR SEGMENT", "SETUP & REGIME // SEGMENT PERFORMANCE")
     _render_setup_table(filtered)
 
-    r1, r2, r3 = st.columns(3)
-    with r1:
+    tab_gamma, tab_vol, tab_event = st.tabs(
+        [
+            t("Régime gamma", "Gamma regime"),
+            t("Régime de volatilité", "Volatility regime"),
+            t("Risque événementiel", "Event risk"),
+        ]
+    )
+    with tab_gamma:
         st.plotly_chart(
             build_segmentation_figure(
                 segment_performance(filtered, by="gamma_regime", min_samples=MIN_SEGMENT_SAMPLES),
@@ -1100,7 +1143,7 @@ def render_coaching_app() -> None:
             ),
             use_container_width=True,
         )
-    with r2:
+    with tab_vol:
         st.plotly_chart(
             build_segmentation_figure(
                 segment_performance(filtered, by="vol_regime", min_samples=MIN_SEGMENT_SAMPLES),
@@ -1109,7 +1152,7 @@ def render_coaching_app() -> None:
             ),
             use_container_width=True,
         )
-    with r3:
+    with tab_event:
         st.plotly_chart(
             build_segmentation_figure(
                 segment_performance(filtered, by="event_risk", min_samples=MIN_SEGMENT_SAMPLES),

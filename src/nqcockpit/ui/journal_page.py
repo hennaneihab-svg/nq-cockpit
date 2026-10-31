@@ -750,6 +750,13 @@ def render_journal_page() -> None:
                             f"{mt5_summary.total_positions} closed position(s).",
                         )
                     )
+                elif mt5_summary.duplicates > 0:
+                    st.info(
+                        t(
+                            f"Rien de nouveau : {mt5_summary.duplicates} trades déjà importés.",
+                            f"Nothing new: {mt5_summary.duplicates} trades already imported.",
+                        )
+                    )
                 else:
                     st.info(
                         t(

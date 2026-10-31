@@ -430,14 +430,17 @@ def _hour_insight(
     cells: dict[tuple[int, int], HeatmapCell],
     want_best: bool,
 ) -> Insight | None:
-    if not cells:
+    qualified = {
+        key: cell for key, cell in cells.items() if cell.n >= HEATMAP_MIN_CELL_SAMPLES
+    }
+    if not qualified:
         return None
     key = (
-        max(cells, key=lambda k: cells[k].expectancy_r)
+        max(qualified, key=lambda k: qualified[k].expectancy_r)
         if want_best
-        else min(cells, key=lambda k: cells[k].expectancy_r)
+        else min(qualified, key=lambda k: qualified[k].expectancy_r)
     )
-    cell = cells[key]
+    cell = qualified[key]
     return Insight(
         kind="best_hour" if want_best else "worst_hour",
         value=round(cell.expectancy_r, 3),

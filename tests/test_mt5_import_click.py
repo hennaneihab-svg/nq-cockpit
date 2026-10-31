@@ -92,6 +92,17 @@ def test_import_click_none_found(monkeypatch) -> None:
     assert any("0 raw deal" in m for m in infos), infos
 
 
+def test_import_click_nothing_new(monkeypatch) -> None:
+    """Tous les trades déjà importés -> message « Nothing new » (pas « No closed trades »)."""
+    summary = MT5ImportSummary(total_deals=3, total_positions=3, imported=0, duplicates=3)
+    app = _click_import(_render_import_page(monkeypatch, summary))
+
+    infos = _messages(app, "info")
+    assert infos, f"expected an info message, got {infos}"
+    assert any("Nothing new" in m and "3" in m and "already imported" in m for m in infos), infos
+    assert not any("No closed trades" in m for m in infos), infos
+
+
 def test_import_click_error(monkeypatch) -> None:
     app = _click_import(_render_import_page(monkeypatch, RuntimeError("boom failure")))
 

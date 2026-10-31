@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import pytest
 
 from nqcockpit.coaching.analytics import (
+    HEATMAP_MIN_CELL_SAMPLES,
     MIN_SEGMENT_SAMPLES,
     NY_HOURS,
     aggregate_heatmap,
@@ -263,6 +264,23 @@ def test_insights_confidence_high_at_sixty():
     insights = compute_insights(trades, config=None)
     best = next(i for i in insights if i.kind == "best_setup")
     assert best.confidence == "high"
+
+
+def test_hour_insight_requires_min_cell_samples():
+    """best_hour ne remonte que les cellules avec n >= HEATMAP_MIN_CELL_SAMPLES."""
+    monday_10 = datetime(2026, 9, 7, 10, 0)  # Monday
+
+    # Une seule cellule (lundi 10h) avec 6 trades -> qualifiée.
+    qualifying = [_trade(f"q{i}", 1.0, entry_time_ny=monday_10) for i in range(6)]
+    insights_q = compute_insights(qualifying, config=None)
+    best_hours = [i for i in insights_q if i.kind == "best_hour"]
+    assert best_hours, "expected a best_hour insight when a cell has >= 5 trades"
+    assert best_hours[0].n >= HEATMAP_MIN_CELL_SAMPLES
+
+    # 4 trades dans la même cellule -> sous le seuil -> pas de best_hour.
+    below = [_trade(f"b{i}", 1.0, entry_time_ny=monday_10) for i in range(4)]
+    insights_b = compute_insights(below, config=None)
+    assert not any(i.kind == "best_hour" for i in insights_b)
 
 
 @pytest.mark.parametrize("n", [0, 1, 3])
