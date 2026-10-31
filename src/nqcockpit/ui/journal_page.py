@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -159,6 +159,16 @@ def _get_config():
     return load_config()
 
 
+def default_period_label(today: date) -> str:
+    """Libellé par défaut du rapport de période, calculé depuis la date du jour.
+
+    Format hebdomadaire ISO : ``W44-2026`` (EN) / ``S44-2026`` (FR). Le libellé
+    n'est jamais figé sur une semaine passée.
+    """
+    iso_year, iso_week, _ = today.isocalendar()
+    return t(f"S{iso_week}-{iso_year}", f"W{iso_week}-{iso_year}")
+
+
 def render_journal_page() -> None:
     """Rendu complet du Journal de bord."""
     try:
@@ -219,7 +229,7 @@ def render_journal_page() -> None:
         t("Import MT5 & CSV", "MT5 & CSV Import"),
         t("Journal du jour", "Daily Journal"),
         t("Performance globale", "Global Performance"),
-        t("Coaching", "Coaching"),
+        t("Rapport de période", "Period Report"),
     ]
     page_idx = st.radio(
         t("Section Journal", "Journal Section"),
@@ -691,35 +701,66 @@ def render_journal_page() -> None:
                 t("Importer depuis MT5", "Import from MT5"),
                 disabled=not status.is_ok,
             ):
-                with st.spinner(
-                    t(
-                        "Récupération des deals et consolidation en cours...",
-                        "Fetching deals and consolidating positions...",
-                    )
-                ):
-                    import_res = client.import_trades_to_journal(
-                        conn=conn,
-                        date_from=d_from,
-                        symbol=symbol_filter if symbol_filter.strip() else None,
-                        config=config,
-                    )
-                if import_res.is_success:
-                    st.success(
+                try:
+                    with st.spinner(
                         t(
-                            f"**Succès !** {import_res.imported} trade(s) importé(s), "
-                            f"{import_res.duplicates} doublon(s) ignoré(s) sur "
-                            f"{import_res.total_positions} position(s) fermée(s).",
-                            f"**Success!** {import_res.imported} trade(s) imported, "
-                            f"{import_res.duplicates} duplicate(s) skipped out of "
-                            f"{import_res.total_positions} closed position(s).",
+                            "Récupération des deals et consolidation en cours...",
+                            "Fetching deals and consolidating positions...",
                         )
+                    ):
+                        import_res = client.import_trades_to_journal(
+                            conn=conn,
+                            date_from=d_from,
+                            symbol=symbol_filter if symbol_filter.strip() else None,
+                            config=config,
+                        )
+                    st.session_state["mt5_import_summary"] = import_res
+                    st.session_state["mt5_import_error"] = None
+                except Exception as exc:  # noqa: BLE001 - l'erreur exacte remonte à l'UI
+                    st.session_state["mt5_import_summary"] = None
+                    st.session_state["mt5_import_error"] = str(exc)
+                st.rerun()
+
+            # Retour utilisateur qui survit au st.rerun() (rendu au run suivant).
+            mt5_err = st.session_state.pop("mt5_import_error", None)
+            mt5_summary = st.session_state.pop("mt5_import_summary", None)
+            if mt5_err is not None:
+                st.error(
+                    t(
+                        f"Erreur d'import MT5 : {mt5_err}",
+                        f"MT5 import error: {mt5_err}",
                     )
-                    st.rerun()
-                else:
+                )
+            elif mt5_summary is not None:
+                if mt5_summary.errors:
                     st.error(
                         t(
-                            f"Erreur d'import : {', '.join(import_res.errors)}",
-                            f"Import error: {', '.join(import_res.errors)}",
+                            f"Erreur d'import : {', '.join(mt5_summary.errors)}",
+                            f"Import error: {', '.join(mt5_summary.errors)}",
+                        )
+                    )
+                elif mt5_summary.imported > 0:
+                    st.success(
+                        t(
+                            f"**Succès !** {mt5_summary.imported} trade(s) importé(s), "
+                            f"{mt5_summary.duplicates} doublon(s) ignoré(s) sur "
+                            f"{mt5_summary.total_positions} position(s) fermée(s).",
+                            f"**Success!** {mt5_summary.imported} trade(s) imported, "
+                            f"{mt5_summary.duplicates} duplicate(s) skipped out of "
+                            f"{mt5_summary.total_positions} closed position(s).",
+                        )
+                    )
+                else:
+                    st.info(
+                        t(
+                            f"Aucun trade fermé trouvé sur la période sélectionnée "
+                            f"(le terminal a renvoyé {mt5_summary.total_deals} deal(s) "
+                            f"brut(s) ; {mt5_summary.duplicates} doublon(s), "
+                            f"{mt5_summary.ignored_out_of_scope} hors NQ).",
+                            f"No closed trades found in the selected period "
+                            f"(the terminal returned {mt5_summary.total_deals} raw "
+                            f"deal(s); {mt5_summary.duplicates} duplicate(s), "
+                            f"{mt5_summary.ignored_out_of_scope} out of scope).",
                         )
                     )
 
@@ -1091,13 +1132,13 @@ def render_journal_page() -> None:
             st.dataframe(seg_rows, use_container_width=True)
 
     # ---------------------------------------------------------------------------
-    # Page 5 — Coaching
+    # Page 5 — Rapport de période
     # ---------------------------------------------------------------------------
 
     elif page_idx == 4:
         hdr_coach = t(
-            "RAPPORT DE COACHING ET ANALYTICS",
-            "COACHING REPORT & ANALYTICS",
+            "RAPPORT DE PÉRIODE",
+            "PERIOD REPORT",
         )
         st.markdown(
             f'<div class="section-header">{hdr_coach}</div>',
@@ -1118,7 +1159,7 @@ def render_journal_page() -> None:
                     "Label (ex. S39-2026, Oct-2026)",
                     "Label (e.g. W39-2026, Oct-2026)",
                 ),
-                value="S39-2026",
+                value=default_period_label(datetime.now(tz_market).date()),
             )
             gen_btn = st.button(
                 t("Générer le rapport", "Generate Report"), type="primary"

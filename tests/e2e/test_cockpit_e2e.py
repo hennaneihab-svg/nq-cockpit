@@ -314,7 +314,7 @@ def run_e2e_suite():
                 ("Import MT5 & CSV", "02b_journal_import.png"),
                 ("Journal du jour", "02c_journal_jour.png"),
                 ("Performance globale", "02d_journal_performance.png"),
-                ("Coaching", "02e_journal_coaching.png"),
+                ("Rapport de période", "02e_journal_coaching.png"),
             ]
 
             for tab_name, ss_file in journal_subtabs:
@@ -452,7 +452,7 @@ def run_e2e_suite():
                         ]
                     )
 
-                elif tab_name == "Coaching":
+                elif tab_name == "Rapport de période":
                     gen_report_btn = page.locator('button:has-text("Générer le rapport")')
                     if gen_report_btn.count() > 0:
                         gen_report_btn.first.click()

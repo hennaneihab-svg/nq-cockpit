@@ -19,6 +19,7 @@ from streamlit.testing.v1 import AppTest
 from nqcockpit.ui import sections, terminal_page
 from nqcockpit.ui.i18n import set_lang
 from nqcockpit.ui.journal_page import (
+    default_period_label,
     direction_label,
     gamma_regime_label,
     journal_segment_label,
@@ -252,3 +253,15 @@ def test_coaching_page_option_labels_follow_the_language() -> None:
     french_options = {option.strip().lower() for _, option in _widget_options(french)}
     assert "toutes les données" in french_options
     assert "all data" not in french_options
+
+
+def test_default_period_label_is_computed_from_today() -> None:
+    """Le libellé par défaut du rapport suit la semaine ISO du jour (plus de S39 figé)."""
+    from datetime import date
+
+    iso_year, iso_week, _ = date(2026, 10, 31).isocalendar()
+    assert iso_week == 44
+
+    label = default_period_label(date(2026, 10, 31))
+    assert label in (f"W{iso_week}-{iso_year}", f"S{iso_week}-{iso_year}")
+    assert "39" not in label  # la semaine 39 est révolue et ne doit plus apparaître

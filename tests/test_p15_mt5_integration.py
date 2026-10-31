@@ -1025,3 +1025,150 @@ def test_mt5_status_checked_at_field():
     assert isinstance(s.checked_at, datetime)
     assert s.checked_at.tzinfo is not None
 
+
+# ---------------------------------------------------------------------------
+# 11. Bug « Import from MT5 ne fait rien » : symboles broker du Nasdaq-100
+# ---------------------------------------------------------------------------
+
+
+def _deal(
+    ticket: int,
+    position_id: int,
+    symbol: str,
+    type_: int,
+    entry: int,
+    price: float,
+    profit: float = 0.0,
+) -> MagicMock:
+    """Construit un deal MT5 mocké (round-trip) avec les champs utilisés."""
+    d = MagicMock()
+    d._asdict.return_value = {
+        "ticket": ticket,
+        "position_id": position_id,
+        "symbol": symbol,
+        "type": type_,
+        "entry": entry,
+        "volume": 1.0,
+        "price": price,
+        "profit": profit,
+        "commission": 0.0,
+        "swap": 0.0,
+        "fee": 0.0,
+        "time": 1727712000,
+        "time_msc": 1727712000000,
+        "reason": 4,
+    }
+    return d
+
+
+def test_import_us100cash_is_normalized_to_nq(mock_mt5, mem_conn, config):
+    """US100Cash est le vrai symbole Nasdaq-100 du broker : il doit être importé.
+
+    Régressions : l'ancien filtre ``startswith(("NQ", "MNQ"))`` rejetait
+    « US100Cash » comme « hors NQ », donc l'import ne faisait rien.
+    """
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1001, 9001, "US100Cash", 0, 0, 30000.0)
+    d_out = _deal(1002, 9001, "US100Cash", 1, 1, 30050.0, profit=100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+    mock_mt5.history_orders_get.return_value = ()
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+
+    assert summary.is_success is True
+    assert summary.imported == 1
+    assert summary.total_deals == 2
+    assert summary.ignored_out_of_scope == 0
+
+    trades = load_trades(mem_conn)
+    assert len(trades) == 1
+    assert trades[0].trade_id == "mt5_9001"
+    assert trades[0].instrument == "NQ"
+
+
+def test_import_us100_futures_is_normalized_to_nq(mock_mt5, mem_conn, config):
+    """US100-DEC26 (future) est aussi un symbole Nasdaq-100 à importer en NQ."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(2001, 9002, "US100-DEC26", 0, 0, 30200.0)
+    d_out = _deal(2002, 9002, "US100-DEC26", 1, 1, 30100.0, profit=-100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+    mock_mt5.history_orders_get.return_value = ()
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+
+    assert summary.imported == 1
+    assert summary.total_deals == 2
+    trades = load_trades(mem_conn)
+    assert trades[0].instrument == "NQ"
+
+
+def test_import_none_found_reports_zero_raw_deals(mock_mt5, mem_conn, config):
+    """Aucun deal renvoyé par le terminal : total_deals doit être à 0 (et pas muet)."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+    mock_mt5.history_deals_get.return_value = None
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+
+    assert summary.imported == 0
+    assert summary.total_deals == 0
+    assert summary.total_positions == 0
+    assert summary.errors == []
+    assert load_trades(mem_conn) == []
+
+
+def test_import_counts_raw_deals_including_balance_ops(mock_mt5, mem_conn, config):
+    """total_deals reflète le nombre brut renvoyé par history_deals_get."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 7001, "NQ", 0, 0, 30000.0)
+    d_out = _deal(2, 7001, "NQ", 1, 1, 30050.0, profit=100.0)
+    d_balance = _deal(3, 0, "", 2, 0, 0.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out, d_balance)
+    mock_mt5.history_orders_get.return_value = ()
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+
+    # 3 deals bruts renvoyés, 1 position fermée importée.
+    assert summary.total_deals == 3
+    assert summary.total_positions == 1
+    assert summary.imported == 1
+
+
+def test_get_closed_trades_symbol_filter_normalizes(mock_mt5):
+    """Le filtre « NQ » doit retrouver US100Cash (et pas seulement « NQ »)."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    us_in = _deal(1, 100, "US100Cash", 0, 0, 30000.0)
+    us_out = _deal(2, 100, "US100Cash", 1, 1, 30050.0)
+    gold_in = _deal(3, 200, "GOLD", 0, 0, 2000.0)
+    gold_out = _deal(4, 200, "GOLD", 1, 1, 2010.0)
+    mock_mt5.history_deals_get.return_value = (us_in, us_out, gold_in, gold_out)
+    mock_mt5.history_orders_get.return_value = ()
+
+    client = MT5Client()
+    trades = client.get_closed_trades(symbol="NQ")
+
+    assert [t.symbol for t in trades] == ["US100Cash"]
+
+

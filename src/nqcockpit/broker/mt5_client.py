@@ -178,6 +178,9 @@ class MT5Client:
         self.path: str = path if path is not None else (raw_env.get("path") or "")
         self.broker_tz_name: str = broker_tz or raw_env.get("broker_tz") or "UTC"
         self._is_connected: bool = False
+        # Nombre de deals bruts renvoyés par le dernier history_deals_get
+        # (utile pour le diagnostic "aucun trade trouvé" côté UI).
+        self._last_raw_deals: int = 0
 
     def __enter__(self) -> MT5Client:
         self.connect()
@@ -464,12 +467,20 @@ class MT5Client:
         if not HAS_MT5_PACKAGE or mt5 is None:
             return []
 
+        self._last_raw_deals = 0
+
         # Construction des arguments d'historique
         _from = date_from if date_from is not None else datetime(2000, 1, 1, tzinfo=timezone.utc)
         _to = date_to if date_to is not None else datetime.now(timezone.utc)
         raw_deals = mt5.history_deals_get(_from, _to)
+        self._last_raw_deals = len(raw_deals) if raw_deals is not None else 0
         if raw_deals is None or len(raw_deals) == 0:
             return []
+
+        # Filtre symbole : on compare les symboles NORMALISÉS afin que le filtre
+        # « NQ » retrouve les symboles broker réels du Nasdaq-100
+        # (US100Cash, US100-DEC26, NAS100...) et pas seulement « NQ »/« MNQ ».
+        norm_filter = self._normalize_symbol(symbol) if symbol else None
 
         # Grouper les deals par position_id
         deals_by_pos: dict[int, list[dict[str, Any]]] = {}
@@ -479,7 +490,7 @@ class MT5Client:
             # Filtrer les opérations d'équilibrage / compte sans symbole
             if not sym or deal_dict.get("type", 0) not in (0, 1):
                 continue
-            if symbol and sym.upper() != symbol.upper():
+            if norm_filter and self._normalize_symbol(sym) != norm_filter:
                 continue
 
             pos_id = int(deal_dict.get("position_id", 0))
@@ -647,6 +658,7 @@ class MT5Client:
         closed_trades = self.get_closed_trades(
             date_from=date_from, date_to=date_to, symbol=symbol
         )
+        summary.total_deals = self._last_raw_deals
         summary.total_positions = len(closed_trades)
 
         if not closed_trades:
@@ -680,14 +692,18 @@ class MT5Client:
         windows_cfg = getattr(config, "trading_windows_algiers", None) if config else None
 
         for tr in closed_trades:
-            if not tr.symbol.upper().startswith(("NQ", "MNQ")):
+            # Le Nasdaq-100 est négocié sous plusieurs symboles selon le broker
+            # (NQ, MNQ, NAS100, US100Cash, US100-DEC26, USTEC...). On normalise
+            # AVANT de décider du périmètre : sans cela, les vrais trades
+            # « US100Cash »/« US100-DEC26 » sont rejetés comme « hors NQ ».
+            norm_symbol = self._normalize_symbol(tr.symbol)
+            if norm_symbol not in ("NQ", "MNQ"):
                 summary.ignored_out_of_scope += 1
                 summary.warnings.append(
                     f"Position #{tr.position_id} ({tr.symbol}) ignorée (hors NQ)"
                 )
                 continue
             trade_id = f"mt5_{tr.position_id}"
-            norm_symbol = self._normalize_symbol(tr.symbol)
             session_date = tr.entry_time_ny.strftime("%Y-%m-%d")
 
             # Détection des doublons

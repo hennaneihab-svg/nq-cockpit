@@ -73,3 +73,24 @@ def test_market_map_gauge_uses_verified_ndx_symbol() -> None:
     source = Path(market_map_page.__file__).read_text(encoding="utf-8")
     assert "TECHNICAL_ANALYSIS_SYMBOL" in source
     assert "SYMBOL_STATE_KEY" not in source
+
+
+def test_market_map_quotes_full_width_and_taller() -> None:
+    """Le bandeau de cotations occupe sa propre ligne pleine largeur.
+
+    Rangée 1 : calendrier + jauge (2 colonnes). Rangée 2 : cotations seules,
+    assez hautes pour afficher les 8 lignes sans défilement interne.
+    """
+    from pathlib import Path
+
+    from nqcockpit.ui import market_map_page
+
+    assert 420 <= market_map_page.QUOTES_PANEL_HEIGHT <= 460
+
+    source = Path(market_map_page.__file__).read_text(encoding="utf-8")
+    # Plus aucune disposition à 3 colonnes : calendrier et jauge à deux.
+    assert "st.columns(2" in source
+    assert "st.columns(3" not in source
+    # Le widget de cotations utilise sa hauteur dédiée (pleine largeur).
+    assert "QUOTES_PANEL_HEIGHT" in source
+    assert "quotes_col" not in source
