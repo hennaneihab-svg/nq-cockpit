@@ -23,8 +23,16 @@ def _parse(html: str) -> tuple[str, dict[str, Any]]:
 
 
 def test_default_symbol_is_an_option() -> None:
+    assert tv_widgets.DEFAULT_NQ_SYMBOL == "CAPITALCOM:US100"
+    assert list(tv_widgets.NQ_SYMBOL_OPTIONS) == [
+        "CAPITALCOM:US100",
+        "FOREXCOM:NSXUSD",
+        "PEPPERSTONE:NAS100",
+        "OANDA:NAS100USD",
+        "NASDAQ:QQQ",
+    ]
+    assert "CME_MINI:NQ1!" not in tv_widgets.NQ_SYMBOL_OPTIONS
     assert tv_widgets.DEFAULT_NQ_SYMBOL in tv_widgets.NQ_SYMBOL_OPTIONS
-    assert len(tv_widgets.NQ_SYMBOL_OPTIONS) >= 2
     assert all(":" in symbol for symbol in tv_widgets.NQ_SYMBOL_OPTIONS)
 
 
@@ -94,10 +102,10 @@ def test_economic_calendar_html() -> None:
 
 
 def test_technical_analysis_html() -> None:
-    html = tv_widgets.technical_analysis_html("CME_MINI:NQ1!", locale="fr", height=400)
+    html = tv_widgets.technical_analysis_html("NASDAQ:NDX", locale="fr", height=400)
     src, config = _parse(html)
     assert src.endswith("embed-widget-technical-analysis.js")
-    assert config["symbol"] == "CME_MINI:NQ1!"
+    assert config["symbol"] == "NASDAQ:NDX"
     assert config["colorTheme"] == "dark"
     assert config["interval"] == "15m"
     assert config["locale"] == "fr"
@@ -105,6 +113,10 @@ def test_technical_analysis_html() -> None:
     assert config["isTransparent"] is True
     assert config["width"] == "100%"
     assert "height:400px" in html
+
+
+def test_technical_analysis_symbol_is_verified() -> None:
+    assert tv_widgets.TECHNICAL_ANALYSIS_SYMBOL == "NASDAQ:NDX"
 
 
 def test_market_quotes_html() -> None:
@@ -124,6 +136,27 @@ def test_market_quotes_html() -> None:
         for item in group["symbols"]
     )
     assert "height:380px" in html
+
+
+def test_market_quotes_symbols_are_verified_dicts() -> None:
+    expected = (
+        ("FOREXCOM:NSXUSD", "Nasdaq 100"),
+        ("FOREXCOM:SPXUSD", "S&P 500"),
+        ("CAPITALCOM:VIX", "VIX"),
+        ("CAPITALCOM:DXY", "US Dollar Index"),
+        ("FRED:DGS10", "US 10Y Yield (daily)"),
+        ("FRED:DGS2", "US 2Y Yield (daily)"),
+        ("AMEX:SPY", "SPY"),
+        ("NASDAQ:QQQ", "QQQ"),
+    )
+    assert [item["name"] for item in tv_widgets.QUOTE_SYMBOLS] == [
+        name for name, _ in expected
+    ]
+    assert [item["displayName"] for item in tv_widgets.QUOTE_SYMBOLS] == [
+        display for _, display in expected
+    ]
+    assert all(isinstance(item, dict) for item in tv_widgets.QUOTE_SYMBOLS)
+    assert all(set(item) == {"name", "displayName"} for item in tv_widgets.QUOTE_SYMBOLS)
 
 
 def test_build_widget_html_generic() -> None:
@@ -154,7 +187,7 @@ def test_every_widget_returns_parsable_html() -> None:
         tv_widgets.advanced_chart_html(tv_widgets.DEFAULT_NQ_SYMBOL),
         tv_widgets.stock_heatmap_html(),
         tv_widgets.economic_calendar_html(),
-        tv_widgets.technical_analysis_html(tv_widgets.DEFAULT_NQ_SYMBOL),
+        tv_widgets.technical_analysis_html(tv_widgets.TECHNICAL_ANALYSIS_SYMBOL),
         tv_widgets.market_quotes_html(),
     ]
     for html in widgets:

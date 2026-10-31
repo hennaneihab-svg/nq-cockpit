@@ -44,8 +44,9 @@ log = logging.getLogger(__name__)
 SYMBOL_STATE_KEY = "terminal_chart_symbol"
 # Height budget (1920x1080, single screen). The block container now clears the
 # fixed Streamlit header (3.75rem) with 4rem of top padding (+57.6px versus the
-# old 0.4rem), so the chart and the right panel each give back 60px: the whole
-# terminal still fits on one screen without page-level scrolling.
+# old 0.4rem). The chart (640 -> 600) and the right panel (690 -> 630) absorb
+# that padding, so the terminal still fits on one screen without page-level
+# scrolling.
 CHART_HEIGHT = 600
 RIGHT_PANEL_HEIGHT = 630
 

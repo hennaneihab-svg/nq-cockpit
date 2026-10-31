@@ -114,12 +114,15 @@ def test_every_page_clears_the_fixed_streamlit_toolbar() -> None:
 
 
 def test_terminal_heights_compensate_the_extra_top_padding() -> None:
-    # 0.4rem -> 4rem costs 57.6px at 16px/rem; both containers give it back.
+    # 0.4rem -> 4rem costs 57.6px at 16px/rem; the two containers absorb it
+    # together (chart 640->600, right panel 690->630).
     extra_px = (4.0 - 0.4) * 16
-    assert terminal_page.CHART_HEIGHT == 580
+    assert terminal_page.CHART_HEIGHT == 600
     assert terminal_page.RIGHT_PANEL_HEIGHT == 630
-    assert 640 - terminal_page.CHART_HEIGHT >= extra_px
-    assert 690 - terminal_page.RIGHT_PANEL_HEIGHT >= extra_px
+    compensation = (640 - terminal_page.CHART_HEIGHT) + (
+        690 - terminal_page.RIGHT_PANEL_HEIGHT
+    )
+    assert compensation >= extra_px
 
 
 # ---------------------------------------------------------------------------

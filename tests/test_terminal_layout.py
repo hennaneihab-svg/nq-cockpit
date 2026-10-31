@@ -379,6 +379,7 @@ def test_terminal_chart_symbol_picker_lists_verified_options() -> None:
     box = next(box for box in app.selectbox if box.label == "Symbol")
     assert list(box.options) == list(tv_widgets.NQ_SYMBOL_OPTIONS)
     assert box.value == tv_widgets.DEFAULT_NQ_SYMBOL
+    assert "CME_MINI:NQ1!" not in list(box.options)
     # The widget embeds a real TradingView script URL.
     from nqcockpit.ui import terminal_page
 

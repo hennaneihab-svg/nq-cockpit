@@ -8,7 +8,6 @@ from streamlit.testing.v1 import AppTest
 from nqcockpit.ui import tv_widgets
 from nqcockpit.ui.i18n import LABELS
 from nqcockpit.ui.nav import page_keys, page_name
-from nqcockpit.ui.terminal_page import SYMBOL_STATE_KEY
 
 EXPECTED_EN = (
     "Market Map",
@@ -65,23 +64,12 @@ def test_nav_lists_market_map_in_en_and_fr() -> None:
     assert page_name("market_map") == "Market Map"
 
 
-def _symbol_script() -> None:
-    import streamlit as st
+def test_market_map_gauge_uses_verified_ndx_symbol() -> None:
+    from pathlib import Path
 
-    from nqcockpit.ui.market_map_page import technical_symbol
+    from nqcockpit.ui import market_map_page
 
-    st.markdown(f"SYMBOL={technical_symbol()}")
-
-
-def test_market_map_uses_terminal_symbol_then_falls_back() -> None:
-    chosen = AppTest.from_function(_symbol_script, default_timeout=30)
-    chosen.session_state[SYMBOL_STATE_KEY] = "CAPITALCOM:US100"
-    chosen.run()
-    assert not chosen.exception, chosen.exception
-    assert chosen.markdown[0].value.endswith("CAPITALCOM:US100")
-
-    fallback = AppTest.from_function(_symbol_script, default_timeout=30)
-    fallback.session_state[SYMBOL_STATE_KEY] = "NOT_A_SYMBOL"
-    fallback.run()
-    assert not fallback.exception, fallback.exception
-    assert fallback.markdown[0].value.endswith(tv_widgets.DEFAULT_NQ_SYMBOL)
+    assert tv_widgets.TECHNICAL_ANALYSIS_SYMBOL == "NASDAQ:NDX"
+    source = Path(market_map_page.__file__).read_text(encoding="utf-8")
+    assert "TECHNICAL_ANALYSIS_SYMBOL" in source
+    assert "SYMBOL_STATE_KEY" not in source

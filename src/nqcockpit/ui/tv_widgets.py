@@ -23,20 +23,27 @@ NQ_SYMBOL_OPTIONS = (
     "FOREXCOM:NSXUSD",
     "PEPPERSTONE:NAS100",
     "OANDA:NAS100USD",
-    "CME_MINI:NQ1!",
     "NASDAQ:QQQ",
 )
 DEFAULT_NQ_SYMBOL = "CAPITALCOM:US100"
 
-# Références macro du bandeau de cotations : symboles candidats du widget
-# gratuit (à confirmer côté navigateur), avec des libellés lisibles.
+# Jauge technique : seul NASDAQ:NDX renvoie une note + compteurs
+# Sell/Neutral/Buy dans l'embed gratuit. CAPITALCOM:US100, FOREXCOM:NSXUSD,
+# PEPPERSTONE:NAS100 et OANDA:NAS100USD échouent ("No data here yet" /
+# "only available on tradingview"), donc la jauge ne doit jamais les utiliser.
+TECHNICAL_ANALYSIS_SYMBOL = "NASDAQ:NDX"
+
+# Références macro du bandeau de cotations. Chaque entrée DOIT rester un dict
+# ``{"name": ..., "displayName": ...}`` : une simple chaîne fait planter le
+# widget ("Cannot create property 'makeUrl' on string"). Les rendements FRED
+# (DGS10/DGS2) sont des séries quotidiennes, d'où le suffixe "(daily)".
 QUOTE_SYMBOLS: tuple[dict[str, str], ...] = (
     {"name": "FOREXCOM:NSXUSD", "displayName": "Nasdaq 100"},
     {"name": "FOREXCOM:SPXUSD", "displayName": "S&P 500"},
-    {"name": "TVC:VIX", "displayName": "VIX"},
-    {"name": "TVC:DXY", "displayName": "US Dollar Index"},
-    {"name": "TVC:US10Y", "displayName": "US 10Y"},
-    {"name": "TVC:US02Y", "displayName": "US 2Y"},
+    {"name": "CAPITALCOM:VIX", "displayName": "VIX"},
+    {"name": "CAPITALCOM:DXY", "displayName": "US Dollar Index"},
+    {"name": "FRED:DGS10", "displayName": "US 10Y Yield (daily)"},
+    {"name": "FRED:DGS2", "displayName": "US 2Y Yield (daily)"},
     {"name": "AMEX:SPY", "displayName": "SPY"},
     {"name": "NASDAQ:QQQ", "displayName": "QQQ"},
 )

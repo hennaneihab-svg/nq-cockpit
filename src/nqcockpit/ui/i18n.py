@@ -595,8 +595,8 @@ LABELS: dict[str, dict[str, str]] = {
     },
     "ui.market_map.technical": {"en": "Technical gauge", "fr": "Jauge technique"},
     "ui.market_map.symbol_note": {
-        "en": "Terminal symbol: {symbol}",
-        "fr": "Symbole du Terminal : {symbol}",
+        "en": "Symbol: {symbol}",
+        "fr": "Symbole : {symbol}",
     },
     "ui.market_map.quotes": {
         "en": "Cross-asset quotes",
