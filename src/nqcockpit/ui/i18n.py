@@ -240,6 +240,11 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "Language and data settings",
         "fr": "Langue et réglages des données",
     },
+    "ui.nav.market_map.name": {"en": "Market Map", "fr": "Carte du marché"},
+    "ui.nav.market_map.desc": {
+        "en": "Nasdaq-100 heatmap, calendar, trend and quotes",
+        "fr": "Carte de chaleur Nasdaq-100, calendrier, tendance et cotations",
+    },
     "ui.hint.click_details": {
         "en": "click for details",
         "fr": "cliquez pour les détails",
@@ -569,6 +574,37 @@ LABELS: dict[str, dict[str, str]] = {
     "ui.settings.disclaimer": {
         "en": "Decision support only: no order execution and no directional bias.",
         "fr": "Aide à la décision uniquement : aucune exécution d'ordre, aucun biais directionnel.",
+    },
+    # Market Map
+    "ui.market_map.title": {"en": "Market Map", "fr": "Carte du marché"},
+    "ui.market_map.desc": {
+        "en": "Nasdaq-100 heatmap, macro calendar and cross-asset context.",
+        "fr": "Carte de chaleur Nasdaq-100, calendrier macro et contexte multi-actifs.",
+    },
+    "ui.market_map.heatmap": {
+        "en": "Nasdaq-100 heatmap",
+        "fr": "Carte de chaleur Nasdaq-100",
+    },
+    "ui.market_map.heatmap_note": {
+        "en": "Market-cap weighted, coloured by daily change.",
+        "fr": "Pondérée par capitalisation, colorée selon la variation du jour.",
+    },
+    "ui.market_map.calendar": {
+        "en": "US economic calendar",
+        "fr": "Calendrier économique US",
+    },
+    "ui.market_map.technical": {"en": "Technical gauge", "fr": "Jauge technique"},
+    "ui.market_map.symbol_note": {
+        "en": "Terminal symbol: {symbol}",
+        "fr": "Symbole du Terminal : {symbol}",
+    },
+    "ui.market_map.quotes": {
+        "en": "Cross-asset quotes",
+        "fr": "Cotations multi-actifs",
+    },
+    "ui.market_map.delayed_note": {
+        "en": "TradingView public widgets — data may be delayed.",
+        "fr": "Widgets publics TradingView — données potentiellement différées.",
     },
 }
 

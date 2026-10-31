@@ -1,8 +1,8 @@
 """Compact horizontal navigation for the NQ Cockpit terminal layout.
 
-Four destinations share one top bar: Terminal, Journal & Discipline, Coaching
-and Settings. The page list and localized names live here so tests can assert
-the English and French versions without rendering Streamlit.
+Five destinations share one top bar: Terminal, Journal & Discipline, Coaching,
+Market Map and Settings. The page list and localized names live here so tests
+can assert the English and French versions without rendering Streamlit.
 """
 
 from __future__ import annotations
@@ -84,6 +84,7 @@ PAGES: tuple[PageSpec, ...] = (
     PageSpec("terminal", "ui.nav.terminal.name", "ui.nav.terminal.desc"),
     PageSpec("journal", "ui.nav.journal.name", "ui.nav.journal.desc"),
     PageSpec("coaching", "ui.nav.coaching.name", "ui.nav.coaching.desc"),
+    PageSpec("market_map", "ui.nav.market_map.name", "ui.nav.market_map.desc"),
     PageSpec("settings", "ui.nav.settings.name", "ui.nav.settings.desc"),
 )
 
@@ -111,6 +112,10 @@ _PAGE_ALIASES: dict[str, str] = {
     "discipline": "journal",
     "4": "coaching",
     "coaching": "coaching",
+    "6": "market_map",
+    "market_map": "market_map",
+    "market-map": "market_map",
+    "marketmap": "market_map",
     "5": "settings",
     "settings": "settings",
 }

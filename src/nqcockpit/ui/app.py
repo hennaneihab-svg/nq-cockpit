@@ -20,6 +20,7 @@ from nqcockpit.ui.coaching_page import render_coaching_app
 from nqcockpit.ui.components import render_page_safely
 from nqcockpit.ui.i18n import t
 from nqcockpit.ui.journal_discipline_page import render_journal_discipline_page
+from nqcockpit.ui.market_map_page import render_market_map_page
 from nqcockpit.ui.nav import active_page, page_name, render_top_nav
 from nqcockpit.ui.settings_page import render_settings_page
 from nqcockpit.ui.terminal_page import render_terminal
@@ -32,6 +33,7 @@ PAGE_RENDERERS = {
     "terminal": render_terminal,
     "journal": render_journal_discipline_page,
     "coaching": render_coaching_app,
+    "market_map": render_market_map_page,
     "settings": render_settings_page,
 }
 

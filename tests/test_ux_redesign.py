@@ -202,12 +202,13 @@ def _render_today_script(data):
 # ---------------------------------------------------------------------------
 
 
-def test_four_pages_have_names_and_descriptions_in_en_and_fr() -> None:
+def test_five_pages_have_names_and_descriptions_in_en_and_fr() -> None:
     """Every terminal destination has a plain name and description in both languages."""
     assert page_keys() == [
         "terminal",
         "journal",
         "coaching",
+        "market_map",
         "settings",
     ]
     assert DEFAULT_PAGE == "terminal"
@@ -232,6 +233,8 @@ def test_legacy_links_resolve_to_the_new_pages() -> None:
     assert resolve_page("2") == "journal"
     assert resolve_page("discipline") == "journal"
     assert resolve_page("5") == "settings"
+    assert resolve_page("market_map") == "market_map"
+    assert resolve_page("6") == "market_map"
     assert resolve_page("briefing") == "terminal"
     assert resolve_page("levels") == "terminal"
     assert resolve_page("macro") == "terminal"

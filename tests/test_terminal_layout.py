@@ -1,7 +1,7 @@
 """Tests for the single-screen Terminal layout.
 
 Acceptance criteria covered here:
-- the top navigation exposes exactly four destinations (EN + FR) and keeps
+- the top navigation exposes five destinations (EN + FR) and keeps
   legacy deep links working;
 - the Terminal renders on one screen with normal data, degraded feeds and no
   data at all (friendly states, no traceback);
@@ -217,11 +217,16 @@ def _markdown(app: AppTest) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_navigation_has_four_destinations_in_en_and_fr() -> None:
-    assert page_keys() == ["terminal", "journal", "coaching", "settings"]
+def test_terminal_navigation_has_five_destinations_in_en_and_fr() -> None:
+    assert page_keys() == ["terminal", "journal", "coaching", "market_map", "settings"]
     assert DEFAULT_PAGE == "terminal"
     assert LABELS["ui.nav.terminal.name"] == {"en": "Terminal", "fr": "Terminal"}
-    for key in ("ui.nav.terminal.name", "ui.nav.journal.name", "ui.nav.coaching.name"):
+    for key in (
+        "ui.nav.terminal.name",
+        "ui.nav.journal.name",
+        "ui.nav.coaching.name",
+        "ui.nav.market_map.name",
+    ):
         assert key in LABELS
         for lang in ("en", "fr"):
             assert LABELS[key][lang].strip()
