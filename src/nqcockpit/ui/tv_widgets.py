@@ -1,14 +1,17 @@
 """Widgets TradingView gratuits intégrés dans le cockpit.
 
-Chaque fonction retourne une chaîne HTML autonome destinée à
-``st.components.v1.html``. Les widgets utilisent les scripts d'embed public de
-TradingView (aucune clé, aucun service payant) et le thème sombre du cockpit.
+Chaque fonction retourne une chaîne HTML autonome passée à
+``render_widget``, l'unique point de rendu des widgets. Les widgets utilisent
+les scripts d'embed public de TradingView (aucune clé, aucun service payant) et
+le thème sombre du cockpit.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
+
+import streamlit as st
 
 # Couleur de fond sombre du cockpit (voir ``sections.py`` / ``chart.py``).
 WIDGET_BACKGROUND = "#0B1220"
@@ -47,6 +50,19 @@ def build_widget_html(script_name: str, config: dict[str, Any], height: int) -> 
         "</script>"
         "</div>"
     )
+
+
+def render_widget(html: str, height: int) -> None:
+    """Affiche un widget HTML dans l'application.
+
+    Unique point de rendu : les helpers ci-dessous restent purs et testables,
+    et un futur changement d'API Streamlit se limite à cette fonction.
+
+    Args:
+        html: Le HTML autonome produit par un helper de ce module.
+        height: Hauteur de l'iframe en pixels.
+    """
+    st.iframe(html, height=height)
 
 
 def advanced_chart_html(

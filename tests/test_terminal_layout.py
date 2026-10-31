@@ -378,7 +378,8 @@ def test_terminal_chart_symbol_picker_has_three_options() -> None:
 
     source = Path(terminal_page.__file__).read_text(encoding="utf-8")
     assert "advanced_chart_html" in source
-    assert "components.html" in source
+    assert "tv_widgets.render_widget" in source
+    assert "components.html" not in source
 
 
 def test_terminal_renders_in_en_and_fr_with_no_raw_keys() -> None:

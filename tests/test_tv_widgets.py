@@ -154,5 +154,31 @@ def test_every_widget_returns_parsable_html() -> None:
         assert config.get("colorTheme", config.get("theme")) == "dark"
 
 
+def _widget_script() -> None:
+    from nqcockpit.ui import tv_widgets
+
+    tv_widgets.render_widget(
+        tv_widgets.advanced_chart_html(tv_widgets.DEFAULT_NQ_SYMBOL, height=200),
+        200,
+    )
+
+
+def test_render_widget_uses_supported_streamlit_api() -> None:
+    import inspect
+
+    source = inspect.getsource(tv_widgets.render_widget)
+    assert "st.iframe(" in source
+    assert "components.html" not in source
+
+
+def test_render_widget_renders_in_apptest() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_function(_widget_script, default_timeout=30)
+    app.run()
+    assert not app.exception, app.exception
+    assert len(app.get("iframe")) == 1
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -18,7 +18,6 @@ import logging
 from html import escape
 
 import streamlit as st
-import streamlit.components.v1 as components
 from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.discipline.engine import evaluate_session_state
@@ -405,15 +404,14 @@ def render_chart_column(data: TodayData) -> None:
     """TradingView advanced chart plus the key-level pills, left column."""
     symbol = render_symbol_selector()
     timezone = getattr(data.config.timezones, "display", None) or "Africa/Algiers"
-    components.html(
+    tv_widgets.render_widget(
         tv_widgets.advanced_chart_html(
             symbol,
             locale=get_lang().lower(),
             timezone=timezone,
             height=CHART_HEIGHT,
         ),
-        height=CHART_HEIGHT,
-        scrolling=False,
+        CHART_HEIGHT,
     )
     render_distance_chips(data.profile)
 
