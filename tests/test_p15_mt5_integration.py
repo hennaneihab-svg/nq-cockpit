@@ -755,6 +755,7 @@ def test_mt5_mock_missing_sl_and_tp(mock_mt5, mem_conn, config):
 
     assert summary.is_success is True
     assert summary.imported == 1
+    assert summary.no_r == 1
 
     trades = load_trades(mem_conn)
     assert len(trades) == 1
@@ -770,6 +771,7 @@ def test_mt5_mock_missing_sl_and_tp(mock_mt5, mem_conn, config):
     # R réalisé nul car absence de risque initial
     assert t.r_realized == 0.0
     assert "SL: non d\u00e9fini" in t.notes
+    assert "no R" in t.notes
     # Mentions explicites "non défini"
 
 
@@ -953,8 +955,8 @@ def test_no_sensitive_logs(monkeypatch, caplog):
         assert "BROKER_SERVER" not in record.message
 
 
-def test_import_ignores_gold_and_out_of_scope(monkeypatch, mem_conn):
-    """Vérifie que les symboles hors NQ/MNQ (ex. GOLD) sont ignorés."""
+def test_import_gold_non_nq(monkeypatch, mem_conn):
+    """Les actifs hors NQ (ex. GOLD) sont désormais importés (sans stop -> no R)."""
     import nqcockpit.broker.mt5_client as mt5_module
     from nqcockpit.broker.mt5_client import MT5Client
 
@@ -992,12 +994,15 @@ def test_import_ignores_gold_and_out_of_scope(monkeypatch, mem_conn):
 
     assert summary.is_success is True
     assert summary.total_positions == 1
-    assert summary.ignored_out_of_scope == 1
-    assert summary.imported == 0
+    assert summary.imported == 1
+    assert summary.no_r == 1
 
     from nqcockpit.journal.store import load_trades
     trades = load_trades(mem_conn)
-    assert len(trades) == 0
+    assert len(trades) == 1
+    assert trades[0].instrument == "GOLD"
+    assert trades[0].stop_price == 0.0
+    assert trades[0].r_realized == 0.0
 
 
 def test_terminal_running_but_no_account_logged_in(mock_mt5):
@@ -1083,7 +1088,7 @@ def test_import_us100cash_is_normalized_to_nq(mock_mt5, mem_conn, config):
     assert summary.is_success is True
     assert summary.imported == 1
     assert summary.total_deals == 2
-    assert summary.ignored_out_of_scope == 0
+    assert summary.no_r == 1
 
     trades = load_trades(mem_conn)
     assert len(trades) == 1
@@ -1170,5 +1175,51 @@ def test_get_closed_trades_symbol_filter_normalizes(mock_mt5):
     trades = client.get_closed_trades(symbol="NQ")
 
     assert [t.symbol for t in trades] == ["US100Cash"]
+
+
+# ---------------------------------------------------------------------------
+# 12. Import multi-actifs (Task B) : normalisation, non-NQ, déduplication
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_symbol_light_normalisation():
+    """NQ/MNQ reconnus ; autres symboles nettoyés des suffixes broker."""
+    assert MT5Client._normalize_symbol("US100Cash") == "NQ"
+    assert MT5Client._normalize_symbol("US100-DEC26") == "NQ"
+    assert MT5Client._normalize_symbol("NAS100") == "NQ"
+    assert MT5Client._normalize_symbol("MNQ") == "MNQ"
+    assert MT5Client._normalize_symbol("XAUUSD") == "XAUUSD"
+    assert MT5Client._normalize_symbol("XAUUSD.r") == "XAUUSD"
+    assert MT5Client._normalize_symbol("EURUSD") == "EURUSD"
+    assert MT5Client._normalize_symbol("GER40-DEC26") == "GER40"
+    assert MT5Client._normalize_symbol("GER40Cash") == "GER40"
+    assert MT5Client._normalize_symbol("GOLD") == "GOLD"
+
+
+def test_import_non_nq_symbol_normalised_and_deduplicated(mock_mt5, mem_conn, config):
+    """XAUUSD.r -> instrument XAUUSD ; re-clic -> 100 % doublon."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 9101, "XAUUSD.r", 0, 0, 2000.0)
+    d_out = _deal(2, 9101, "XAUUSD.r", 1, 1, 2010.0, profit=100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+    mock_mt5.history_orders_get.return_value = ()
+
+    client = MT5Client()
+    s1 = client.import_trades_to_journal(mem_conn, config=config)
+    assert s1.imported == 1
+    assert s1.no_r == 1  # pas de stop
+    trades = load_trades(mem_conn)
+    assert len(trades) == 1
+    assert trades[0].instrument == "XAUUSD"
+    assert trades[0].window_name == ""  # pas de fenêtre Nasdaq pour un actif hors NQ
+
+    s2 = client.import_trades_to_journal(mem_conn, config=config)
+    assert s2.imported == 0
+    assert s2.duplicates == 1
+    assert len(load_trades(mem_conn)) == 1
 
 

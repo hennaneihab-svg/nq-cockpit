@@ -287,3 +287,26 @@ def test_coaching_page_renders_with_synthetic_fixture(tmp_path, monkeypatch):
     app = AppTest.from_function(_render_coaching_from_env, default_timeout=120)
     app.run()
     assert not app.exception, app.exception
+
+
+# ---------------------------------------------------------------------------
+# 7. Filtre instrument : libellés triés par nombre de trades
+# ---------------------------------------------------------------------------
+
+
+def test_instrument_filter_labels_sorted_by_count():
+    """Les instruments sont triés par volume de trades, le nombre dans le libellé."""
+    from nqcockpit.ui.coaching_page import _instrument_filter_labels
+
+    trades = []
+    for name, count in (("NQ", 3), ("EURUSD", 5), ("XAUUSD", 2)):
+        for i in range(count):
+            tr = _make_dummy_trade(f"{name}-{i}", "2026-09-01", 1.0, TradeOutcome.WIN)
+            tr.instrument = name
+            trades.append(tr)
+
+    labels, mapping = _instrument_filter_labels(trades)
+    assert labels == ["EURUSD (5)", "NQ (3)", "XAUUSD (2)"]
+    assert mapping["EURUSD (5)"] == "EURUSD"
+    assert mapping["NQ (3)"] == "NQ"
+    assert mapping["XAUUSD (2)"] == "XAUUSD"

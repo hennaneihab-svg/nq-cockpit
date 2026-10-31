@@ -14,6 +14,7 @@ Règles impératives :
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -139,8 +140,8 @@ class MT5ImportSummary:
     total_positions: int = 0
     imported: int = 0
     duplicates: int = 0
+    no_r: int = 0
     rejected: int = 0
-    ignored_out_of_scope: int = 0
     status: str = "OK"  # "OK" | "DÉGRADÉ"
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -694,15 +695,10 @@ class MT5Client:
         for tr in closed_trades:
             # Le Nasdaq-100 est négocié sous plusieurs symboles selon le broker
             # (NQ, MNQ, NAS100, US100Cash, US100-DEC26, USTEC...). On normalise
-            # AVANT de décider du périmètre : sans cela, les vrais trades
-            # « US100Cash »/« US100-DEC26 » sont rejetés comme « hors NQ ».
+            # AVANT la décision d'import. Les autres actifs gardent leur symbole
+            # nettoyé (ex. XAUUSD, EURUSD, GER40) et sont importés aussi.
             norm_symbol = self._normalize_symbol(tr.symbol)
-            if norm_symbol not in ("NQ", "MNQ"):
-                summary.ignored_out_of_scope += 1
-                summary.warnings.append(
-                    f"Position #{tr.position_id} ({tr.symbol}) ignorée (hors NQ)"
-                )
-                continue
+            is_nq = norm_symbol in ("NQ", "MNQ")
             trade_id = f"mt5_{tr.position_id}"
             session_date = tr.entry_time_ny.strftime("%Y-%m-%d")
 
@@ -736,11 +732,13 @@ class MT5Client:
                 summary.duplicates += 1
                 continue
 
-            # Détection de la fenêtre de trading
-            in_window, win_name = is_in_trading_window(
-                tr.entry_time_algiers, windows=windows_cfg
-            )
-            window_label = win_name or ""
+            # Fenêtre de trading : spécifique au Nasdaq (kill zones NQ).
+            window_label = ""
+            if is_nq:
+                _, win_name = is_in_trading_window(
+                    tr.entry_time_algiers, windows=windows_cfg
+                )
+                window_label = win_name or ""
 
             # Frais cumulés
             total_fees = abs(tr.commission) + abs(tr.swap) + abs(tr.fee)
@@ -776,13 +774,14 @@ class MT5Client:
                 if outcome == TradeOutcome.WIN
                 else ("PERTE" if outcome == TradeOutcome.LOSS else "BREAKEVEN")
             )
+            no_r_marker = "" if has_sl else " | no R"
             notes_str = (
                 f"Auto-import MT5 (#{tr.position_id}) {chr(183)} {pnl_label} "
                 f'PnL net: {"-" if net_pnl < 0 else "+"}${abs(net_pnl):.2f} '
-                f'| SL: {sl_desc} | TP: {tp_desc}'
+                f"| SL: {sl_desc} | TP: {tp_desc}{no_r_marker}"
             )
 
-            # Calcul du R si SL défini, sinon 0.0 (non calculable sans risque initial)
+            # Calcul du R si SL défini, sinon 0.0 (exclu des stats R).
             if has_sl:
                 initial_risk = abs(tr.entry_price - stop_price_val)
                 if initial_risk > 0:
@@ -794,6 +793,7 @@ class MT5Client:
                     r_calc = 0.0
             else:
                 r_calc = 0.0
+                summary.no_r += 1
 
             entry = TradeEntry(
                 trade_id=trade_id,
@@ -873,13 +873,22 @@ class MT5Client:
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
-        """Normalise le nom du symbole pour l'instrument du journal."""
+        """Normalise le nom du symbole pour l'instrument du journal.
+
+        Nasdaq-100 -> ``NQ`` / ``MNQ``. Les autres actifs gardent leur symbole
+        nettoyé des suffixes broker (``.r``, ``Cash``, ``-DEC26``…) afin de
+        rester stables et lisibles (ex. ``XAUUSD``, ``EURUSD``, ``GER40``).
+        """
         s = symbol.strip().upper()
         if "MNQ" in s:
             return "MNQ"
         if "NQ" in s or "NAS100" in s or "US100" in s or "USTEC" in s:
             return "NQ"
-        return s
+        base = s.split(".")[0]
+        if base.endswith("CASH"):
+            base = base[:-4]
+        base = re.sub(r"[-_ ]+[A-Z]{1,3}\d{1,2}$", "", base)
+        return base or s
 
     @staticmethod
     def _get_last_error() -> tuple[int, str]:

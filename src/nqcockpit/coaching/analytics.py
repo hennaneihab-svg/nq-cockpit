@@ -44,6 +44,24 @@ def sort_trades_chronologically(trades: list[TradeEntry]) -> list[TradeEntry]:
     return sorted(trades, key=lambda t: (trade_timestamp(t), t.trade_id))
 
 
+def has_usable_stop(trade: TradeEntry) -> bool:
+    """True when a trade has a usable initial stop, i.e. R can be computed.
+
+    A trade without a stop has no meaningful R and must be excluded from R
+    statistics rather than given a fabricated 0.0 R.
+    """
+    return trade.stop_price is not None and trade.stop_price > 0
+
+
+def split_by_stop(
+    trades: list[TradeEntry],
+) -> tuple[list[TradeEntry], list[TradeEntry]]:
+    """Return ``(with_stop, without_stop)`` for R statistics separation."""
+    with_stop = [t for t in trades if has_usable_stop(t)]
+    without_stop = [t for t in trades if not has_usable_stop(t)]
+    return with_stop, without_stop
+
+
 # ---------------------------------------------------------------------------
 # Drawdown series (cumulative R with underwater drawdown)
 # ---------------------------------------------------------------------------

@@ -46,6 +46,7 @@ from nqcockpit.coaching.analytics import (
     heatmap_grid,
     segment_table_rows,
     sort_trades_chronologically,
+    split_by_stop,
 )
 from nqcockpit.config import AppConfig, load_config
 from nqcockpit.journal.engine import (
@@ -875,8 +876,18 @@ def _render_insights(trades: list[TradeEntry], config: AppConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _unique_instruments(trades: list[TradeEntry]) -> list[str]:
-    return sorted({tr.instrument for tr in trades if tr.instrument})
+def _instrument_filter_labels(
+    trades: list[TradeEntry],
+) -> tuple[list[str], dict[str, str]]:
+    """Instrument labels sorted by trade count (desc), count shown in the label."""
+    counts: dict[str, int] = {}
+    for tr in trades:
+        if tr.instrument:
+            counts[tr.instrument] = counts.get(tr.instrument, 0) + 1
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    labels = [f"{name} ({count})" for name, count in items]
+    mapping = {f"{name} ({count})": name for name, count in items}
+    return labels, mapping
 
 
 def _unique_setups(trades: list[TradeEntry]) -> list[str]:
@@ -917,9 +928,8 @@ def render_coaching_app() -> None:
             key="coaching_date_range",
         )
     with f2:
-        instrument_options = [t("Tous les instruments", "All instruments")] + _unique_instruments(
-            all_trades
-        )
+        instrument_labels, instrument_map = _instrument_filter_labels(all_trades)
+        instrument_options = [t("Tous les instruments", "All instruments")] + instrument_labels
         instrument_choice = st.selectbox(
             t("Instrument", "Instrument"),
             options=instrument_options,
@@ -939,15 +949,20 @@ def render_coaching_app() -> None:
     elif range_choice == range_labels[1]:
         filtered = filter_trades_by_date_range(filtered, today_ny - timedelta(days=90), today_ny)
     if instrument_choice != instrument_options[0]:
-        filtered = [tr for tr in filtered if tr.instrument == instrument_choice]
+        filtered = [tr for tr in filtered if tr.instrument == instrument_map[instrument_choice]]
     if setup_choice != setup_options[0]:
         filtered = [tr for tr in filtered if tr.setup_tag == setup_choice]
 
     min_required = config.validation.min_sessions
-    stats = compute_performance_stats(filtered, min_trades=min_required, config=config)
+    r_trades, no_r_trades = split_by_stop(filtered)
+    no_r_count = len(no_r_trades)
+    # Statistiques R calculées uniquement sur les trades avec stop (jamais de R inventé).
+    stats = compute_performance_stats(r_trades, min_trades=min_required, config=config)
+    # Effectif total + conformité calculés sur l'ensemble (indépendants du R).
+    stats_all = compute_performance_stats(filtered, min_trades=min_required, config=config)
     tilt_alerts = detect_period_tilt_alerts(filtered, config)
-    total_r = sum(tr.r_realized for tr in filtered)
-    current_streak = current_loss_streak(filtered)
+    total_r = sum(tr.r_realized for tr in r_trades)
+    current_streak = current_loss_streak(r_trades)
 
     # --- En-tête : titre + badge de taille d'échantillon ---
     title_text = t("ANALYSE DE PERFORMANCE", "PERFORMANCE ANALYTICS")
@@ -996,9 +1011,9 @@ def render_coaching_app() -> None:
         f"{t('actuelle', 'current')} {current_streak} / "
         f"{t('max', 'max')} {stats.max_loss_streak}"
     )
-    dd_value = f"-{stats.max_drawdown_r:.2f}R" if filtered else "—"
-    comp_value = _fmt_pct(stats.compliance_rate)
-    comp_sub = f"{stats.n_compliant} / {stats.n_trades} {t('trades', 'trades')}"
+    dd_value = f"-{stats.max_drawdown_r:.2f}R" if r_trades else "—"
+    comp_value = _fmt_pct(stats_all.compliance_rate)
+    comp_sub = f"{stats_all.n_compliant} / {stats_all.n_trades} {t('trades', 'trades')}"
 
     if expectancy is None:
         exp_class = "kpi-mut"
@@ -1008,14 +1023,14 @@ def render_coaching_app() -> None:
         exp_class = "kpi-neg"
 
     pf_value = f"{stats.profit_factor:.2f}" if stats.profit_factor is not None else "—"
-    comp_class = "kpi-pos" if (stats.compliance_rate or 1) >= 0.8 else "kpi-warn"
+    comp_class = "kpi-pos" if (stats_all.compliance_rate or 1) >= 0.8 else "kpi-warn"
     total_r_caption = t("R total", "Total R") + f" : {total_r:+.2f}R"
 
     cards = [
         _kpi_card(
             t("Trades", "Trades"),
-            str(stats.n_trades),
-            f"{stats.n_wins} W / {stats.n_losses} L / {stats.n_breakeven} BE",
+            str(stats_all.n_trades),
+            f"{stats_all.n_wins} W / {stats_all.n_losses} L / {stats_all.n_breakeven} BE",
         ),
         _kpi_card(t("Win rate", "Win rate"), wr_value, wr_sub),
         _kpi_card(
@@ -1044,6 +1059,17 @@ def render_coaching_app() -> None:
     ]
     st.markdown('<div class="kpi-grid">' + "".join(cards) + "</div>", unsafe_allow_html=True)
 
+    if no_r_count > 0:
+        no_r_note = t(
+            "trade(s) exclus des stats R (sans stop)",
+            "trade(s) excluded from R stats (no stop)",
+        )
+        st.markdown(
+            f"<span style='color:{MUTED}; font-size:0.76rem;'>"
+            f"{no_r_count} {no_r_note}</span>",
+            unsafe_allow_html=True,
+        )
+
     # --- 2. Courbe d'équité ---
     _section(
         "EQUITY // COURBE D'ÉQUITÉ",
@@ -1066,7 +1092,7 @@ def render_coaching_app() -> None:
         )
     st.plotly_chart(
         build_equity_curve_figure(
-            filtered,
+            r_trades,
             tilt_alerts,
             config,
             show_violations=show_violations,
@@ -1082,11 +1108,19 @@ def render_coaching_app() -> None:
         "Cellules sous le seuil d'échantillon estompées.",
         "Cells below the sample threshold are muted.",
     )
-    cells = aggregate_heatmap(filtered)
+    ny_hour_note = t(
+        "La vue par heure NY est surtout significative pour le Nasdaq (NQ/MNQ).",
+        "The NY-hour view is most meaningful for Nasdaq (NQ/MNQ).",
+    )
+    st.markdown(
+        f"<span style='color:{MUTED}; font-size:0.76rem;'>{ny_hour_note}</span>",
+        unsafe_allow_html=True,
+    )
+    cells = aggregate_heatmap(r_trades)
     qualified_cells = {k: c for k, c in cells.items() if c.n >= HEATMAP_MIN_CELL_SAMPLES}
     hcol1, hcol2 = st.columns([3, 1])
     with hcol1:
-        st.plotly_chart(build_heatmap_figure(filtered), use_container_width=True)
+        st.plotly_chart(build_heatmap_figure(r_trades), use_container_width=True)
     with hcol2:
         if qualified_cells:
             best_key = max(qualified_cells, key=lambda k: qualified_cells[k].expectancy_r)
@@ -1125,7 +1159,7 @@ def render_coaching_app() -> None:
 
     # --- 4. Table des setups + barres par régime ---
     _section("SETUP & RÉGIME // PERFORMANCE PAR SEGMENT", "SETUP & REGIME // SEGMENT PERFORMANCE")
-    _render_setup_table(filtered)
+    _render_setup_table(r_trades)
 
     tab_gamma, tab_vol, tab_event = st.tabs(
         [
@@ -1137,7 +1171,7 @@ def render_coaching_app() -> None:
     with tab_gamma:
         st.plotly_chart(
             build_segmentation_figure(
-                segment_performance(filtered, by="gamma_regime", min_samples=MIN_SEGMENT_SAMPLES),
+                segment_performance(r_trades, by="gamma_regime", min_samples=MIN_SEGMENT_SAMPLES),
                 title=t("Espérance par régime gamma", "Expectancy by gamma regime"),
                 by_label=t("Régime gamma", "Gamma regime"),
             ),
@@ -1146,7 +1180,7 @@ def render_coaching_app() -> None:
     with tab_vol:
         st.plotly_chart(
             build_segmentation_figure(
-                segment_performance(filtered, by="vol_regime", min_samples=MIN_SEGMENT_SAMPLES),
+                segment_performance(r_trades, by="vol_regime", min_samples=MIN_SEGMENT_SAMPLES),
                 title=t("Espérance par régime de volatilité", "Expectancy by volatility regime"),
                 by_label=t("Régime volatilité", "Volatility regime"),
             ),
@@ -1155,7 +1189,7 @@ def render_coaching_app() -> None:
     with tab_event:
         st.plotly_chart(
             build_segmentation_figure(
-                segment_performance(filtered, by="event_risk", min_samples=MIN_SEGMENT_SAMPLES),
+                segment_performance(r_trades, by="event_risk", min_samples=MIN_SEGMENT_SAMPLES),
                 title=t("Espérance par risque événementiel", "Expectancy by event risk"),
                 by_label=t("Risque événementiel", "Event risk"),
             ),
@@ -1164,7 +1198,7 @@ def render_coaching_app() -> None:
 
     # --- 5. Coût des violations ---
     _section("DISCIPLINE // COÛT DES VIOLATIONS", "DISCIPLINE // COST OF RULE BREAKS")
-    _render_rule_break(filtered, config)
+    _render_rule_break(r_trades, config)
 
     # --- 6. Séries de pertes & alertes de tilt ---
     _section("TILT // SÉRIES DE PERTES & ALERTES", "TILT // LOSS STREAKS & ALERTS")
@@ -1172,7 +1206,7 @@ def render_coaching_app() -> None:
 
     # --- 7. Constats chiffrés ---
     _section("INSIGHTS // CONSTATS CHIFFRÉS", "INSIGHTS // DATA-DRIVEN FINDINGS")
-    _render_insights(filtered, config)
+    _render_insights(r_trades, config)
 
     # --- Rapport de coaching qualitatif (disponible, non dupliqué) ---
     st.markdown("---")

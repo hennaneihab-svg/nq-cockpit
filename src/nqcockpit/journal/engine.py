@@ -78,23 +78,27 @@ def detect_violations(
     flags: list[DisciplineFlag] = []
     rules = config.rules
 
-    # --- Violation 1 : hors fenêtre ---
-    window_names = {w.name for w in config.trading_windows_algiers}
-    if trade.window_name and trade.window_name not in window_names:
-        flags.append(DisciplineFlag(
-            trade_id=trade.trade_id,
-            violation=DisciplineViolationType.OUT_OF_WINDOW,
-            detail=(
-                f"Fenêtre '{trade.window_name}' inconnue dans la config "
-                f"(fenêtres valides : {sorted(window_names)})"
-            ),
-        ))
-    elif not trade.window_name:
-        flags.append(DisciplineFlag(
-            trade_id=trade.trade_id,
-            violation=DisciplineViolationType.OUT_OF_WINDOW,
-            detail="Aucune fenêtre de trading renseignée — trade hors kill zone.",
-        ))
+    # --- Violation 1 : hors fenêtre (règle spécifique au Nasdaq) ---
+    # Les kill zones configurées ne s'appliquent qu'aux indices NQ/MNQ ; les
+    # autres actifs (XAUUSD, EURUSD, GER40…) n'ont pas de fenêtre définie et
+    # ne doivent donc pas être marqués « hors fenêtre ».
+    if trade.instrument.upper() in ("NQ", "MNQ"):
+        window_names = {w.name for w in config.trading_windows_algiers}
+        if trade.window_name and trade.window_name not in window_names:
+            flags.append(DisciplineFlag(
+                trade_id=trade.trade_id,
+                violation=DisciplineViolationType.OUT_OF_WINDOW,
+                detail=(
+                    f"Fenêtre '{trade.window_name}' inconnue dans la config "
+                    f"(fenêtres valides : {sorted(window_names)})"
+                ),
+            ))
+        elif not trade.window_name:
+            flags.append(DisciplineFlag(
+                trade_id=trade.trade_id,
+                violation=DisciplineViolationType.OUT_OF_WINDOW,
+                detail="Aucune fenêtre de trading renseignée — trade hors kill zone.",
+            ))
 
     # --- Violation 2 : > max_trades_per_day ---
     # Compter les trades de la séance AVANT ce trade (par recorded_at)

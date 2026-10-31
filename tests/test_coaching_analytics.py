@@ -22,9 +22,11 @@ from nqcockpit.coaching.analytics import (
     compute_max_drawdown,
     compute_rule_break_cost,
     current_loss_streak,
+    has_usable_stop,
     heatmap_grid,
     segment_table_rows,
     sort_trades_chronologically,
+    split_by_stop,
 )
 from nqcockpit.journal.engine import segment_performance
 from nqcockpit.journal.models import (
@@ -281,6 +283,19 @@ def test_hour_insight_requires_min_cell_samples():
     below = [_trade(f"b{i}", 1.0, entry_time_ny=monday_10) for i in range(4)]
     insights_b = compute_insights(below, config=None)
     assert not any(i.kind == "best_hour" for i in insights_b)
+
+
+def test_split_by_stop_excludes_no_stop_trades():
+    """Les trades sans stop sont séparés et exclus des stats R."""
+    with_stop = _trade("a", 1.0)
+    no_stop = _trade("b", -1.0)
+    no_stop.stop_price = 0.0
+
+    ws, ns = split_by_stop([with_stop, no_stop])
+    assert [t.trade_id for t in ws] == ["a"]
+    assert [t.trade_id for t in ns] == ["b"]
+    assert has_usable_stop(with_stop) is True
+    assert has_usable_stop(no_stop) is False
 
 
 @pytest.mark.parametrize("n", [0, 1, 3])

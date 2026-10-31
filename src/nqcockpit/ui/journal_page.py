@@ -743,10 +743,12 @@ def render_journal_page() -> None:
                     st.success(
                         t(
                             f"**Succès !** {mt5_summary.imported} trade(s) importé(s), "
-                            f"{mt5_summary.duplicates} doublon(s) ignoré(s) sur "
+                            f"{mt5_summary.duplicates} doublon(s) ignoré(s), "
+                            f"{mt5_summary.no_r} sans R sur "
                             f"{mt5_summary.total_positions} position(s) fermée(s).",
                             f"**Success!** {mt5_summary.imported} trade(s) imported, "
-                            f"{mt5_summary.duplicates} duplicate(s) skipped out of "
+                            f"{mt5_summary.duplicates} duplicate(s) skipped, "
+                            f"{mt5_summary.no_r} without R out of "
                             f"{mt5_summary.total_positions} closed position(s).",
                         )
                     )
@@ -762,12 +764,10 @@ def render_journal_page() -> None:
                         t(
                             f"Aucun trade fermé trouvé sur la période sélectionnée "
                             f"(le terminal a renvoyé {mt5_summary.total_deals} deal(s) "
-                            f"brut(s) ; {mt5_summary.duplicates} doublon(s), "
-                            f"{mt5_summary.ignored_out_of_scope} hors NQ).",
+                            f"brut(s) ; {mt5_summary.duplicates} doublon(s)).",
                             f"No closed trades found in the selected period "
                             f"(the terminal returned {mt5_summary.total_deals} raw "
-                            f"deal(s); {mt5_summary.duplicates} duplicate(s), "
-                            f"{mt5_summary.ignored_out_of_scope} out of scope).",
+                            f"deal(s); {mt5_summary.duplicates} duplicate(s)).",
                         )
                     )
 
