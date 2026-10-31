@@ -1,11 +1,10 @@
-"""Tests de la page de coaching et analytics P11 (tests/test_p11_coaching_ui.py).
+"""Tests de la page Coaching & Analytics P11 (tests/test_p11_coaching_ui.py).
 
 Couvre :
-- Les visualisations Plotly (courbe d'équité, timeline tilt, segmentation, conformité)
-- Le comportement avec données vides, échantillon insuffisant (< 60) et représentatif (>= 60)
-- La superposition exacte des alertes de tilt sur les trades concernés
-- L'intégration de la commande CLI coaching-ui (port par défaut 8504)
-- La stricte réutilisation des fonctions d'engine et de reports sans duplication
+- Les visualisations Plotly (courbe d'équité chronologique, heatmap, segmentation)
+- Le comportement avec données vides, échantillon insuffisant (< 60) et suffisant (>= 60)
+- La superposition des marqueurs de tilt sur la courbe d'équité
+- La commande CLI coaching-ui (port par défaut 8504)
 """
 
 from __future__ import annotations
@@ -30,8 +29,8 @@ from nqcockpit.journal.models import (
     VolRegime,
 )
 from nqcockpit.ui.coaching_page import (
-    build_compliance_timeline_figure,
     build_equity_curve_figure,
+    build_heatmap_figure,
     build_segmentation_figure,
 )
 
@@ -40,6 +39,7 @@ from nqcockpit.ui.coaching_page import (
 def mock_config() -> AppConfig:
     """Configuration de test depuis config.yaml."""
     from nqcockpit.config import load_config
+
     return load_config()
 
 
@@ -58,7 +58,7 @@ def _make_dummy_trade(
     outcome: TradeOutcome,
     setup_tag: str = "FVG_REVERSAL",
     gamma_regime: GammaRegime = GammaRegime.POSITIVE,
-    entry_time_ny: str = "09:45",
+    entry_time_ny: datetime | None = None,
     contracts: int | None = 1,
     sl_moved: bool = False,
     early_exit: bool = False,
@@ -108,7 +108,7 @@ def test_cli_coaching_ui_parser():
 
 
 # ---------------------------------------------------------------------------
-# 2. Tests Courbe d'équité & Superposition Tilt
+# 2. Tests Courbe d'équité & superposition tilt
 # ---------------------------------------------------------------------------
 
 
@@ -120,12 +120,15 @@ def test_build_equity_curve_empty():
     assert any("No trades available" in str(ann.text) for ann in fig.layout.annotations)
 
 
-def test_build_equity_curve_with_trades_and_tilt(mock_config: AppConfig):
-    """Vérifie la progression du R cumulé et le placement des alertes de tilt."""
+def test_build_equity_curve_with_trades_and_tilt():
+    """Vérifie la progression du R cumulé, l'abscisse chronologique et les tilt."""
     trades = [
-        _make_dummy_trade("t1", "2026-09-01", 1.5, TradeOutcome.WIN),
-        _make_dummy_trade("t2", "2026-09-01", -1.0, TradeOutcome.LOSS),
-        _make_dummy_trade("t3", "2026-09-02", 2.0, TradeOutcome.WIN),
+        _make_dummy_trade("t1", "2026-09-01", 1.5, TradeOutcome.WIN,
+                           entry_time_ny=datetime(2026, 9, 1, 10, 0)),
+        _make_dummy_trade("t2", "2026-09-01", -1.0, TradeOutcome.LOSS,
+                           entry_time_ny=datetime(2026, 9, 1, 11, 0)),
+        _make_dummy_trade("t3", "2026-09-02", 2.0, TradeOutcome.WIN,
+                           entry_time_ny=datetime(2026, 9, 2, 10, 0)),
     ]
 
     tilt_alert = TiltAlert(
@@ -136,25 +139,22 @@ def test_build_equity_curve_with_trades_and_tilt(mock_config: AppConfig):
     )
 
     fig = build_equity_curve_figure(trades, tilt_alerts=[tilt_alert])
-    assert len(fig.data) == 2  # Trace équité + Trace alertes tilt
+    names = [trace.name for trace in fig.data]
+    assert "Cumulative R" in names
 
-    # Vérification trace équité
-    trace_equity = fig.data[0]
-    assert trace_equity.name == "Cumulative R"
-    assert list(trace_equity.y) == [1.5, 0.5, 2.5]
-    assert len(trace_equity.x) == 3
+    cumulative = next(trace for trace in fig.data if trace.name == "Cumulative R")
+    assert list(cumulative.y) == [1.5, 0.5, 2.5]
+    # L'abscisse est désormais une date/heure, pas un index de séquence.
+    assert all(isinstance(x, datetime) for x in cumulative.x)
 
-    # Vérification trace tilt
-    trace_tilt = fig.data[1]
-    assert trace_tilt.name == "Tilt Alerts"
-    assert len(trace_tilt.x) == 1
-    assert trace_tilt.x[0] == "#2 (2026-09-01)"
-    assert trace_tilt.y[0] == 0.5
-    assert "Tilt Alert : série_pertes" in trace_tilt.hovertext[0]
+    # Le trade de tilt est marqué sur la courbe.
+    tilt_trace = next(trace for trace in fig.data if trace.name == "Tilt alert")
+    assert list(tilt_trace.x) == [datetime(2026, 9, 1, 11, 0)]
+    assert list(tilt_trace.y) == [0.5]
 
 
 # ---------------------------------------------------------------------------
-# 3. Tests Segmentation
+# 3. Tests Segmentation (barres de régime)
 # ---------------------------------------------------------------------------
 
 
@@ -167,7 +167,7 @@ def test_build_segmentation_figure_empty():
 
 
 def test_build_segmentation_figure_populated():
-    """Segmentation avec données produit les barres et annotations adaptées."""
+    """Segmentation avec données produit les barres et le suffixe « low sample »."""
     trades = [
         _make_dummy_trade("t1", "2026-09-01", 1.5, TradeOutcome.WIN, setup_tag="BREAKOUT"),
         _make_dummy_trade("t2", "2026-09-01", -1.0, TradeOutcome.LOSS, setup_tag="BREAKOUT"),
@@ -178,40 +178,31 @@ def test_build_segmentation_figure_populated():
     assert len(fig.data) == 1
     bar_trace = fig.data[0]
     assert len(bar_trace.y) == 2
-    # BREAKOUT a 2 trades (suffisant pour min_samples=2)
-    # PULLBACK a 1 trade (n < seuil)
     assert any("BREAKOUT" in str(lbl) for lbl in bar_trace.y)
-    assert any("(n < threshold)" in str(lbl) for lbl in bar_trace.y if "PULLBACK" in str(lbl))
+    assert any("(low sample)" in str(lbl) for lbl in bar_trace.y if "PULLBACK" in str(lbl))
 
 
 # ---------------------------------------------------------------------------
-# 4. Tests Évolution temporelle de la conformité
+# 4. Tests Heatmap
 # ---------------------------------------------------------------------------
 
 
-def test_build_compliance_timeline_empty(mock_config: AppConfig):
-    """Conformité vide."""
-    fig = build_compliance_timeline_figure([], mock_config)
+def test_build_heatmap_figure_empty():
+    """Heatmap vide retourne une figure propre."""
+    fig = build_heatmap_figure([])
     assert len(fig.data) == 0
+    assert any("No trades available" in str(ann.text) for ann in fig.layout.annotations)
 
 
-def test_build_compliance_timeline_populated(mock_config: AppConfig):
-    """Calcule le taux de conformité par séance."""
+def test_build_heatmap_figure_populated():
+    """Heatmap avec données produit une trace Heatmap."""
     trades = [
-        # Séance 1 : 2 trades, tous conformes -> 100%
-        _make_dummy_trade("t1", "2026-09-01", 1.0, TradeOutcome.WIN, sl_moved=False),
-        _make_dummy_trade("t2", "2026-09-01", 1.0, TradeOutcome.WIN, sl_moved=False),
-        # Séance 2 : 2 trades, 1 violation (sl_moved) -> 50%
-        _make_dummy_trade("t3", "2026-09-02", -1.0, TradeOutcome.LOSS, sl_moved=True),
-        _make_dummy_trade("t4", "2026-09-02", 1.0, TradeOutcome.WIN, sl_moved=False),
+        _make_dummy_trade("t1", "2026-09-07", 1.0, TradeOutcome.WIN,
+                           entry_time_ny=datetime(2026, 9, 7, 10, 0)),
     ]
-    fig = build_compliance_timeline_figure(trades, mock_config)
+    fig = build_heatmap_figure(trades)
     assert len(fig.data) == 1
-    bar_trace = fig.data[0]
-    assert list(bar_trace.x) == ["2026-09-01", "2026-09-02"]
-    assert list(bar_trace.y) == [100.0, 50.0]
-    # Vert (teal) pour 100%, Rouge pour 50%
-    assert list(bar_trace.marker.color) == ["#089981", "#F23645"]
+    assert fig.data[0].type == "heatmap"
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +221,6 @@ def test_sample_insufficient_handling(mock_config: AppConfig):
     assert stats.profit_factor is None
     assert stats.max_drawdown_r == 0.0
 
-    # Le rapport de coaching signale explicitement l'insuffisance
     coaching = generate_coaching_report(
         trades, period="hebdo", period_label="S36", config=mock_config
     )
@@ -240,12 +230,60 @@ def test_sample_insufficient_handling(mock_config: AppConfig):
 
 def test_sample_sufficient_handling(mock_config: AppConfig):
     """Au-dessus ou égal au seuil de 60 trades, sample_sufficient=True."""
-    trades = [_make_dummy_trade(f"t{i}", f"2026-09-{(i % 28) + 1:02d}", 1.0 if i % 2 == 0 else -1.0,
-                                TradeOutcome.WIN if i % 2 == 0 else TradeOutcome.LOSS)
-              for i in range(65)]
+    trades = [
+        _make_dummy_trade(
+            f"t{i}",
+            f"2026-09-{(i % 28) + 1:02d}",
+            1.0 if i % 2 == 0 else -1.0,
+            TradeOutcome.WIN if i % 2 == 0 else TradeOutcome.LOSS,
+        )
+        for i in range(65)
+    ]
     stats = compute_performance_stats(trades, min_trades=60, config=mock_config)
     assert stats.sample_sufficient is True
     assert stats.n_trades == 65
     assert stats.expectancy_r is not None
     assert stats.profit_factor is not None
     assert stats.max_drawdown_r is not None
+
+
+# ---------------------------------------------------------------------------
+# 6. Rendu headless de la page complète avec une fixture synthétique (150 trades)
+# ---------------------------------------------------------------------------
+
+
+def _render_coaching_from_env() -> None:
+    """Point d'entrée AppTest : importe et rend la page Coaching."""
+    from nqcockpit.ui.coaching_page import render_coaching_app
+
+    render_coaching_app()
+
+
+def test_coaching_page_renders_with_synthetic_fixture(tmp_path, monkeypatch):
+    """Rend la page Coaching headless sur 150 trades sans exception."""
+    from streamlit.testing.v1 import AppTest
+
+    from nqcockpit.journal.store import init_journal_db, save_trade
+
+    db_path = tmp_path / "coaching_fixture.db"
+    conn = init_journal_db(db_path)
+    for i in range(150):
+        day = (i % 28) + 1
+        trade = _make_dummy_trade(
+            f"t{i}",
+            f"2026-09-{day:02d}",
+            1.2 if i % 3 != 0 else -0.9,
+            TradeOutcome.WIN if i % 3 != 0 else TradeOutcome.LOSS,
+            setup_tag="BREAKOUT" if i % 2 == 0 else "PULLBACK",
+            entry_time_ny=datetime(2026, 9, day, 9 + (i % 8), 0),
+            sl_moved=(i % 5 == 0),
+            early_exit=(i % 7 == 0),
+        )
+        save_trade(conn, trade)
+    conn.close()
+
+    monkeypatch.setenv("NQ_DATA_DB_PATH", str(db_path))
+
+    app = AppTest.from_function(_render_coaching_from_env, default_timeout=120)
+    app.run()
+    assert not app.exception, app.exception

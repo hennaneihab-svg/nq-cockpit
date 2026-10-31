@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import streamlit as st
 
-from nqcockpit.config import load_config
 from nqcockpit.journal.engine import segment_by_setup_tag
 from nqcockpit.journal.models import (
     GammaRegime,
@@ -17,8 +16,8 @@ from nqcockpit.journal.models import (
     TradeOutcome,
 )
 from nqcockpit.ui.coaching_page import (
-    build_compliance_timeline_figure,
     build_equity_curve_figure,
+    build_heatmap_figure,
     build_segmentation_figure,
 )
 from nqcockpit.ui.components import render_degraded_banner, render_status_badge
@@ -140,7 +139,6 @@ def test_components_bilingual_rendering() -> None:
 
 def test_coaching_figures_bilingual_labels() -> None:
     """Vérifie que les graphiques Plotly basculent leurs titres et axes en anglais."""
-    config = load_config()
     trades = [_sample_trade(1, 1.5, True), _sample_trade(2, -1.0, False)]
     alerts = [
         TiltAlert(
@@ -160,10 +158,10 @@ def test_coaching_figures_bilingual_labels() -> None:
         fig_seg = build_segmentation_figure(
             segments, title="Expectancy by Setup Tag", by_label="Setup Tag"
         )
-        assert "Average Return per Trade (R)" in fig_seg.layout.xaxis.title.text
+        assert "Expectancy per trade (R)" in fig_seg.layout.xaxis.title.text
 
-        fig_comp = build_compliance_timeline_figure(trades, config)
-        assert "Rule Compliance Rate per Session (%)" in fig_comp.layout.title.text
-        assert "Trading Session" in fig_comp.layout.xaxis.title.text
+        fig_heat = build_heatmap_figure(trades)
+        assert "Expectancy by hour (NY session) x weekday" in fig_heat.layout.title.text
+        assert "Hour (ET)" in fig_heat.layout.xaxis.title.text
     finally:
         set_lang("FR")
