@@ -283,7 +283,11 @@ def test_today_renders_with_empty_database_and_shows_no_data() -> None:
     assert not app.exception, app.exception
     markdown = unescape(" ".join(element.value for element in app.markdown))
     assert "No data" in markdown
-    assert "No chart data" in unescape(" ".join(el.value for el in app.info))
+    # The TradingView widget always renders, so the old "No chart data"
+    # placeholder is gone; the symbol picker stays available without bars.
+    info = unescape(" ".join(el.value for el in app.info))
+    assert "No chart data" not in info
+    assert any(box.label == "Symbol" for box in app.selectbox)
 
 
 # ---------------------------------------------------------------------------

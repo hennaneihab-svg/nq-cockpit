@@ -7,7 +7,7 @@ Acceptance criteria covered here:
   data at all (friendly states, no traceback);
 - the status chip is the only global status indicator and its tooltip lists
   every degraded feed;
-- the chart layer toggles are display-only options;
+- the chart layer toggles are gone: the chart is the TradingView widget;
 - every page still renders headless through Streamlit's AppTest.
 """
 
@@ -275,7 +275,7 @@ def test_status_chip_tooltip_lists_degraded_feeds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. Chart layer toggles are display-only
+# 3. Chart builder options stay display-only (kept for the Levels page)
 # ---------------------------------------------------------------------------
 
 
@@ -342,7 +342,11 @@ def test_terminal_renders_with_degraded_data() -> None:
     assert "Degraded" in markdown
     assert "Degraded feeds:" in markdown
     assert "Macro radar" in markdown
-    assert "No chart data" in unescape(" ".join(el.value for el in app.info))
+    # The TradingView widget renders even without stored bars, so the old
+    # "No chart data" placeholder is gone; the symbol picker stays usable.
+    info = unescape(" ".join(el.value for el in app.info))
+    assert "No chart data" not in info
+    assert any(box.label == "Symbol" for box in app.selectbox)
 
 
 def test_terminal_renders_without_data() -> None:
@@ -357,15 +361,49 @@ def test_terminal_renders_without_data() -> None:
     assert "No upcoming" not in markdown
 
 
-def test_terminal_layer_toggles_rerender_without_error() -> None:
+def test_terminal_chart_symbol_picker_has_three_options() -> None:
     data = _data(_profile())
     app = AppTest.from_function(_terminal_script, args=(data,), default_timeout=60)
     app.run()
-    assert [toggle.label for toggle in app.toggle] == ["Levels", "Labels"]
-    app.toggle[0].set_value(False)
-    app.toggle[1].set_value(False)
-    app.run()
+
     assert not app.exception, app.exception
+    assert not app.toggle, "the layer toggles must be gone from the Terminal"
+    labels = [box.label for box in app.selectbox]
+    assert "Symbol" in labels
+    box = next(box for box in app.selectbox if box.label == "Symbol")
+    assert list(box.options) == ["NASDAQ:NDX", "CAPITALCOM:US100", "CME_MINI:NQ1!"]
+    assert box.value == "NASDAQ:NDX"
+    # The widget embeds a real TradingView script URL.
+    from nqcockpit.ui import terminal_page
+
+    source = Path(terminal_page.__file__).read_text(encoding="utf-8")
+    assert "advanced_chart_html" in source
+    assert "components.html" in source
+
+
+def test_terminal_renders_in_en_and_fr_with_no_raw_keys() -> None:
+    data = _data(_profile())
+    texts: dict[str, str] = {}
+    for lang in ("EN", "FR"):
+        app = AppTest.from_function(_terminal_script, args=(data,), default_timeout=60)
+        app.session_state["lang"] = lang
+        app.run()
+        assert not app.exception, (lang, app.exception)
+
+        parts = [element.value for element in app.markdown]
+        parts += [element.value for element in app.caption]
+        parts += [element.value for element in app.info]
+        parts += [element.value for element in app.warning]
+        parts += [box.label for box in app.selectbox]
+        parts += [str(option) for box in app.selectbox for option in box.options]
+        parts += [tab.label for tab in app.tabs]
+        parts += [button.label for button in app.button]
+        joined = " ".join(parts)
+        assert "ui." not in joined, (lang, joined)
+        texts[lang] = joined
+
+    assert "Symbol" in texts["EN"]
+    assert "Symbole" in texts["FR"]
 
 
 def test_terminal_brief_button_opens_without_error() -> None:
@@ -431,8 +469,7 @@ def test_terminal_labels_exist_in_both_languages() -> None:
     for key in (
         "ui.terminal.brief",
         "ui.terminal.brief_title",
-        "ui.terminal.layer_levels",
-        "ui.terminal.layer_labels",
+        "ui.terminal.symbol",
         "ui.terminal.tab_radar",
         "ui.terminal.tab_news",
         "ui.terminal.tab_events",

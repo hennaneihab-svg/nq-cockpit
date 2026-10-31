@@ -4,8 +4,8 @@ Layout (1920x1080, no page-level scrolling):
 
 - top bar: spot, one data-status chip, Algiers kill-zone state, next event and
   the Brief button that opens the pre-session briefing in a dialog;
-- main area: the existing NQ chart (with layer toggles and distance chips) on
-  the left, and Radar / News / Events / Coach tabs on the right;
+- main area: the TradingView advanced chart (symbol picker + key-level pills)
+  on the left, and Radar / News / Events / Coach tabs on the right;
 - bottom strip: trades today, kill-zone state and gamma regime.
 
 Every number comes from an existing engine/DB field: this module only lays out
@@ -18,19 +18,21 @@ import logging
 from html import escape
 
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.discipline.engine import evaluate_session_state
 from nqcockpit.discipline.models import DisciplineSessionState
 from nqcockpit.journal.store import load_trades
 from nqcockpit.profile.models import DayProfile, NoTradeFlagCode
-from nqcockpit.ui import sections
+from nqcockpit.ui import sections, tv_widgets
 from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.coaching_page import render_coaching_summary
 from nqcockpit.ui.cockpit_page import TodayData, load_today_data
 from nqcockpit.ui.components import badge_html
 from nqcockpit.ui.db import get_ui_db
 from nqcockpit.ui.i18n import (
+    get_lang,
     label,
     normalize_status_code,
     status_label,
@@ -40,8 +42,7 @@ from nqcockpit.ui.i18n import (
 
 log = logging.getLogger(__name__)
 
-LAYERS_STATE_KEY = "terminal_show_levels"
-LABELS_STATE_KEY = "terminal_show_labels"
+SYMBOL_STATE_KEY = "terminal_chart_symbol"
 # Height budget (1920x1080, single screen). The block container now clears the
 # fixed Streamlit header (3.75rem) with 4rem of top padding (+57.6px versus the
 # old 0.4rem), so the chart and the right panel each give back 60px: the whole
@@ -385,40 +386,34 @@ def render_distance_chips(profile: DayProfile | None) -> None:
     )
 
 
-def render_layer_toggles() -> tuple[bool, bool]:
-    """Levels/Labels toggles above the chart, wired to existing chart options."""
-    toggle_cols = st.columns([1.1, 1.1, 6.8], gap="small")
-    with toggle_cols[0]:
-        show_levels = st.toggle(
-            label("ui.terminal.layer_levels"),
-            value=True,
-            key=LAYERS_STATE_KEY,
-        )
-    with toggle_cols[1]:
-        show_labels = st.toggle(
-            label("ui.terminal.layer_labels"),
-            value=True,
-            key=LABELS_STATE_KEY,
-        )
-    with toggle_cols[2]:
-        st.markdown(
-            f'<div class="terminal-empty" style="text-align:right;">'
-            f'{escape(label("ui.terminal.layers_hint"))}</div>',
-            unsafe_allow_html=True,
-        )
-    return bool(show_levels), bool(show_labels)
+def render_symbol_selector() -> str:
+    """Compact TradingView symbol picker; defaults to the NQ proxy."""
+    options = list(tv_widgets.NQ_SYMBOL_OPTIONS)
+    default = tv_widgets.DEFAULT_NQ_SYMBOL
+    stored = st.session_state.get(SYMBOL_STATE_KEY)
+    if stored not in options:
+        st.session_state[SYMBOL_STATE_KEY] = default
+    symbol = st.selectbox(
+        label("ui.terminal.symbol"),
+        options=options,
+        key=SYMBOL_STATE_KEY,
+    )
+    return str(symbol)
 
 
 def render_chart_column(data: TodayData) -> None:
-    """Existing chart, taller, filling the left column of the terminal."""
-    show_levels, show_labels = render_layer_toggles()
-    sections.render_chart_section(
-        data.profile,
-        data.session_bars,
-        data.last_bar_utc,
-        show_levels=show_levels,
-        show_labels=show_labels,
+    """TradingView advanced chart plus the key-level pills, left column."""
+    symbol = render_symbol_selector()
+    timezone = getattr(data.config.timezones, "display", None) or "Africa/Algiers"
+    components.html(
+        tv_widgets.advanced_chart_html(
+            symbol,
+            locale=get_lang().lower(),
+            timezone=timezone,
+            height=CHART_HEIGHT,
+        ),
         height=CHART_HEIGHT,
+        scrolling=False,
     )
     render_distance_chips(data.profile)
 
@@ -585,12 +580,15 @@ def render_terminal(data: TodayData | None = None) -> None:
 
 
 __all__ = [
+    "SYMBOL_STATE_KEY",
     "degraded_feeds",
     "maybe_render_brief_dialog",
     "render_bottom_strip",
+    "render_chart_column",
     "render_distance_chips",
     "render_event_panel",
     "render_side_panel",
+    "render_symbol_selector",
     "render_terminal",
     "render_top_bar",
     "session_state_snapshot",

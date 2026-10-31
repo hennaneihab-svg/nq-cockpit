@@ -379,12 +379,7 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "Pre-session briefing",
         "fr": "Briefing pré-séance",
     },
-    "ui.terminal.layer_levels": {"en": "Levels", "fr": "Niveaux"},
-    "ui.terminal.layer_labels": {"en": "Labels", "fr": "Étiquettes"},
-    "ui.terminal.layers_hint": {
-        "en": "Layer toggles affect the chart only",
-        "fr": "Les options de calque s'appliquent au graphique uniquement",
-    },
+    "ui.terminal.symbol": {"en": "Symbol", "fr": "Symbole"},
     "ui.terminal.tab_radar": {"en": "Radar", "fr": "Radar"},
     "ui.terminal.tab_news": {"en": "News", "fr": "Actualités"},
     "ui.terminal.tab_events": {"en": "Events", "fr": "Événements"},
