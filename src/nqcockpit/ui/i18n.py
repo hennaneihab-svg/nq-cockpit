@@ -539,8 +539,8 @@ LABELS: dict[str, dict[str, str]] = {
         "fr": "Langue de l'interface",
     },
     "ui.settings.language_help": {
-        "en": "Applies immediately; English is the default (config ui.language).",
-        "fr": "S'applique immédiatement ; l'anglais est la langue par défaut (config ui.language).",
+        "en": "Applies immediately; English is the default language.",
+        "fr": "S'applique immédiatement ; l'anglais est la langue par défaut.",
     },
     "ui.settings.data": {"en": "Data & storage", "fr": "Données et stockage"},
     "ui.settings.db_path": {"en": "SQLite database", "fr": "Base SQLite"},
