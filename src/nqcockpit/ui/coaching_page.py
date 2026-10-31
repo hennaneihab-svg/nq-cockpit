@@ -913,6 +913,107 @@ def render_coaching_app() -> None:
         st.table(alert_rows)
 
 
+def render_coaching_summary() -> None:
+    """Compact, read-only coaching summary for the Terminal side panel.
+
+    Reuses the existing journal loaders and coaching engine (no new
+    calculation): sample sufficiency, headline metrics, top leaks and the rule
+    to reinforce. An empty journal shows a friendly message, never a traceback.
+    """
+    try:
+        config = load_config()
+        db_path_str = os.getenv("NQ_DATA_DB_PATH", config.data.db_path)
+        conn = get_ui_db(db_path_str)
+        trades = load_trades(conn)
+        min_trades = config.validation.min_sessions
+        stats = compute_performance_stats(
+            trades, min_trades=min_trades, config=config
+        )
+        report = generate_coaching_report(
+            trades,
+            "global",
+            t("Tout l'historique", "Full history"),
+            config,
+        )
+    except Exception as exc:  # noqa: BLE001 - a missing journal never breaks the page
+        st.info(
+            t(
+                f"Rapport de coaching indisponible ({exc}).",
+                f"Coaching report unavailable ({exc}).",
+            )
+        )
+        return
+
+    if not trades:
+        st.info(
+            t(
+                "Aucun trade enregistré : le résumé de coaching apparaîtra "
+                "après le premier trade documenté.",
+                "No trade recorded yet: the coaching summary will appear "
+                "after the first documented trade.",
+            )
+        )
+        return
+
+    wr = f"{stats.win_rate:.1%}" if stats.win_rate is not None else "—"
+    exp = (
+        f"{stats.expectancy_r:+.3f}R"
+        if stats.sample_sufficient and stats.expectancy_r is not None
+        else "—"
+    )
+    compliance = (
+        f"{stats.compliance_rate:.1%}" if stats.compliance_rate is not None else "—"
+    )
+    st.markdown(
+        f"""
+        <div class="card">
+            <div class="strip">
+                <div class="strip-item">
+                    <div class="strip-label">{t("Trades", "Trades")}</div>
+                    <div class="strip-value">{stats.n_trades} / {min_trades}</div>
+                </div>
+                <div class="strip-item">
+                    <div class="strip-label">Win Rate</div>
+                    <div class="strip-value">{wr}</div>
+                </div>
+                <div class="strip-item">
+                    <div class="strip-label">{t("Espérance", "Expectancy")}</div>
+                    <div class="strip-value">{exp}</div>
+                </div>
+                <div class="strip-item">
+                    <div class="strip-label">{t("Conformité", "Compliance")}</div>
+                    <div class="strip-value">{compliance}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not stats.sample_sufficient:
+        st.warning(
+            t(
+                f"Échantillon insuffisant ({stats.n_trades}/{min_trades} trades) : "
+                "les métriques restent descriptives, sans conclusion statistique.",
+                f"Insufficient sample ({stats.n_trades}/{min_trades} trades): "
+                "metrics stay descriptive, with no statistical conclusion.",
+            )
+        )
+
+    if report.top_leaks:
+        st.markdown(f"**{t('Fuites principales', 'Top leaks')}**")
+        for index, leak in enumerate(report.top_leaks[:3], 1):
+            st.markdown(f"{index}. {tr_text(leak)}")
+    if report.rule_to_reinforce:
+        st.warning(f"**{tr_text(report.rule_to_reinforce)}**")
+    if report.strength_to_keep:
+        st.success(f"**{tr_text(report.strength_to_keep)}**")
+    if report.measurable_goals:
+        st.markdown(f"**{t('Objectifs mesurables', 'Measurable goals')}**")
+        for goal in report.measurable_goals:
+            st.markdown(f"- {tr_text(goal)}")
+
+
 if __name__ == "__main__":
     render_coaching_app()
 

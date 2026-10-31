@@ -1,11 +1,9 @@
-"""Today page — the default landing of the NQ Cockpit.
+"""Terminal page data layer for the NQ Cockpit.
 
-Progressive disclosure: four visible blocks (status strip, plain-language read,
-chart + levels, watch next) and five collapsed expanders for the full detail.
-
-This module also keeps the historical entry points used by the rest of the
-application and the test-suite: ``render_cockpit`` (alias of the Today page)
-and the four cached loaders.
+This module keeps the cached loaders (profile, macro radar, news wire, chart
+bars), the ``TodayData`` container and the historical entry points used by the
+rest of the application and the test-suite. The page itself now renders the
+single-screen Terminal layout — see ``nqcockpit.ui.terminal_page``.
 """
 
 from __future__ import annotations
@@ -29,22 +27,8 @@ from nqcockpit.profile.engine import build_day_profile
 from nqcockpit.profile.models import DayProfile
 from nqcockpit.ui import sections
 from nqcockpit.ui.chart import load_latest_session_bars
-from nqcockpit.ui.i18n import label, t
-from nqcockpit.ui.sections import (
-    _radar_card_html,
-    _wire_item_html,
-    inject_ui_css,
-    render_chart_section,
-    render_cot,
-    render_header_strip,
-    render_health,
-    render_levels_table,
-    render_news_wire,
-    render_radar_cards,
-    render_scenarios,
-    render_today_read,
-    render_watch_next,
-)
+from nqcockpit.ui.i18n import t
+from nqcockpit.ui.sections import _radar_card_html, _wire_item_html
 
 log = logging.getLogger(__name__)
 
@@ -153,65 +137,19 @@ def load_today_data() -> TodayData:
 
 
 def render_today(data: TodayData | None = None) -> None:
-    """Render the Today page (four visible blocks, then collapsed detail)."""
-    if data is None:
-        with st.spinner(t("Chargement du cockpit…", "Loading the cockpit…")):
-            data = load_today_data()
+    """Historical entry point — the landing page is now the Terminal page."""
+    from nqcockpit.ui.terminal_page import render_terminal
 
-    inject_ui_css()
-
-    # Block 1 — header strip.
-    render_header_strip(data.profile, data.config, data.now_utc)
-
-    # Block 2 — one plain-language read card.
-    render_today_read(data.profile)
-
-    # Block 3 — hero: existing chart next to the compact levels table.
-    st.markdown(
-        f'<div class="section-title">{label("ui.today.hero_title")}</div>',
-        unsafe_allow_html=True,
-    )
-    chart_col, levels_col = st.columns([1.7, 1], gap="medium")
-    with chart_col:
-        render_chart_section(
-            data.profile, data.session_bars, data.last_bar_utc
-        )
-    with levels_col:
-        render_levels_table(data.profile)
-
-    # Block 4 — watch next: next high-impact event + top three drivers.
-    render_watch_next(data.profile, data.radar)
-
-    # Everything else — collapsed, plain-English expanders.
-    with st.expander(label("ui.expander.radar"), expanded=False):
-        if data.radar is not None:
-            render_radar_cards(data.radar.as_list())
-        else:
-            st.warning(label("ui.today.no_drivers"))
-    with st.expander(label("ui.expander.news"), expanded=False):
-        render_news_wire(data.wire)
-    with st.expander(label("ui.expander.cot"), expanded=False):
-        render_cot(data.profile.cot)
-    with st.expander(label("ui.expander.scenarios"), expanded=False):
-        render_scenarios(data.profile)
-    with st.expander(label("ui.expander.health"), expanded=False):
-        render_health(data.profile)
-
-    st.caption(
-        t(
-            "Aide à la décision non-directionnelle · aucune exécution d'ordre.",
-            "Non-directional decision support · no order execution.",
-        )
-    )
+    render_terminal(data)
 
 
 def render_cockpit() -> None:
-    """Historical entry point — the cockpit is now the Today page."""
+    """Historical entry point — the cockpit is now the Terminal page."""
     try:
         st.set_page_config(
-            page_title=t("NQ Cockpit · Aujourd'hui", "NQ Cockpit · Today"),
+            page_title=t("NQ Cockpit · Terminal", "NQ Cockpit · Terminal"),
             layout="wide",
-            initial_sidebar_state="expanded",
+            initial_sidebar_state="collapsed",
         )
     except StreamlitAPIException:
         pass
@@ -221,6 +159,7 @@ def render_cockpit() -> None:
 # Backwards-compatible helper aliases (used by older tests / callers).
 _render_radar_card_html = _radar_card_html
 _render_wire_item_html = _wire_item_html
+
 
 __all__ = [
     "TodayData",

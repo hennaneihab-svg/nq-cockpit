@@ -43,6 +43,7 @@ NOW_UTC = datetime(2026, 10, 29, 13, 0, tzinfo=UTC)
 HELP_TERMS = ("call_wall", "gamma_flip", "put_support", "expected_move", "leveraged_funds")
 
 LAYOUT_MODULES = (
+    "terminal_page",
     "cockpit_page",
     "levels_page",
     "macro_page",
@@ -201,17 +202,15 @@ def _render_today_script(data):
 # ---------------------------------------------------------------------------
 
 
-def test_six_pages_have_names_and_descriptions_in_en_and_fr() -> None:
-    """Every destination has a plain name and one-line description in both languages."""
+def test_four_pages_have_names_and_descriptions_in_en_and_fr() -> None:
+    """Every terminal destination has a plain name and description in both languages."""
     assert page_keys() == [
-        "today",
-        "levels",
-        "macro",
+        "terminal",
         "journal",
         "coaching",
         "settings",
     ]
-    assert DEFAULT_PAGE == "today"
+    assert DEFAULT_PAGE == "terminal"
     for page in PAGES:
         for key in (page.name_key, page.desc_key):
             assert key in LABELS, f"missing i18n key {key}"
@@ -227,15 +226,16 @@ def test_six_pages_have_names_and_descriptions_in_en_and_fr() -> None:
 
 def test_legacy_links_resolve_to_the_new_pages() -> None:
     """Old section numbers and names still land on a valid destination."""
-    assert resolve_page(None) == "today"
-    assert resolve_page("1") == "today"
-    assert resolve_page("cockpit") == "today"
+    assert resolve_page(None) == "terminal"
+    assert resolve_page("1") == "terminal"
+    assert resolve_page("cockpit") == "terminal"
     assert resolve_page("2") == "journal"
     assert resolve_page("discipline") == "journal"
     assert resolve_page("5") == "settings"
-    assert resolve_page("briefing") == "settings"
-    assert resolve_page("levels") == "levels"
-    assert resolve_page("unknown-value") == "today"
+    assert resolve_page("briefing") == "terminal"
+    assert resolve_page("levels") == "terminal"
+    assert resolve_page("macro") == "terminal"
+    assert resolve_page("unknown-value") == "terminal"
 
 
 def test_technical_terms_have_plain_help_in_en_and_fr() -> None:
@@ -259,23 +259,23 @@ def test_technical_terms_have_plain_help_in_en_and_fr() -> None:
 
 
 def test_today_renders_with_data() -> None:
-    """With a full profile the page renders four blocks and no exception."""
+    """With a full profile the Terminal renders on one screen and no exception."""
     data = _today_data(_profile_with_data(), with_feeds=True)
     app = AppTest.from_function(_render_today_script, args=(data,), default_timeout=30)
     app.run()
 
     assert not app.exception, app.exception
     markdown = unescape(" ".join(element.value for element in app.markdown))
-    assert "Today's read" in markdown
+    assert "NQ spot" in markdown
     assert "20,000.00" in markdown
     assert "Call Wall" in markdown
     assert "Gamma Flip" in markdown
-    assert "Expected Move" in markdown
-    assert "Watch next" in markdown
+    assert "Put Support" in markdown
+    assert [tab.label for tab in app.tabs] == ["Radar", "News", "Events", "Coach"]
 
 
 def test_today_renders_with_empty_database_and_shows_no_data() -> None:
-    """Empty DB: the page still renders, with explicit 'No data' states only."""
+    """Empty DB: the Terminal still renders, with explicit 'No data' states only."""
     data = _today_data(_empty_profile(), with_feeds=False)
     app = AppTest.from_function(_render_today_script, args=(data,), default_timeout=30)
     app.run()
@@ -283,7 +283,7 @@ def test_today_renders_with_empty_database_and_shows_no_data() -> None:
     assert not app.exception, app.exception
     markdown = unescape(" ".join(element.value for element in app.markdown))
     assert "No data" in markdown
-    assert "Watch next" in markdown
+    assert "No chart data" in unescape(" ".join(el.value for el in app.info))
 
 
 # ---------------------------------------------------------------------------

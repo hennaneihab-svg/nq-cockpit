@@ -1,13 +1,9 @@
-"""Application Streamlit Consolidée Multipage NQ Cockpit (Design System Swetrix).
+"""NQ Cockpit Streamlit entry point — single-screen Terminal layout.
 
-Design System extrait de Swetrix (Analytics Dashboard) :
-- Fond principal : #020617 (Tailwind Slate-950)
-- Cartes & Panneaux : #0F172A (Tailwind Slate-900 / 0.6)
-- Bordures : rgba(51, 65, 85, 0.6) (Tailwind Slate-800/60)
-- Texte principal : #F8FAFC (Gray-50), Secondaire : #CBD5E1 (Slate-300), Muted : #94A3B8 (Slate-400)
-- Accents : Indigo #6366F1 / #818CF8
-- Rayons de bordure : rounded-lg (8px) pour cartes, rounded-md (6px) pour badges
-- Typographie soignée, alignement net, zéro emoji, conformité totale aux règles.
+Top area: brand + compact horizontal navigation (Terminal | Journal &
+Discipline | Coaching | Settings). The sidebar starts collapsed and no longer
+carries the language switch (it lives in Settings). Colour stays reserved for
+data status; the active tab only gets a neutral border.
 """
 
 from __future__ import annotations
@@ -21,43 +17,35 @@ import streamlit as st
 from nqcockpit.config import load_config
 from nqcockpit.levels.scheduler import start_levels_scheduler_once
 from nqcockpit.ui.coaching_page import render_coaching_app
-from nqcockpit.ui.cockpit_page import render_cockpit
 from nqcockpit.ui.components import render_page_safely
-from nqcockpit.ui.i18n import render_lang_selector, t
+from nqcockpit.ui.i18n import t
 from nqcockpit.ui.journal_discipline_page import render_journal_discipline_page
-from nqcockpit.ui.levels_page import render_levels_page
-from nqcockpit.ui.macro_page import render_macro_page
-from nqcockpit.ui.nav import (
-    active_page,
-    page_name,
-    render_sidebar_nav,
-)
+from nqcockpit.ui.nav import active_page, page_name, render_top_nav
 from nqcockpit.ui.settings_page import render_settings_page
+from nqcockpit.ui.terminal_page import render_terminal
 
 log = logging.getLogger(__name__)
 
-# One renderer per plain-language destination. The pre-session briefing is
-# embedded in Settings, so the historical briefing page is reused there.
+# One renderer per destination. Levels, Macro and Briefing are now panels of
+# the Terminal page instead of separate destinations.
 PAGE_RENDERERS = {
-    "today": render_cockpit,
-    "levels": render_levels_page,
-    "macro": render_macro_page,
+    "terminal": render_terminal,
     "journal": render_journal_discipline_page,
     "coaching": render_coaching_app,
     "settings": render_settings_page,
 }
 
 # ---------------------------------------------------------------------------
-# Configuration Initiale Unique
+# Initial configuration (single call per run)
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
     page_title="NQ Cockpit — Trading Desk",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# Injection CSS Thème Swetrix
+# Swetrix dark theme, shared by every destination.
 st.markdown(
     """
     <style>
@@ -67,48 +55,25 @@ st.markdown(
         font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 98% !important;
+        padding-top: 0.6rem !important;
+        padding-bottom: 1rem !important;
+        max-width: 99% !important;
     }
-    /* En-tête de barre latérale Swetrix */
-    .sidebar-brand {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
-    }
-    .sidebar-brand-title {
-        font-size: 1.15rem;
+    .app-brand {
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 1.05rem;
         font-weight: 700;
-        letter-spacing: -0.02em;
+        letter-spacing: 0.05em;
         color: #F8FAFC;
+        white-space: nowrap;
+        padding-top: 4px;
     }
-    .sidebar-brand-badge {
-        background-color: rgba(99, 102, 241, 0.15);
-        border: 1px solid rgba(99, 102, 241, 0.35);
-        color: #A5B4FC;
-        border-radius: 4px;
-        padding: 2px 6px;
-        font-size: 0.7rem;
+    .app-brand span {
+        color: #64748B;
         font-weight: 600;
-        font-family: ui-monospace, monospace;
+        font-size: 0.72rem;
+        margin-left: 6px;
     }
-    .sidebar-clock {
-        background-color: #0F172A;
-        border: 1px solid rgba(51, 65, 85, 0.6);
-        border-radius: 8px;
-        padding: 10px 12px;
-        margin-bottom: 14px;
-        font-family: ui-monospace, SFMono-Regular, monospace;
-        font-size: 0.76rem;
-        color: #94A3B8;
-        line-height: 1.5;
-    }
-    .sidebar-clock b {
-        color: #F8FAFC;
-    }
-    /* Force l'élargissement complet des composants HTML personnalisés */
     [data-testid="stCustomComponentV1"] {
         width: 100% !important;
     }
@@ -117,12 +82,6 @@ st.markdown(
         min-width: 100% !important;
         border-radius: 8px !important;
         border: 1px solid rgba(51, 65, 85, 0.6) !important;
-    }
-    /* Stylisation du menu de navigation */
-    .stRadio label {
-        font-size: 0.85rem !important;
-        font-weight: 500 !important;
-        color: #CBD5E1 !important;
     }
     /* Buttons stay neutral: colour is reserved for data status. */
     .stButton > button[kind="primary"] {
@@ -148,7 +107,7 @@ st.markdown(
 
 @st.cache_resource
 def _ensure_file_logging() -> bool:
-    """Configure une seule fois les logs fichier (tracebacks complets consultables)."""
+    """Configure file logging once (full tracebacks stay consultable)."""
     from nqcockpit.logging import setup_logging
 
     setup_logging()
@@ -157,12 +116,10 @@ def _ensure_file_logging() -> bool:
 
 @st.cache_resource(show_spinner=False)
 def _prewarm_cockpit_caches() -> bool:
-    """Préchauffe une seule fois les caches 60 s du cockpit (première ouverture).
+    """Warm the 60 s cockpit caches in parallel for a fast first paint.
 
-    Les chargements indépendants (profil, radar, fil) partent en parallèle : le
-    premier rendu lit ensuite les caches, au lieu de refaire les appels réseau.
-    Une erreur de préchauffage est journalisée et n'empêche pas l'affichage :
-    la page montre son statut DÉGRADÉ habituel.
+    A failed pre-warm is logged and never blocks the page: the terminal shows
+    its usual degraded status instead.
     """
     from nqcockpit.ui.cockpit_page import (
         load_chart_bars_cached,
@@ -173,39 +130,36 @@ def _prewarm_cockpit_caches() -> bool:
 
     db_path = str(Path(load_config().data.db_path))
     loaders = {
-        "profil de séance": lambda: load_day_profile_cached(db_path),
-        "radar macro": load_macro_radar_cached,
-        "fil d'actualités": lambda: load_news_wire_cached(max_items_per_source=4),
+        "session profile": lambda: load_day_profile_cached(db_path),
+        "macro radar": load_macro_radar_cached,
+        "news wire": lambda: load_news_wire_cached(max_items_per_source=4),
     }
     with ThreadPoolExecutor(max_workers=len(loaders)) as pool:
         futures = {pool.submit(loader): name for name, loader in loaders.items()}
         for future in as_completed(futures):
             try:
                 future.result()
-            except Exception as exc:  # noqa: BLE001 - un cache manquant ne bloque pas l'app
-                log.warning("Préchauffage %s incomplet: %s", futures[future], exc)
+            except Exception as exc:  # noqa: BLE001 - a missing cache never blocks the app
+                log.warning("Pre-warm %s incomplete: %s", futures[future], exc)
 
-    # Après le profil (qui peut insérer des barres) pour lire la séance la plus fraîche.
     try:
         load_chart_bars_cached(db_path)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Préchauffage graphique incomplet: %s", exc)
+        log.warning("Pre-warm chart incomplete: %s", exc)
     return True
 
 
 def main() -> None:
-    """Application entry point: sidebar navigation + one page at a time."""
+    """Application entry point: top navigation + one page at a time."""
     _ensure_file_logging()
     # A single scheduler start per process (Streamlit reruns reuse it).
     start_levels_scheduler_once()
 
-    # Deep links: ?page=today|levels|macro|journal|coaching|settings
-    # plus the historical section numbers (1-5).
+    # Deep links: ?page=terminal|journal|coaching|settings, legacy aliases too.
     query_page = str(st.query_params.get("page", ""))
     page_key = active_page(query_page)
 
-    # Pre-warm only the default landing page (first run), so Today paints fast.
-    if page_key == "today":
+    if page_key == "terminal":
         with st.spinner(
             t(
                 "Préchauffage des données de marché (première ouverture)…",
@@ -214,35 +168,25 @@ def main() -> None:
         ):
             _prewarm_cockpit_caches()
 
-    # ---------------------------------------------------------------------------
-    # Sidebar: brand, language, then the six plain-language destinations.
-    # ---------------------------------------------------------------------------
-    st.sidebar.markdown(
-        """
-        <div class="sidebar-brand">
-            <span class="sidebar-brand-title">NQ COCKPIT</span>
-            <span class="sidebar-brand-badge">DESK</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.sidebar:
-        render_lang_selector(key_prefix="sidebar_main")
-
-    render_sidebar_nav(page_key)
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption(
-        t(
-            "Aide à la décision non-directionnelle · NQ Cockpit",
-            "Non-directional decision support · NQ Cockpit",
+    brand_col, nav_col = st.columns([2.2, 9.8], vertical_alignment="center")
+    with brand_col:
+        st.markdown(
+            '<div class="app-brand">NQ COCKPIT<span>DESK</span></div>',
+            unsafe_allow_html=True,
         )
-    )
+    with nav_col:
+        page_key = render_top_nav(page_key)
 
     # One renderer per destination; unexpected exceptions are caught and logged.
     renderer = PAGE_RENDERERS[page_key]
     render_page_safely(renderer, page_name(page_key))
+
+    st.caption(
+        t(
+            "Aide à la décision non-directionnelle · aucune exécution d'ordre · NQ Cockpit",
+            "Non-directional decision support · no order execution · NQ Cockpit",
+        )
+    )
 
 
 if __name__ == "__main__":

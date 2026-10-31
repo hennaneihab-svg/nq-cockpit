@@ -944,6 +944,10 @@ def render_chart_section(
     profile: DayProfile,
     session_bars: list,
     last_bar_utc: datetime | None,
+    *,
+    show_levels: bool = True,
+    show_labels: bool = True,
+    height: int = 520,
 ) -> None:
     """Existing NQ chart with the gamma lines; honest empty state otherwise."""
     try:
@@ -953,6 +957,9 @@ def render_chart_section(
             call_wall=profile.call_wall_nq,
             put_support=profile.put_support_nq,
             last_bar_utc=last_bar_utc,
+            show_levels=show_levels,
+            show_labels=show_labels,
+            height=height,
         )
         if chart.figure is not None:
             st.plotly_chart(chart.figure, use_container_width=True)

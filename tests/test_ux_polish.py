@@ -24,7 +24,7 @@ from nqcockpit.ui.briefing_page import (
     prepare_briefing_markdown,
 )
 from nqcockpit.ui.i18n import LABELS, set_lang, tr_text
-from nqcockpit.ui.nav import NAV_CSS
+from nqcockpit.ui.nav import NAV_CSS, TOP_NAV_CSS
 from nqcockpit.ui.sections import UI_CSS, render_health
 
 UI_DIR = Path(i18n.__file__).resolve().parent
@@ -218,12 +218,13 @@ def test_source_health_renders_one_row_per_source() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. Sidebar spacing: description under its own button
+# 7. Top navigation: compact horizontal control, no sidebar block
 # ---------------------------------------------------------------------------
 
 
-def test_nav_css_tightens_description_and_separates_buttons() -> None:
-    assert ".nav-desc" in NAV_CSS
-    assert "margin-top: -10px" in NAV_CSS
-    assert "margin-bottom: 14px" in NAV_CSS
-    assert 'div[data-testid="stButton"]' in NAV_CSS
+def test_top_nav_css_keeps_one_compact_horizontal_row() -> None:
+    assert 'div[data-testid="stRadio"]' in TOP_NAV_CSS
+    assert "flex-direction: row" in TOP_NAV_CSS
+    assert "flex-wrap: wrap" in TOP_NAV_CSS
+    assert ".topnav-brand" in TOP_NAV_CSS
+    assert NAV_CSS == TOP_NAV_CSS

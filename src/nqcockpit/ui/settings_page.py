@@ -1,4 +1,4 @@
-"""Settings page — language, data locations and the pre-session briefing."""
+"""Settings page — language, data locations and display configuration."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import streamlit as st
 
 from nqcockpit.config import find_config_path, load_config
 from nqcockpit.ui import sections
-from nqcockpit.ui.briefing_page import render_briefing_page
 from nqcockpit.ui.components import badge_html
 from nqcockpit.ui.i18n import get_lang, label, set_lang
 
@@ -101,10 +100,8 @@ def render_settings_page() -> None:
         unsafe_allow_html=True,
     )
 
-    # --- Pre-session briefing (existing page, embedded) -------------------
-    with st.expander(label("ui.settings.briefing"), expanded=False):
-        st.caption(label("ui.settings.briefing_note"))
-        render_briefing_page(embedded=True, show_title=False)
+    # --- Pre-session briefing: opened from the Terminal top bar -------------
+    st.caption(label("ui.settings.briefing_note"))
 
     # --- About ------------------------------------------------------------
     st.markdown(

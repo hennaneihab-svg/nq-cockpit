@@ -202,6 +202,11 @@ LABELS: dict[str, dict[str, str]] = {
     # Tous les libellés visibles passent par ce dictionnaire en/fr.
     # ------------------------------------------------------------------
     "ui.nav.title": {"en": "Navigate", "fr": "Navigation"},
+    "ui.nav.terminal.name": {"en": "Terminal", "fr": "Terminal"},
+    "ui.nav.terminal.desc": {
+        "en": "Chart, levels and live context on one screen",
+        "fr": "Graphique, niveaux et contexte en direct sur un écran",
+    },
     "ui.nav.today.name": {"en": "Today", "fr": "Aujourd'hui"},
     "ui.nav.today.desc": {
         "en": "What matters right now",
@@ -232,8 +237,8 @@ LABELS: dict[str, dict[str, str]] = {
     },
     "ui.nav.settings.name": {"en": "Settings", "fr": "Réglages"},
     "ui.nav.settings.desc": {
-        "en": "Language, data and briefing",
-        "fr": "Langue, données et briefing",
+        "en": "Language and data settings",
+        "fr": "Langue et réglages des données",
     },
     "ui.hint.click_details": {
         "en": "click for details",
@@ -368,6 +373,84 @@ LABELS: dict[str, dict[str, str]] = {
         "en": "Chart unavailable: {error}",
         "fr": "Graphique indisponible : {error}",
     },
+    # Terminal page (single screen: top bar, chart, side tabs, bottom strip)
+    "ui.terminal.brief": {"en": "Brief", "fr": "Briefing"},
+    "ui.terminal.brief_title": {
+        "en": "Pre-session briefing",
+        "fr": "Briefing pré-séance",
+    },
+    "ui.terminal.layer_levels": {"en": "Levels", "fr": "Niveaux"},
+    "ui.terminal.layer_labels": {"en": "Labels", "fr": "Étiquettes"},
+    "ui.terminal.layers_hint": {
+        "en": "Layer toggles affect the chart only",
+        "fr": "Les options de calque s'appliquent au graphique uniquement",
+    },
+    "ui.terminal.tab_radar": {"en": "Radar", "fr": "Radar"},
+    "ui.terminal.tab_news": {"en": "News", "fr": "Actualités"},
+    "ui.terminal.tab_events": {"en": "Events", "fr": "Événements"},
+    "ui.terminal.tab_coach": {"en": "Coach", "fr": "Coach"},
+    "ui.terminal.kill_zone_timer": {
+        "en": "Africa/Algiers",
+        "fr": "Africa/Alger",
+    },
+    "ui.terminal.kill_zone_label": {"en": "Kill zone", "fr": "Kill zone"},
+    "ui.terminal.kill_zone_active": {
+        "en": "{name} {start}–{end} (Algiers)",
+        "fr": "{name} {start}–{end} (Alger)",
+    },
+    "ui.terminal.kill_zone_outside": {
+        "en": "Outside kill zone",
+        "fr": "Hors kill zone",
+    },
+    "ui.terminal.trades_label": {"en": "Trades today", "fr": "Trades du jour"},
+    "ui.terminal.trades_today": {"en": "{taken}/{max}", "fr": "{taken}/{max}"},
+    "ui.terminal.gamma_label": {"en": "Gamma regime", "fr": "Régime gamma"},
+    "ui.terminal.feed_radar": {"en": "Macro radar", "fr": "Radar macro"},
+    "ui.terminal.feed_news": {"en": "News wire", "fr": "Fil d'actualités"},
+    "ui.terminal.feed_chart": {"en": "Chart bars", "fr": "Barres du graphique"},
+    "ui.terminal.feed_events": {
+        "en": "Events calendar",
+        "fr": "Calendrier des événements",
+    },
+    "ui.terminal.status_tooltip_ok": {
+        "en": "All tracked feeds are fresh.",
+        "fr": "Tous les flux suivis sont frais.",
+    },
+    "ui.terminal.status_tooltip_degraded": {
+        "en": "Degraded feeds: {feeds}",
+        "fr": "Flux dégradés : {feeds}",
+    },
+    "ui.terminal.status_tooltip_stale": {
+        "en": "Stale feeds: {feeds}",
+        "fr": "Flux périmés : {feeds}",
+    },
+    "ui.terminal.status_tooltip_no_data": {
+        "en": "No market data available.",
+        "fr": "Aucune donnée de marché disponible.",
+    },
+    "ui.terminal.no_radar": {
+        "en": "Macro radar unavailable — no driver is shown.",
+        "fr": "Radar macro indisponible — aucun moteur affiché.",
+    },
+    "ui.terminal.events_empty": {
+        "en": "No event data available.",
+        "fr": "Aucune donnée d'événement disponible.",
+    },
+    "ui.terminal.events_next": {
+        "en": "Next event",
+        "fr": "Prochain événement",
+    },
+    "ui.terminal.events_risk": {
+        "en": "Event risk",
+        "fr": "Risque événementiel",
+    },
+    "ui.terminal.events_reason": {"en": "Reason", "fr": "Motif"},
+    "ui.terminal.events_note": {
+        "en": "Only the next Tier 1 event and the event risk are exposed by the "
+        "current profile; this is not a full calendar.",
+        "fr": "Seuls le prochain événement Tier 1 et le risque événementiel sont "
+        "exposés par le profil actuel ; ce n'est pas un calendrier complet.",
+    },
     "ui.levels.value": {"en": "Value", "fr": "Valeur"},
     "ui.levels.distance": {
         "en": "Distance from spot (pts)",
@@ -453,8 +536,8 @@ LABELS: dict[str, dict[str, str]] = {
     # Settings
     "ui.settings.title": {"en": "Settings", "fr": "Réglages"},
     "ui.settings.desc": {
-        "en": "Language, data locations and the pre-session briefing.",
-        "fr": "Langue, emplacements des données et briefing pré-séance.",
+        "en": "Language, data locations and display settings.",
+        "fr": "Langue, emplacements des données et réglages d'affichage.",
     },
     "ui.settings.language": {
         "en": "Interface language",
@@ -484,8 +567,8 @@ LABELS: dict[str, dict[str, str]] = {
         "fr": "Briefing pré-séance (cliquez pour les détails)",
     },
     "ui.settings.briefing_note": {
-        "en": "Optional generation of the existing pre-session briefing.",
-        "fr": "Génération optionnelle du briefing pré-séance existant.",
+        "en": "The pre-session briefing opens from the Brief button on the Terminal top bar.",
+        "fr": "Le briefing pré-séance s'ouvre depuis le bouton Briefing de la barre supérieure du Terminal.",
     },
     "ui.settings.about": {"en": "About", "fr": "À propos"},
     "ui.settings.disclaimer": {

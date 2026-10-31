@@ -93,8 +93,16 @@ def build_session_chart(
     put_support: float | None = None,
     last_bar_utc: datetime | None = None,
     symbol: str = CHART_SYMBOL,
+    show_levels: bool = True,
+    show_labels: bool = True,
+    height: int = 520,
 ) -> SessionChart:
     """Construit la figure en bougies + lignes de niveaux, ou l'état vide.
+
+    Args:
+        show_levels: dessine les lignes gamma (défaut : oui).
+        show_labels: ajoute le nom et le prix sur chaque ligne (défaut : oui).
+        height: hauteur Plotly en pixels (mise en page uniquement).
 
     Returns:
         ``SessionChart(figure=..., message="")`` si des barres existent,
@@ -137,24 +145,29 @@ def build_session_chart(
         (call_wall, "chart.call_wall", "#F59E0B"),
         (put_support, "chart.put_support", "#38BDF8"),
     )
-    for value, key, color in levels:
-        if value is None:
-            continue
-        figure.add_hline(
-            y=float(value),
-            line_dash="dash",
-            line_width=1,
-            line_color=color,
-            annotation_text=f"{label(key)} {float(value):,.1f}",
-            annotation_position="top right",
-            annotation_font_size=10,
-            annotation_font_color=color,
-        )
+    if show_levels:
+        for value, key, color in levels:
+            if value is None:
+                continue
+            line_kwargs: dict[str, object] = {
+                "y": float(value),
+                "line_dash": "dash",
+                "line_width": 1,
+                "line_color": color,
+            }
+            if show_labels:
+                line_kwargs.update(
+                    annotation_text=f"{label(key)} {float(value):,.1f}",
+                    annotation_position="top right",
+                    annotation_font_size=10,
+                    annotation_font_color=color,
+                )
+            figure.add_hline(**line_kwargs)
 
     figure.update_layout(
         template="plotly_dark",
         title=dict(text=label("chart.title"), font=dict(size=13)),
-        height=520,
+        height=int(height),
         margin=dict(l=10, r=10, t=36, b=10),
         paper_bgcolor="#0B1220",
         plot_bgcolor="#0B1220",
