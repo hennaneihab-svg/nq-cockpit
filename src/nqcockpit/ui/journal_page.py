@@ -29,6 +29,7 @@ from nqcockpit.journal.engine import (
 )
 from nqcockpit.journal.importer import import_trades_from_csv
 from nqcockpit.journal.models import (
+    DisciplineViolationType,
     GammaRegime,
     TradeDirection,
     TradeEntry,
@@ -38,6 +39,119 @@ from nqcockpit.journal.store import delete_trade, load_trades, save_trade
 from nqcockpit.ui.components import render_terminal_metric
 from nqcockpit.ui.db import get_ui_db
 from nqcockpit.ui.i18n import t, tr_text
+
+# ---------------------------------------------------------------------------
+# Display-only labels for the raw enum values stored in the journal
+# ---------------------------------------------------------------------------
+# The database keeps its historical values (`inconnu`, `faible`, `GEX+`...).
+# These tables only change what the operator reads, never what is saved.
+
+_GAMMA_REGIME_DISPLAY: dict[str, tuple[str, str]] = {
+    GammaRegime.UNKNOWN.value: ("Inconnu", "Unknown"),
+}
+
+_DIRECTION_DISPLAY: dict[str, tuple[str, str]] = {
+    TradeDirection.NONE.value: ("Aucune", "None"),
+}
+
+_VOL_REGIME_DISPLAY: dict[str, tuple[str, str]] = {
+    VolRegime.LOW.value: ("Faible", "Low"),
+    VolRegime.NORMAL.value: ("Normale", "Normal"),
+    VolRegime.HIGH.value: ("Élevée", "High"),
+    VolRegime.UNKNOWN.value: ("Inconnu", "Unknown"),
+}
+
+_VIOLATION_DISPLAY: dict[str, tuple[str, str]] = {
+    DisciplineViolationType.OUT_OF_WINDOW.value: ("Hors fenêtre", "Out of window"),
+    DisciplineViolationType.TRADE_LIMIT.value: (
+        "Limite de trades dépassée",
+        "Trade limit exceeded",
+    ),
+    DisciplineViolationType.TRADE2_AFTER_LOSS.value: (
+        "Trade 2 après perte sur le trade 1",
+        "Second trade after a loss on trade 1",
+    ),
+    DisciplineViolationType.QUICK_REENTRY.value: (
+        "Rentrée rapide après stop",
+        "Quick re-entry after stop",
+    ),
+    DisciplineViolationType.MOVED_SL.value: ("Stop-loss déplacé", "Stop-loss moved"),
+    DisciplineViolationType.EARLY_EXIT.value: ("Sortie anticipée", "Early exit"),
+    DisciplineViolationType.OVERSIZED.value: (
+        "Risque supérieur à la limite",
+        "Risk above limit",
+    ),
+    DisciplineViolationType.TILT_SIGNAL.value: ("Signal de tilt", "Tilt signal"),
+}
+
+# Segment keys produced by `segment_performance` (values stay untouched).
+_SEGMENT_BY_DISPLAY: dict[str, tuple[str, str]] = {
+    "setup_tag": ("Tag setup", "Setup tag"),
+    "gamma_regime": ("Régime gamma", "Gamma regime"),
+    "vol_regime": ("Régime volatilité", "Volatility regime"),
+    "day_of_week": ("Jour de semaine", "Day of week"),
+    "event_risk": ("Contexte événement", "Event context"),
+}
+
+# Raw segment values emitted by the engine that are not enum values.
+_SEGMENT_VALUE_DISPLAY: dict[str, tuple[str, str]] = {
+    "(sans tag)": ("(sans tag)", "(no tag)"),
+    "(aucun événement)": ("(aucun événement)", "(no event)"),
+    "Lun": ("Lun", "Mon"),
+    "Mar": ("Mar", "Tue"),
+    "Mer": ("Mer", "Wed"),
+    "Jeu": ("Jeu", "Thu"),
+    "Ven": ("Ven", "Fri"),
+    "Sam": ("Sam", "Sat"),
+    "Dim": ("Dim", "Sun"),
+}
+
+
+def window_name_label(value: str) -> str:
+    """Display label for a stored trading-window name (value unchanged)."""
+    if value == "":
+        return "—"
+    return {"trade1": "Trade 1", "trade2": "Trade 2"}.get(value, value)
+
+
+def segment_by_label(value: str) -> str:
+    """Display label for a stored `seg_by` key (value unchanged)."""
+    pair = _SEGMENT_BY_DISPLAY.get(value)
+    return t(*pair) if pair is not None else value
+
+
+def direction_label(value: str) -> str:
+    """Display label for a stored trade direction (value unchanged)."""
+    return _display_label(_DIRECTION_DISPLAY, value)
+
+
+def _display_label(table: dict[str, tuple[str, str]], value: str) -> str:
+    """Localised display text for a stored enum value (value itself unchanged)."""
+    pair = table.get(value)
+    return t(*pair) if pair is not None else value
+
+
+def gamma_regime_label(value: str) -> str:
+    """Display label for a stored gamma regime value (`inconnu` -> Unknown)."""
+    return _display_label(_GAMMA_REGIME_DISPLAY, value)
+
+
+def vol_regime_label(value: str) -> str:
+    """Display label for a stored volatility regime value."""
+    return _display_label(_VOL_REGIME_DISPLAY, value)
+
+
+def violation_type_label(value: str) -> str:
+    """Display label for a stored discipline violation type."""
+    return _display_label(_VIOLATION_DISPLAY, value)
+
+
+def journal_segment_label(value: str) -> str:
+    """Display label for a segment key produced by the performance engine."""
+    for table in (_GAMMA_REGIME_DISPLAY, _VOL_REGIME_DISPLAY, _SEGMENT_VALUE_DISPLAY):
+        if value in table:
+            return _display_label(table, value)
+    return tr_text(value)
 
 
 @st.cache_resource
@@ -137,7 +251,10 @@ def render_journal_page() -> None:
                 t("Instrument", "Instrument"), ["MNQ", "NQ"], index=0
             )
             direction = st.selectbox(
-                t("Direction", "Direction"), ["LONG", "SHORT", "NONE"], index=0
+                t("Direction", "Direction"),
+                [r.value for r in TradeDirection],
+                index=0,
+                format_func=direction_label,
             )
             window_name = st.selectbox(
                 t("Fenêtre", "Window"),
@@ -147,6 +264,7 @@ def render_journal_page() -> None:
                     if w.name not in ("trade1", "trade2")
                 ],
                 index=0,
+                format_func=window_name_label,
             )
 
         with col2:
@@ -225,11 +343,13 @@ def render_journal_page() -> None:
                 t("Régime gamma", "Gamma Regime"),
                 [r.value for r in GammaRegime],
                 index=2,
+                format_func=gamma_regime_label,
             )
             vol_regime = st.selectbox(
                 t("Régime volatilité", "Volatility Regime"),
                 [r.value for r in VolRegime],
                 index=2,
+                format_func=vol_regime_label,
             )
 
         with col5:
@@ -799,7 +919,10 @@ def render_journal_page() -> None:
                     )
                 )
                 for v in stats.violations:
-                    st.warning(f"**[{v.violation.value}]** {tr_text(v.detail)}")
+                    st.warning(
+                        f"**[{violation_type_label(v.violation.value)}]** "
+                        f"{tr_text(v.detail)}"
+                    )
 
             # Tilt alerts
             if stats.tilt_alerts:
@@ -940,6 +1063,7 @@ def render_journal_page() -> None:
             seg_by = st.selectbox(
                 t("Segmenter par", "Segment by"),
                 ["setup_tag", "gamma_regime", "vol_regime", "day_of_week", "event_risk"],
+                format_func=segment_by_label,
             )
             seg = segment_performance(all_trades, by=seg_by)
 
@@ -953,7 +1077,7 @@ def render_journal_page() -> None:
                     )
                 )
                 seg_rows.append({
-                    t("Segment", "Segment"): tr_text(label),
+                    t("Segment", "Segment"): journal_segment_label(label),
                     "n": s.n_trades,
                     "Win Rate": f"{s.win_rate:.1%}" if s.win_rate is not None else "—",
                     t("Espérance (R)", "Expectancy (R)"): (

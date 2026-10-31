@@ -54,8 +54,10 @@ st.markdown(
         color: #F8FAFC;
         font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+    /* Streamlit's header is fixed on top (3.75rem tall): keep the brand and
+       the top navigation below it instead of letting them slide underneath. */
     .block-container {
-        padding-top: 0.6rem !important;
+        padding-top: 4rem !important;
         padding-bottom: 1rem !important;
         max-width: 99% !important;
     }

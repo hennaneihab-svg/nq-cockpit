@@ -42,13 +42,17 @@ log = logging.getLogger(__name__)
 
 LAYERS_STATE_KEY = "terminal_show_levels"
 LABELS_STATE_KEY = "terminal_show_labels"
-CHART_HEIGHT = 640
-RIGHT_PANEL_HEIGHT = 690
+# Height budget (1920x1080, single screen). The block container now clears the
+# fixed Streamlit header (3.75rem) with 4rem of top padding (+57.6px versus the
+# old 0.4rem), so the chart and the right panel each give back 60px: the whole
+# terminal still fits on one screen without page-level scrolling.
+CHART_HEIGHT = 580
+RIGHT_PANEL_HEIGHT = 630
 
 TERMINAL_CSS = """
 <style>
 .block-container {
-    padding-top: 0.4rem !important;
+    padding-top: 4rem !important;
     padding-bottom: 0.4rem !important;
     max-width: 99% !important;
 }

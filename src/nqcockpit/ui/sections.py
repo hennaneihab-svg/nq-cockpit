@@ -74,8 +74,9 @@ UI_CSS = """
     color: var(--text-primary);
 }
 
+/* Clear Streamlit's fixed header (3.75rem tall, same budget as app.py). */
 .block-container {
-    padding-top: 1.25rem;
+    padding-top: 4rem;
     padding-bottom: 2rem;
     max-width: 98%;
 }
