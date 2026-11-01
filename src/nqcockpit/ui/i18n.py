@@ -451,6 +451,10 @@ LABELS: dict[str, dict[str, str]] = {
         "fr": "Seuls le prochain événement Tier 1 et le risque événementiel sont "
         "exposés par le profil actuel ; ce n'est pas un calendrier complet.",
     },
+    "ui.terminal.sources_health": {
+        "en": "Event sources",
+        "fr": "Sources événements",
+    },
     "ui.levels.value": {"en": "Value", "fr": "Valeur"},
     "ui.levels.distance": {
         "en": "Distance from spot (pts)",

@@ -22,6 +22,11 @@ from streamlit.errors import StreamlitAPIException
 
 from nqcockpit.discipline.engine import evaluate_session_state
 from nqcockpit.discipline.models import DisciplineSessionState
+from nqcockpit.events.health import (
+    load_latest_event_source_health,
+    render_source_health,
+    source_health_chip_html,
+)
 from nqcockpit.journal.store import load_trades
 from nqcockpit.profile.models import DayProfile, NoTradeFlagCode
 from nqcockpit.ui import sections, tv_widgets
@@ -276,8 +281,8 @@ def _status_chip_html(code: str, feeds: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_top_bar(data: TodayData) -> bool:
-    """One row: spot, status chip, kill-zone timer, next event and Brief.
+def render_top_bar(data: TodayData, source_health: list | None = None) -> bool:
+    """One row: spot, status chip, kill-zone timer, next event, sources, Brief.
 
     Returns True on the run where the Brief button was clicked, so the dialog
     opens exactly once (dismissing it requires no extra session state).
@@ -318,6 +323,11 @@ def render_top_bar(data: TodayData) -> bool:
             <div class="tb-label">{escape(label("ui.today.next_event"))}</div>
             <div class="tb-value">{escape(event)}</div>
             <div class="tb-meta">{escape(event_meta)}</div>
+        </div>
+        <div class="tb-item">
+            <div class="tb-label">{escape(label("ui.terminal.sources_health"))}</div>
+            <div class="tb-value">{source_health_chip_html(source_health or [])}</div>
+            <div class="tb-meta">{escape(t("sources événements", "event sources"))}</div>
         </div>
     </div>
     """
@@ -566,8 +576,13 @@ def render_terminal(data: TodayData | None = None) -> None:
     sections.inject_ui_css()
     st.markdown(TERMINAL_CSS, unsafe_allow_html=True)
 
-    brief_clicked = render_top_bar(data)
+    source_health = load_latest_event_source_health()
+    brief_clicked = render_top_bar(data, source_health)
     maybe_render_brief_dialog(brief_clicked)
+
+    if source_health:
+        with st.expander(label("ui.terminal.sources_health"), expanded=False):
+            render_source_health(source_health)
 
     chart_col, panel_col = st.columns([7, 3], gap="medium")
     with chart_col:

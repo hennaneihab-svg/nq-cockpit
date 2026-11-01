@@ -367,6 +367,41 @@ def test_terminal_renders_without_data() -> None:
     assert "No upcoming" not in markdown
 
 
+def _terminal_script_with_sources(data):
+    from nqcockpit.ui.terminal_page import render_terminal
+
+    render_terminal(data)
+
+
+def test_terminal_source_health_chip_and_panel(monkeypatch) -> None:
+    """Le chip « N/M sources OK » et le panneau DÉGRADÉ/STALE s'affichent."""
+    from datetime import datetime, timezone
+
+    import nqcockpit.ui.terminal_page as tp
+    from nqcockpit.events.models import DataStatus, SourceHealth
+
+    source_health = [
+        SourceHealth(source="fed", status=DataStatus.OK, events_count=3,
+                     last_success_utc=datetime.now(timezone.utc)),
+        SourceHealth(source="ecb", status=DataStatus.DEGRADED, events_count=0,
+                     error_msg="flux vide", stale=True),
+    ]
+    monkeypatch.setattr(tp, "load_latest_event_source_health", lambda: source_health)
+
+    data = _data(_profile())
+    app = AppTest.from_function(_terminal_script_with_sources, args=(data,), default_timeout=60)
+    app.run()
+
+    assert not app.exception, app.exception
+    markdown = _markdown(app)
+    assert "1/2 sources OK" in markdown
+    assert "Event sources" in markdown
+    assert "DÉGRADÉ" in markdown
+    assert "STALE" in markdown
+    assert "flux vide" in markdown
+    assert "fed" in markdown
+
+
 def test_terminal_chart_symbol_picker_lists_verified_options() -> None:
     data = _data(_profile())
     app = AppTest.from_function(_terminal_script, args=(data,), default_timeout=60)
@@ -465,8 +500,8 @@ def test_terminal_has_no_stacked_expanders_or_click_suffixes() -> None:
     from nqcockpit.ui import terminal_page
 
     source = Path(terminal_page.__file__).read_text(encoding="utf-8")
-    # The only expander is the documented fallback for the Brief dialog.
-    assert source.count("st.expander") == 1
+    # Two expanders: the Brief dialog fallback + the event source-health panel.
+    assert source.count("st.expander") == 2
     assert "ui.expander." not in source
     assert "click_details" not in source
     assert "render_health(" not in source

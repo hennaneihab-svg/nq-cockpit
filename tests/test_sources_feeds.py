@@ -6,6 +6,7 @@ déduplication, états de santé et le résumé « N/M sources OK ».
 
 from __future__ import annotations
 
+import json
 import urllib.error
 from datetime import datetime, timezone
 
@@ -139,21 +140,79 @@ def test_rss_adapter_404_degrades(monkeypatch):
     assert "404" in err
 
 
-def test_ecb_and_treasury_feeds_degrade_gracefully(monkeypatch):
-    from nqcockpit.events.sources import ecb, treasury
+def test_ecb_feed_degrade_gracefully(monkeypatch):
+    from nqcockpit.events.sources import ecb
 
     monkeypatch.setattr(
         ecb, "normalize_feed",
         lambda url, source, timeout: ([], DataStatus.DEGRADED, "flux vide"),
     )
-    monkeypatch.setattr(
-        treasury, "normalize_feed",
-        lambda url, source, timeout: ([], DataStatus.DEGRADED, "flux vide"),
-    )
     items, st, err = ecb.fetch_ecb_feed()
     assert st == DataStatus.DEGRADED and items == []
-    items2, st2, _ = treasury.fetch_treasury_feed()
-    assert st2 == DataStatus.DEGRADED and items2 == []
+
+
+def test_treasury_fiscaldata_parse(monkeypatch):
+    """Trésor US : l'API FiscalData (sans clé) est parsée en items d'adjudication."""
+    import nqcockpit.events.sources.treasury as tr
+
+    payload = {
+        "data": [
+            {"security_type": "Bill", "security_term": "8-Week", "auction_date": "2026-11-05"},
+            {"security_type": "Note", "security_term": "10-Year", "auction_date": "2026-11-10"},
+        ]
+    }
+
+    def fake_urlopen(req, timeout):
+        class _Resp:
+            def read(self):
+                return json.dumps(payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(tr.urllib.request, "urlopen", fake_urlopen)
+    items, st, err = tr.fetch_treasury_feed()
+    assert st == DataStatus.OK
+    assert len(items) == 2
+    assert "Bill" in items[0].title
+    assert items[0].source == "treasury"
+
+
+def test_treasury_fiscaldata_http_error(monkeypatch):
+    import nqcockpit.events.sources.treasury as tr
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 500, "Server Error", None, None)
+
+    monkeypatch.setattr(tr.urllib.request, "urlopen", fake_urlopen)
+    items, st, err = tr.fetch_treasury_feed()
+    assert st == DataStatus.DEGRADED
+    assert items == []
+    assert "500" in err
+
+
+def test_marketwatch_feed(monkeypatch):
+    from nqcockpit.events.sources import marketwatch
+    from nqcockpit.events.sources.rss_adapter import NewsItem
+
+    monkeypatch.setattr(
+        marketwatch,
+        "normalize_feed",
+        lambda url, source, timeout: (
+            [NewsItem(title="Stocks rise", published_utc=None, link="", source="marketwatch")],
+            DataStatus.OK,
+            "",
+        ),
+    )
+    items, st, err = marketwatch.fetch_marketwatch_feed()
+    assert st == DataStatus.OK
+    assert items[0].title == "Stocks rise"
+    assert items[0].source == "marketwatch"
 
 
 # ---------------------------------------------------------------------------

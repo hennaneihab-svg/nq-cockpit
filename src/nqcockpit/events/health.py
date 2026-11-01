@@ -8,7 +8,9 @@ d'items retournés, et un drapeau « stale » quand le cache dépasse son TTL.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from nqcockpit.events.models import DataStatus, SourceHealth
 
@@ -31,6 +33,50 @@ def source_health_summary(source_health: list[SourceHealth]) -> str:
     """Résumé compact « N/M sources OK » pour le chip du Terminal."""
     ok = sum(1 for s in source_health if s.status == DataStatus.OK)
     return f"{ok}/{len(source_health)}"
+
+
+def source_health_chip_html(source_health: list[SourceHealth]) -> str:
+    """Chip « N/M sources OK » : vert si tout est OK, ambre (DÉGRADÉ) sinon."""
+    if not source_health:
+        return ""
+    ok = sum(1 for s in source_health if s.status == DataStatus.OK)
+    css = "chip-ok" if ok == len(source_health) else "chip-degraded"
+    return f'<span class="{css}"><b>{ok}/{len(source_health)} sources OK</b></span>'
+
+
+def load_latest_event_source_health(
+    cache_dir: str | Path = "data/events",
+) -> list[SourceHealth]:
+    """Reconstruit la santé des sources depuis le dernier rapport JSON du radar.
+
+    Aucun appel réseau : lit uniquement le cache JSON exporté par le radar
+    d'événements. Retourne une liste vide si aucun rapport n'existe.
+    """
+    d = Path(cache_dir)
+    if not d.is_dir():
+        return []
+    files = sorted(d.glob("events_*.json"))
+    if not files:
+        return []
+    try:
+        data = json.loads(files[-1].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    out: list[SourceHealth] = []
+    for sh in data.get("source_health", []):
+        try:
+            out.append(
+                SourceHealth(
+                    source=sh.get("source", ""),
+                    status=DataStatus(sh.get("status", "DÉGRADÉ")),
+                    events_count=int(sh.get("events_count", 0)),
+                    error_msg=sh.get("error_msg"),
+                )
+            )
+        except (ValueError, TypeError):
+            continue
+    return out
 
 
 def _status_pill(status: DataStatus, fr: bool) -> str:

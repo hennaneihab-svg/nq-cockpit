@@ -24,6 +24,7 @@ from nqcockpit.events.sources.fed import fetch_fed_events
 from nqcockpit.events.sources.forexfactory import fetch_forexfactory_events
 from nqcockpit.events.sources.fred import fetch_fred_events
 from nqcockpit.events.sources.ism import fetch_ism_events
+from nqcockpit.events.sources.marketwatch import fetch_marketwatch_feed
 from nqcockpit.events.sources.treasury import fetch_treasury_feed
 
 log = logging.getLogger(__name__)
@@ -226,8 +227,13 @@ def fetch_event_radar(
             source="forexfactory", status=DataStatus.BLOCKED, error_msg=str(exc)
         ))
 
-    # 5b. Sources officielles sans clé (ECB, US Treasury) — santé uniquement (news)
-    for src_name, fetcher in (("ecb", fetch_ecb_feed), ("treasury", fetch_treasury_feed)):
+    # 5b. Sources officielles sans clé — santé uniquement (news)
+    news_fetchers = (
+        ("ecb", fetch_ecb_feed),
+        ("treasury", fetch_treasury_feed),
+        ("marketwatch", fetch_marketwatch_feed),
+    )
+    for src_name, fetcher in news_fetchers:
         try:
             items, st, err = fetcher(now_utc=ref_utc)
             source_health.append(SourceHealth(
@@ -318,6 +324,10 @@ def _export_json(report: EventRiskReport, config: AppConfig) -> None:
                     "status": s.status.value,
                     "events_count": s.events_count,
                     "error_msg": s.error_msg,
+                    "last_success_utc": (
+                        s.last_success_utc.isoformat() if s.last_success_utc else None
+                    ),
+                    "stale": s.stale,
                 }
                 for s in report.source_health
             ],
