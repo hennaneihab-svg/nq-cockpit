@@ -739,24 +739,26 @@ def render_journal_page() -> None:
                             f"Import error: {', '.join(mt5_summary.errors)}",
                         )
                     )
-                elif mt5_summary.imported > 0:
+                elif mt5_summary.imported > 0 or mt5_summary.updated_with_r > 0:
                     st.success(
                         t(
-                            f"**Succès !** {mt5_summary.imported} trade(s) importé(s), "
-                            f"{mt5_summary.duplicates} doublon(s) ignoré(s), "
-                            f"{mt5_summary.no_r} sans R sur "
-                            f"{mt5_summary.total_positions} position(s) fermée(s).",
-                            f"**Success!** {mt5_summary.imported} trade(s) imported, "
-                            f"{mt5_summary.duplicates} duplicate(s) skipped, "
-                            f"{mt5_summary.no_r} without R out of "
-                            f"{mt5_summary.total_positions} closed position(s).",
+                            f"**Succès !** {mt5_summary.imported} importé(s), "
+                            f"{mt5_summary.updated_with_r} R récupéré(s), "
+                            f"{mt5_summary.duplicates} doublon(s), "
+                            f"{mt5_summary.no_r} toujours sans R.",
+                            f"**Success!** {mt5_summary.imported} imported, "
+                            f"{mt5_summary.updated_with_r} R recovered, "
+                            f"{mt5_summary.duplicates} duplicate(s), "
+                            f"{mt5_summary.no_r} still without R.",
                         )
                     )
                 elif mt5_summary.duplicates > 0:
                     st.info(
                         t(
-                            f"Rien de nouveau : {mt5_summary.duplicates} trades déjà importés.",
-                            f"Nothing new: {mt5_summary.duplicates} trades already imported.",
+                            f"Rien de nouveau : {mt5_summary.duplicates} trades déjà importés, "
+                            f"{mt5_summary.no_r} toujours sans R.",
+                            f"Nothing new: {mt5_summary.duplicates} trades already imported, "
+                            f"{mt5_summary.no_r} still without R.",
                         )
                     )
                 else:

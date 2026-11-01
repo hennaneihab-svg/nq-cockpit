@@ -1223,3 +1223,133 @@ def test_import_non_nq_symbol_normalised_and_deduplicated(mock_mt5, mem_conn, co
     assert len(load_trades(mem_conn)) == 1
 
 
+# ---------------------------------------------------------------------------
+# 13. Récupération SL depuis l'ordre d'entrée (Task « R presque vide »)
+# ---------------------------------------------------------------------------
+
+
+def test_import_recovers_sl_from_entry_order_and_flags_sl_moved(mock_mt5, mem_conn, config):
+    """SL d'entrée récupéré ; SL modifié plus tard -> sl_moved=True."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 9201, "NQ", 0, 0, 20800.0)
+    d_out = _deal(2, 9201, "NQ", 1, 1, 20850.0, profit=100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+
+    # Ordres donnés dans le désordre : entrée SL 20760, puis modification 20820.
+    o_entry = MagicMock()
+    o_entry._asdict.return_value = {
+        "ticket": 1, "position_id": 9201, "sl": 20760.0, "tp": 20850.0,
+        "time_setup": 1000,
+    }
+    o_mod = MagicMock()
+    o_mod._asdict.return_value = {
+        "ticket": 2, "position_id": 9201, "sl": 20820.0, "tp": 0.0,
+        "time_setup": 2000,
+    }
+    mock_mt5.history_orders_get.return_value = (o_mod, o_entry)
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+    assert summary.imported == 1
+    assert summary.no_r == 0
+
+    t = load_trades(mem_conn)[0]
+    assert t.stop_price == 20760.0  # SL d'entrée, pas le SL modifié
+    assert t.r_realized > 1.2  # (20850 - 20800) / 40 = 1.25R
+    assert t.sl_moved is True
+
+
+def test_import_entry_sl_zero_stays_no_r_even_if_later_sl(mock_mt5, mem_conn, config):
+    """SL=0 à l'entrée -> pas de R, même si un ordre postérieur a un SL."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 9202, "NQ", 0, 0, 20800.0)
+    d_out = _deal(2, 9202, "NQ", 1, 1, 20850.0, profit=100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+
+    o_entry = MagicMock()
+    o_entry._asdict.return_value = {"sl": 0.0, "tp": 0.0, "time_setup": 1000}
+    o_mod = MagicMock()
+    o_mod._asdict.return_value = {"sl": 20760.0, "tp": 0.0, "time_setup": 2000}
+    mock_mt5.history_orders_get.return_value = (o_entry, o_mod)
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+    assert summary.imported == 1
+    assert summary.no_r == 1
+
+    t = load_trades(mem_conn)[0]
+    assert t.stop_price == 0.0
+    assert t.r_realized == 0.0
+
+
+def test_import_short_side_r_sign_with_recovered_sl(mock_mt5, mem_conn, config):
+    """Signe du R correct pour un SHORT (entrée 20900, SL 20940, sortie 20940)."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 9203, "NQ", 1, 0, 20900.0)      # SELL
+    d_out = _deal(2, 9203, "NQ", 0, 1, 20940.0, profit=-80.0)  # BUY (close)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+
+    o = MagicMock()
+    o._asdict.return_value = {"sl": 20940.0, "tp": 20800.0, "time_setup": 1000}
+    mock_mt5.history_orders_get.return_value = (o,)
+
+    client = MT5Client()
+    summary = client.import_trades_to_journal(mem_conn, config=config)
+    assert summary.imported == 1
+
+    t = load_trades(mem_conn)[0]
+    assert t.direction == TradeDirection.SHORT
+    assert t.r_realized == -1.0
+
+
+def test_reimport_updates_existing_no_r_trade_without_duplicate(mock_mt5, mem_conn, config):
+    """Re-import récupère SL/R sur un trade déjà présent sans R, sans doublon."""
+    mock_mt5.initialize.return_value = True
+    mock_acc = MagicMock()
+    mock_acc._asdict.return_value = {"login": 123456, "balance": 50000.0}
+    mock_mt5.account_info.return_value = mock_acc
+
+    d_in = _deal(1, 9204, "NQ", 0, 0, 20800.0)
+    d_out = _deal(2, 9204, "NQ", 1, 1, 20850.0, profit=100.0)
+    mock_mt5.history_deals_get.return_value = (d_in, d_out)
+
+    # Premier import : aucun ordre -> pas de SL -> no R.
+    mock_mt5.history_orders_get.return_value = ()
+    client = MT5Client()
+    s1 = client.import_trades_to_journal(mem_conn, config=config)
+    assert s1.imported == 1
+    assert s1.no_r == 1
+    t1 = load_trades(mem_conn)[0]
+    assert t1.stop_price == 0.0
+    assert t1.r_realized == 0.0
+
+    # Deuxième import : l'ordre d'entrée fournit maintenant le SL.
+    o = MagicMock()
+    o._asdict.return_value = {"sl": 20760.0, "tp": 20850.0, "time_setup": 1000}
+    mock_mt5.history_orders_get.return_value = (o,)
+
+    s2 = client.import_trades_to_journal(mem_conn, config=config)
+    assert s2.imported == 0
+    assert s2.updated_with_r == 1
+    assert s2.duplicates == 0
+
+    trades = load_trades(mem_conn)
+    assert len(trades) == 1  # pas de doublon
+    t2 = trades[0]
+    assert t2.stop_price == 20760.0
+    assert t2.r_realized > 1.2
+    assert t2.instrument == "NQ"  # les autres champs restent inchangés
+
+

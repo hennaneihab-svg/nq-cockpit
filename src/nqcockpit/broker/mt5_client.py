@@ -111,6 +111,7 @@ class MT5TradeRecord:
     exit_price: float
     stop_price: Optional[float] = None
     take_profit: Optional[float] = None
+    sl_moved: bool = False
     pnl: float = 0.0
     commission: float = 0.0
     swap: float = 0.0
@@ -141,6 +142,7 @@ class MT5ImportSummary:
     imported: int = 0
     duplicates: int = 0
     no_r: int = 0
+    updated_with_r: int = 0
     rejected: int = 0
     status: str = "OK"  # "OK" | "DÉGRADÉ"
     errors: list[str] = field(default_factory=list)
@@ -552,32 +554,43 @@ class MT5Client:
             total_swap = sum(float(d.get("swap", 0.0)) for d in deals)
             total_fee = sum(float(d.get("fee", 0.0)) for d in deals)
 
-            # Recherche des SL / TP initiaux depuis les ordres de la position
+            # Récupération SL/TP depuis l'ordre d'ENTRÉE (premier ordre de la
+            # position). Le SL d'entrée prime : s'il était à 0, pas de R inventé.
+            # Repli sur le deal d'entrée (price_sl / price_tp) si l'ordre est absent.
             stop_price: Optional[float] = None
             take_profit: Optional[float] = None
+            sl_moved = False
             try:
                 orders = mt5.history_orders_get(position=pos_id)
                 if orders:
-                    for o in orders:
-                        o_dict = o._asdict() if hasattr(o, "_asdict") else {}
-                        o_sl = float(o_dict.get("sl", 0.0))
-                        o_tp = float(o_dict.get("tp", 0.0))
-                        if o_sl > 0 and stop_price is None:
-                            stop_price = round(o_sl, 2)
-                        if o_tp > 0 and take_profit is None:
-                            take_profit = round(o_tp, 2)
+                    order_list = [
+                        o._asdict() if hasattr(o, "_asdict") else {}
+                        for o in orders
+                    ]
+                    order_list.sort(
+                        key=lambda o: (o.get("time_setup", 0), o.get("time_done", 0))
+                    )
+                    entry_order = order_list[0]
+                    entry_sl = float(entry_order.get("sl", 0.0))
+                    entry_tp = float(entry_order.get("tp", 0.0))
+                    if entry_sl > 0:
+                        stop_price = round(entry_sl, 2)
+                    if entry_tp > 0:
+                        take_profit = round(entry_tp, 2)
+                    # SL modifié plus tard ? (ordre postérieur avec un SL différent)
+                    for o in order_list[1:]:
+                        o_sl = float(o.get("sl", 0.0))
+                        if o_sl > 0 and stop_price is not None and abs(o_sl - stop_price) > 1e-9:
+                            sl_moved = True
+                            break
             except Exception:  # noqa: BLE001
                 pass
 
-            # Si non trouvé dans les ordres, vérifier également les deals
-            if stop_price is None or take_profit is None:
-                for d_chk in deals:
-                    d_sl = float(d_chk.get("sl", 0.0)) if "sl" in d_chk else 0.0
-                    d_tp = float(d_chk.get("tp", 0.0)) if "tp" in d_chk else 0.0
-                    if d_sl > 0 and stop_price is None:
-                        stop_price = round(d_sl, 2)
-                    if d_tp > 0 and take_profit is None:
-                        take_profit = round(d_tp, 2)
+            # Repli sur le deal d'entrée : SL/TP exprimés en niveau de prix.
+            if stop_price is None:
+                stop_price = float(first_entry.get("price_sl", 0.0)) or None
+            if take_profit is None:
+                take_profit = float(first_entry.get("price_tp", 0.0)) or None
 
             # Détermination de la raison de sortie
             deal_reason = last_exit.get("reason", 0)
@@ -611,6 +624,7 @@ class MT5Client:
                     exit_price=exit_price,
                     stop_price=stop_price,
                     take_profit=take_profit,
+                    sl_moved=sl_moved,
                     pnl=total_pnl,
                     commission=total_comm,
                     swap=total_swap,
@@ -666,29 +680,29 @@ class MT5Client:
             return summary
 
         existing_trades = load_trades(conn)
-        existing_ids = {t.trade_id for t in existing_trades}
-        existing_timed_keys: set[tuple[str, str, float, float, str, str]] = {
-            (
-                t.session_date,
-                t.instrument.upper(),
-                round(t.entry_price, 2),
-                round(t.exit_price, 2),
-                t.direction.value,
-                t.entry_time_ny.isoformat(),
-            )
-            for t in existing_trades
-            if t.entry_time_ny is not None
-        }
-        existing_5_keys: set[tuple[str, str, float, float, str]] = {
-            (
+        existing_by_id: dict[str, TradeEntry] = {t.trade_id: t for t in existing_trades}
+        existing_timed_map: dict[tuple, TradeEntry] = {}
+        existing_5_map: dict[tuple, TradeEntry] = {}
+        for t in existing_trades:
+            five_key = (
                 t.session_date,
                 t.instrument.upper(),
                 round(t.entry_price, 2),
                 round(t.exit_price, 2),
                 t.direction.value,
             )
-            for t in existing_trades
-        }
+            existing_5_map[five_key] = t
+            if t.entry_time_ny is not None:
+                existing_timed_map[
+                    (
+                        t.session_date,
+                        t.instrument.upper(),
+                        round(t.entry_price, 2),
+                        round(t.exit_price, 2),
+                        t.direction.value,
+                        t.entry_time_ny.isoformat(),
+                    )
+                ] = t
 
         windows_cfg = getattr(config, "trading_windows_algiers", None) if config else None
 
@@ -702,34 +716,65 @@ class MT5Client:
             trade_id = f"mt5_{tr.position_id}"
             session_date = tr.entry_time_ny.strftime("%Y-%m-%d")
 
-            # Détection des doublons
-            is_dup = False
-            if trade_id in existing_ids:
-                is_dup = True
-            else:
-                timed_key = (
-                    session_date,
-                    norm_symbol.upper(),
-                    round(tr.entry_price, 2),
-                    round(tr.exit_price, 2),
-                    tr.direction.value,
-                    tr.entry_time_ny.isoformat(),
-                )
-                if timed_key in existing_timed_keys:
-                    is_dup = True
-                else:
-                    five_key = (
-                        session_date,
-                        norm_symbol.upper(),
-                        round(tr.entry_price, 2),
-                        round(tr.exit_price, 2),
-                        tr.direction.value,
-                    )
-                    if five_key in existing_5_keys:
-                        is_dup = True
+            # Frais, SL/TP et R calculés AVANT la dédup : nécessaires pour
+            # décider si un trade déjà présent (sans R) doit être mis à jour.
+            total_fees = abs(tr.commission) + abs(tr.swap) + abs(tr.fee)
+            has_sl = tr.stop_price is not None and tr.stop_price > 0
+            has_tp = tr.take_profit is not None and tr.take_profit > 0
+            stop_price_val = round(tr.stop_price, 2) if has_sl else 0.0
+            tp_price_val = round(tr.take_profit, 2) if has_tp else None
 
-            if is_dup:
+            if has_sl:
+                initial_risk = abs(tr.entry_price - stop_price_val)
+                if initial_risk > 0:
+                    raw_r = (tr.exit_price - tr.entry_price) / initial_risk
+                    if tr.direction == TradeDirection.SHORT:
+                        raw_r = -raw_r
+                    r_calc = round(raw_r - (total_fees / max(initial_risk, 1e-9)), 4)
+                else:
+                    r_calc = 0.0
+            else:
+                r_calc = 0.0
+
+            timed_key = (
+                session_date,
+                norm_symbol.upper(),
+                round(tr.entry_price, 2),
+                round(tr.exit_price, 2),
+                tr.direction.value,
+                tr.entry_time_ny.isoformat(),
+            )
+            five_key = (
+                session_date,
+                norm_symbol.upper(),
+                round(tr.entry_price, 2),
+                round(tr.exit_price, 2),
+                tr.direction.value,
+            )
+
+            existing = existing_by_id.get(trade_id)
+            if existing is None:
+                existing = existing_timed_map.get(timed_key)
+            if existing is None:
+                existing = existing_5_map.get(five_key)
+
+            if existing is not None:
+                existing_has_stop = (
+                    existing.stop_price is not None and existing.stop_price > 0
+                )
+                if has_sl and not existing_has_stop:
+                    # Trade déjà présent sans R : on récupère SL/R sans créer de
+                    # doublon et sans altérer les autres champs.
+                    existing.stop_price = stop_price_val
+                    existing.tp1_price = tp_price_val
+                    existing.r_realized = r_calc
+                    existing.sl_moved = tr.sl_moved
+                    save_trade(conn, existing)
+                    summary.updated_with_r += 1
+                    continue
                 summary.duplicates += 1
+                if not existing_has_stop:
+                    summary.no_r += 1  # toujours sans R (source sans SL non plus)
                 continue
 
             # Fenêtre de trading : spécifique au Nasdaq (kill zones NQ).
@@ -740,9 +785,6 @@ class MT5Client:
                 )
                 window_label = win_name or ""
 
-            # Frais cumulés
-            total_fees = abs(tr.commission) + abs(tr.swap) + abs(tr.fee)
-
             # Nombre de contrats
             contracts_count: Optional[int] = (
                 int(tr.volume)
@@ -750,7 +792,7 @@ class MT5Client:
                 else int(max(1, round(tr.volume)))
             )
 
-            # Détermination directe du résultat Gain / Perte / Breakeven depuis le profit net MT5
+            # Résultat Gain/Perte/Breakeven depuis le profit net MT5
             net_pnl = tr.net_profit
             if net_pnl > 0.001:
                 outcome = TradeOutcome.WIN
@@ -758,13 +800,6 @@ class MT5Client:
                 outcome = TradeOutcome.LOSS
             else:
                 outcome = TradeOutcome.BREAKEVEN
-
-            # Gestion honnête de SL et TP (jamais de chiffre inventé)
-            has_sl = tr.stop_price is not None and tr.stop_price > 0
-            has_tp = tr.take_profit is not None and tr.take_profit > 0
-
-            stop_price_val = round(tr.stop_price, 2) if has_sl else 0.0
-            tp_price_val = round(tr.take_profit, 2) if has_tp else None
 
             sl_desc = f"{stop_price_val:.2f}" if has_sl else "non défini"
             tp_desc = f"{tp_price_val:.2f}" if has_tp else "non défini"
@@ -781,18 +816,7 @@ class MT5Client:
                 f"| SL: {sl_desc} | TP: {tp_desc}{no_r_marker}"
             )
 
-            # Calcul du R si SL défini, sinon 0.0 (exclu des stats R).
-            if has_sl:
-                initial_risk = abs(tr.entry_price - stop_price_val)
-                if initial_risk > 0:
-                    raw_r = (tr.exit_price - tr.entry_price) / initial_risk
-                    if tr.direction == TradeDirection.SHORT:
-                        raw_r = -raw_r
-                    r_calc = round(raw_r - (total_fees / max(initial_risk, 1e-9)), 4)
-                else:
-                    r_calc = 0.0
-            else:
-                r_calc = 0.0
+            if not has_sl:
                 summary.no_r += 1
 
             entry = TradeEntry(
@@ -815,31 +839,15 @@ class MT5Client:
                 day_of_week=tr.entry_time_ny.weekday(),
                 notes=notes_str,
                 contracts=contracts_count,
+                sl_moved=tr.sl_moved,
             )
 
             save_trade(conn, entry)
 
             # Mise à jour des index de déduplication en mémoire
-            existing_ids.add(trade_id)
-            existing_timed_keys.add(
-                (
-                    session_date,
-                    norm_symbol.upper(),
-                    round(tr.entry_price, 2),
-                    round(tr.exit_price, 2),
-                    tr.direction.value,
-                    tr.entry_time_ny.isoformat(),
-                )
-            )
-            existing_5_keys.add(
-                (
-                    session_date,
-                    norm_symbol.upper(),
-                    round(tr.entry_price, 2),
-                    round(tr.exit_price, 2),
-                    tr.direction.value,
-                )
-            )
+            existing_by_id[trade_id] = entry
+            existing_timed_map[timed_key] = entry
+            existing_5_map[five_key] = entry
 
             summary.imported += 1
 
