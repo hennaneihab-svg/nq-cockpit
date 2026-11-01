@@ -12,8 +12,13 @@ Règles (chacune est ignorée avec un log d'une ligne si sa source est absente) 
   1. événement programmé dans les N prochaines minutes (défaut 15)
   2. source dégradée / rétablie (changement d'état uniquement)
   3. MT5 déconnecté / reconnecté (changement d'état uniquement)
-  4. verrou discipline / limite de perte journalière active
+  4. verrou discipline réel (perte journalière, tilt/premier trade perdant,
+     nombre max de trades) ; hors fenêtre horaire n'alerte jamais
   5. toucher d'un niveau gamma (Call Wall / Gamma Flip / Put Support)
+
+Langue : variable d'environnement ALERT_LANG (EN par défaut, FR supporté).
+Tout le texte est construit ici à partir des CODES de statut ; les textes
+français des moteurs ne sont jamais réutilisés.
 """
 
 from __future__ import annotations
@@ -33,7 +38,59 @@ from nqcockpit.events.radar import fetch_event_radar
 log = logging.getLogger("nqcockpit.alerts")
 
 UTC = timezone.utc
-TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+try:
+    TZ_ALGIERS = ZoneInfo("Africa/Algiers")
+except Exception:  # noqa: BLE001 - tzdata absente sous Windows : Algérie = UTC+1 fixe
+    TZ_ALGIERS = timezone(timedelta(hours=1), "Africa/Algiers")
+
+# --- Table de libellés EN/FR (aucune chaîne issue des moteurs) ---------------
+
+_LABELS: dict[str, dict[str, str]] = {
+    "EN": {
+        "status.OK": "OK",
+        "status.DEGRADED": "DEGRADED",
+        "status.BLOCKED": "DOWN",
+        "source": "Source {source}: {prev} → {cur}",
+        "event": "Scheduled event: {name} at {when}{tier}",
+        "mt5.connected": "MT5 connected",
+        "mt5.disconnected": "MT5 disconnected",
+        "discipline.lock": "Discipline lock active: {reasons}.",
+        "discipline.clear": "Discipline lock cleared",
+        "discipline.reason.LOCKED_DAILY_LOSS": "daily loss limit reached",
+        "discipline.reason.LOCKED_TRADE1_LOSS": "first-trade loss / tilt lock",
+        "discipline.reason.LOCKED_MAX_TRADES": "max trades reached",
+        "level": "Price {dist:.0f} pts from {name} {level:,.0f}",
+    },
+    "FR": {
+        "status.OK": "OK",
+        "status.DEGRADED": "DÉGRADÉ",
+        "status.BLOCKED": "HORS LIGNE",
+        "source": "Source {source} : {prev} → {cur}",
+        "event": "Événement programmé : {name} à {when}{tier}",
+        "mt5.connected": "MT5 connecté",
+        "mt5.disconnected": "MT5 déconnecté",
+        "discipline.lock": "Verrou discipline actif : {reasons}.",
+        "discipline.clear": "Verrou discipline levé",
+        "discipline.reason.LOCKED_DAILY_LOSS": "limite de perte journalière atteinte",
+        "discipline.reason.LOCKED_TRADE1_LOSS": "tilt / premier trade perdant",
+        "discipline.reason.LOCKED_MAX_TRADES": "nombre maximal de trades atteint",
+        "level": "Prix à {dist:.0f} pts de {name} {level:,.0f}",
+    },
+}
+
+# Seuls ces codes sont de vrais verrous (OUT_OF_WINDOW et COOLDOWN n'alertent pas).
+_LOCK_CODES = {"LOCKED_DAILY_LOSS", "LOCKED_TRADE1_LOSS", "LOCKED_MAX_TRADES"}
+_STATUS_CODE_ALIASES = {
+    "DÉGRADÉ": "DEGRADED",
+    "DEGRADE": "DEGRADED",
+    "BLOQUÉ": "BLOCKED",
+    "HORS LIGNE": "BLOCKED",
+}
+
+
+def _t(lang: str, key: str, **kwargs) -> str:
+    table = _LABELS[lang]
+    return table[key].format(**kwargs)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -86,15 +143,24 @@ def _in_quiet_hours(cfg: dict, now_utc: datetime) -> bool:
     start = time.fromisoformat(cfg["quiet_start"])
     end = time.fromisoformat(cfg["quiet_end"])
     if start <= end:
-        return start <= now <= end
-    return now >= start or now <= end
+        return start <= now < end
+    return now >= start or now < end
 
 
-def _lang(config) -> str:
-    return str(getattr(getattr(config, "ui", None), "language", "EN") or "EN").upper()
+def _lang() -> str:
+    """Langue de l'alerteur : ALERT_LANG (EN par défaut, FR supporté)."""
+    lang = os.getenv("ALERT_LANG", "EN").strip().upper()
+    return lang if lang in _LABELS else "EN"
+
+
+def _status_code(status) -> str:
+    code = getattr(status, "name", None) or str(status)
+    code = str(code).strip().upper()
+    return _STATUS_CODE_ALIASES.get(code, code)
 
 
 def _rule_event(cfg: dict, report, now_utc: datetime, fr: bool) -> list[str]:
+    lang = "FR" if fr else "EN"
     horizon = now_utc + timedelta(minutes=cfg["event_window_min"])
     msgs: list[str] = []
     for ev in getattr(report, "events", []) or []:
@@ -103,23 +169,31 @@ def _rule_event(cfg: dict, report, now_utc: datetime, fr: bool) -> list[str]:
             continue
         when = sched.astimezone(TZ_ALGIERS).strftime("%H:%M")
         tier = f" T{getattr(ev, 'tier', '')}" if getattr(ev, "tier", None) else ""
-        msgs.append(
-            f"Événement programmé: {ev.name} à {when}{tier}"
-            if fr
-            else f"Scheduled event: {ev.name} at {when}{tier}"
-        )
+        msgs.append(_t(lang, "event", name=ev.name, when=when, tier=tier))
     return msgs
 
 
+def _status_label(lang: str, code: str) -> str:
+    return _LABELS[lang].get(f"status.{code}", str(code))
+
+
 def _rule_source(state: dict, report, now_utc: datetime, fr: bool) -> list[str]:
+    lang = "FR" if fr else "EN"
     src_state = state.setdefault("source_state", {})
     msgs: list[str] = []
     for sh in getattr(report, "source_health", []) or []:
-        cur = sh.status.value
-        prev = src_state.get(sh.source)
+        cur = _status_code(sh.status)
+        prev_raw = src_state.get(sh.source)
+        prev = _status_code(prev_raw) if prev_raw is not None else None
         if prev is not None and prev != cur:
             msgs.append(
-                f"Source {sh.source}: {prev} → {cur}"
+                _t(
+                    lang,
+                    "source",
+                    source=sh.source,
+                    prev=_status_label(lang, prev),
+                    cur=_status_label(lang, cur),
+                )
             )
         src_state[sh.source] = cur
     state["source_state"] = src_state
@@ -127,6 +201,7 @@ def _rule_source(state: dict, report, now_utc: datetime, fr: bool) -> list[str]:
 
 
 def _rule_mt5(state: dict, now_utc: datetime, fr: bool) -> list[str]:
+    lang = "FR" if fr else "EN"
     from nqcockpit.broker.mt5_client import MT5Client
 
     status = MT5Client().get_status()
@@ -135,12 +210,11 @@ def _rule_mt5(state: dict, now_utc: datetime, fr: bool) -> list[str]:
     state["mt5_connected"] = connected
     if prev is None or prev == connected:
         return []
-    if connected:
-        return ["MT5 connecté"] if fr else ["MT5 connected"]
-    return ["MT5 déconnecté"] if fr else ["MT5 disconnected"]
+    return [_t(lang, "mt5.connected" if connected else "mt5.disconnected")]
 
 
 def _rule_discipline(state: dict, now_utc: datetime, config, db_path: str, fr: bool) -> list[str]:
+    lang = "FR" if fr else "EN"
     from nqcockpit.discipline.engine import evaluate_session_state
     from nqcockpit.journal.store import init_journal_db, load_trades
 
@@ -150,18 +224,16 @@ def _rule_discipline(state: dict, now_utc: datetime, config, db_path: str, fr: b
     finally:
         conn.close()
     st = evaluate_session_state(trades, now_utc, config)
-    locked = not st.can_trade
+    code = _status_code(st.status)
+    locked = code in _LOCK_CODES
     prev = state.get("discipline_locked", False)
     state["discipline_locked"] = locked
-    if locked and not prev:
-        reasons = ", ".join(st.lock_reasons) if st.lock_reasons else (
-            "limite de perte / tilt" if fr else "loss limit / tilt"
-        )
-        if fr:
-            return [f"Verrou discipline actif: {reasons}"]
-        return [f"Discipline lock active: {reasons}"]
-    if not locked and prev:
-        return ["Verrou discipline levé"] if fr else ["Discipline lock cleared"]
+    if locked:
+        reasons = _LABELS[lang].get(f"discipline.reason.{code}", code)
+        return [_t(lang, "discipline.lock", reasons=reasons)]
+    # Hors fenêtre horaire = état normal : aucun message.
+    if prev and code != "OUT_OF_WINDOW":
+        return [_t(lang, "discipline.clear")]
     return []
 
 
@@ -194,6 +266,7 @@ def _rule_level(cfg: dict, state: dict, now_utc: datetime, db_path: str, fr: boo
         log.info("Prix NQ indisponible, règle niveau ignorée")
         return []
 
+    lang = "FR" if fr else "EN"
     levels = {
         "Call Wall": snap.get("call_wall"),
         "Gamma Flip": snap.get("gamma_flip"),
@@ -210,7 +283,7 @@ def _rule_level(cfg: dict, state: dict, now_utc: datetime, db_path: str, fr: boo
             continue
         if abs(price - level) <= cfg["level_touch_pts"]:
             msgs.append(
-                f"Prix à {abs(price - level):.0f} pts de {name} {level:,.0f}"
+                _t(lang, "level", dist=abs(price - level), name=name, level=level)
             )
             touched[key] = True
     state["level_touch"] = touched
@@ -258,7 +331,7 @@ def evaluate() -> int:
     _setup_logging()
     now_utc = datetime.now(UTC)
     config = load_config()
-    fr = _lang(config) == "FR"
+    fr = _lang() == "FR"
     cfg = _cfg()
     state_path = _state_path()
     state = _load_state(state_path)
