@@ -108,6 +108,7 @@ def fetch_event_radar(
             events_count=len(fed_evs),
             error_msg=fed_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if fed_st == DataStatus.OK else None,
         ))
         log.info("Fed: %d événements [%s]", len(fed_evs), fed_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -130,6 +131,7 @@ def fetch_event_radar(
             events_count=len(bls_evs),
             error_msg=bls_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if bls_st == DataStatus.OK else None,
         ))
         log.info("BLS: %d événements [%s]", len(bls_evs), bls_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -152,6 +154,7 @@ def fetch_event_radar(
             events_count=len(bea_evs),
             error_msg=bea_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if bea_st == DataStatus.OK else None,
         ))
         log.info("BEA: %d événements [%s]", len(bea_evs), bea_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -174,6 +177,7 @@ def fetch_event_radar(
             events_count=len(ism_evs),
             error_msg=ism_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if ism_st == DataStatus.OK else None,
         ))
         log.info("ISM: %d événements [%s]", len(ism_evs), ism_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -196,6 +200,7 @@ def fetch_event_radar(
             events_count=len(fred_evs),
             error_msg=fred_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if fred_st == DataStatus.OK else None,
         ))
         log.info("FRED: %d événements [%s]", len(fred_evs), fred_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -219,6 +224,7 @@ def fetch_event_radar(
             events_count=len(ff_evs),
             error_msg=ff_err or None,
             fetched_utc=datetime.now(UTC),
+            last_success_utc=datetime.now(UTC) if ff_st == DataStatus.OK else None,
         ))
         log.info("ForexFactory: %d événements [%s]", len(ff_evs), ff_st.value)
     except Exception as exc:  # noqa: BLE001
@@ -279,6 +285,7 @@ def fetch_event_radar(
         events_count=len(earnings),
         error_msg=earnings_err,
         fetched_utc=datetime.now(UTC),
+        last_success_utc=datetime.now(UTC) if earnings_st == DataStatus.OK else None,
     ))
 
     # 8. Calcul du risque

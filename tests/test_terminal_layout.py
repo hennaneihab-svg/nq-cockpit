@@ -508,6 +508,17 @@ def test_terminal_has_no_stacked_expanders_or_click_suffixes() -> None:
     assert "ui.terminal.tab_radar" in source
 
 
+def test_terminal_renders_all_four_level_pills() -> None:
+    """Les 4 pilules de niveaux (Call Wall/Gamma Flip/Put Support/Expected Move)."""
+    import inspect
+
+    import nqcockpit.ui.terminal_page as tp
+
+    src = inspect.getsource(tp.render_distance_chips)
+    assert "[:3]" not in src
+    assert "sections.compact_levels(profile)" in src
+
+
 def test_terminal_labels_exist_in_both_languages() -> None:
     for key in (
         "ui.terminal.brief",

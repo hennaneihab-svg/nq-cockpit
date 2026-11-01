@@ -269,6 +269,26 @@ def test_status_pill_localisation():
     assert "HORS LIGNE" in _status_pill(DataStatus.BLOCKED, fr=True)
 
 
+def test_source_health_chip_localisation():
+    from nqcockpit.events.health import source_health_chip_html
+
+    sh = [SourceHealth(source="fed", status=DataStatus.OK, events_count=1)]
+    assert "sources OK" in source_health_chip_html(sh, fr=False)
+    assert "sources OK" in source_health_chip_html(sh, fr=True)
+    assert "1/1" in source_health_chip_html(sh)
+
+
+def test_radar_sets_last_success_utc_for_ok_sources():
+    import inspect
+
+    import nqcockpit.events.radar as radar
+
+    src = inspect.getsource(radar)
+    # Chaque fetcher réussi (fed, bls, bea, ism, fred, forexfactory, earnings)
+    # renseigne last_success_utc pour que l'âge ne soit plus « — ».
+    assert src.count("last_success_utc=datetime.now(UTC) if ") >= 7
+
+
 def test_render_source_health_html_localisation_and_window_empty():
     from nqcockpit.events.health import render_source_health_html
 

@@ -373,7 +373,7 @@ def maybe_render_brief_dialog(open_brief: bool) -> None:
 
 def render_distance_chips(profile: DayProfile | None) -> None:
     """Slim row under the chart: level value and signed distance from spot."""
-    lines = sections.compact_levels(profile)[:3]
+    lines = sections.compact_levels(profile)
     chips = []
     for line in lines:
         value = (

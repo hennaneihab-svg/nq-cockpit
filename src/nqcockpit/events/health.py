@@ -49,7 +49,8 @@ def source_health_chip_html(
         return ""
     ok = sum(1 for s in source_health if s.status == DataStatus.OK)
     css = "chip-ok" if ok == len(source_health) else "chip-degraded"
-    return f'<span class="{css}"><b>{ok}/{len(source_health)} sources OK</b></span>'
+    label = "sources OK" if not fr else "sources OK"
+    return f'<span class="{css}"><b>{ok}/{len(source_health)} {label}</b></span>'
 
 
 def load_latest_event_source_health(
