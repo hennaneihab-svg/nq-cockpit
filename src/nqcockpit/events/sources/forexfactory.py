@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import pathlib
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -97,18 +98,53 @@ def _parse_ff_date(date_str: str) -> tuple[datetime | None, str, DataStatus]:
         return None, "", DataStatus.DEGRADED
 
 
-def _fetch_ff_json(url: str, timeout: int = 5) -> list[dict]:
-    """Fetch le JSON ForexFactory."""
+def _fetch_ff_json(url: str, timeout: int = 5) -> tuple[list[dict] | None, str | None]:
+    """Fetch le JSON ForexFactory. Retourne ``(data, error)``.
+
+    Distingue HTTP 404 (pas encore publié) / 429 (rate-limit) / timeout pour
+    permettre le repli sur le cache sans jamais masquer l'erreur.
+    """
     try:
         req = urllib.request.Request(
             url,
             headers={"User-Agent": "Mozilla/5.0 (compatible; NQCockpit/1.0)"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError) as exc:
-        log.warning("ForexFactory fetch %s: %s", url, exc)
-        return []
+            data = json.loads(resp.read())
+            if not isinstance(data, list):
+                return None, "format inattendu (pas une liste)"
+            return data, None
+    except urllib.error.HTTPError as exc:
+        return None, f"HTTP {exc.code}"
+    except (urllib.error.URLError, json.JSONDecodeError, OSError, ValueError) as exc:
+        return None, str(exc)
+
+
+def _load_cache(cache_path: pathlib.Path) -> dict:
+    """Charge le cache JSON (dernier fetch réussi)."""
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_cache(cache_path: pathlib.Path, raw_this: list[dict], raw_next: list[dict]) -> None:
+    """Sauvegarde le dernier fetch réussi (plan B en cas de 429/timeout)."""
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "fetched_utc": datetime.now(UTC).isoformat(),
+                    "raw_this": raw_this,
+                    "raw_next": raw_next,
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log.warning("ForexFactory cache write failed: %s", exc)
 
 
 def fetch_forexfactory_events(
@@ -117,11 +153,14 @@ def fetch_forexfactory_events(
     now_utc: datetime | None = None,
     horizon_days: int = 14,
     timeout: int = 5,
+    cache_path: pathlib.Path | None = None,
+    min_interval_s: float = 1800.0,
 ) -> tuple[list[CalendarEvent], DataStatus, str]:
     """Fetch les événements USD à fort impact depuis ForexFactory.
 
     Retourne les événements normalisés + consensus/précédent pour croisement.
-    Statut DÉGRADÉ si les deux endpoints sont inaccessibles.
+    Statut DÉGRADÉ si les deux endpoints sont inaccessibles ; en cas de 429 ou
+    timeout, sert le cache (jamais silencieusement).
 
     Returns:
         (events, status, error_msg)
@@ -134,8 +173,41 @@ def fetch_forexfactory_events(
     horizon_end = now_utc + timedelta(days=horizon_days)
     fetched_utc = datetime.now(UTC)
 
-    raw_this = _fetch_ff_json(thisweek_url, timeout)
-    raw_next = _fetch_ff_json(nextweek_url, timeout)
+    if cache_path is None:
+        cache_path = pathlib.Path("data/cache/forexfactory.json")
+    cache = _load_cache(cache_path)
+
+    cached_at = cache.get("fetched_utc")
+    fresh = False
+    if cached_at:
+        try:
+            age_s = (fetched_utc - datetime.fromisoformat(cached_at)).total_seconds()
+            fresh = age_s < min_interval_s
+        except (ValueError, TypeError):
+            fresh = False
+
+    if fresh:
+        raw_this = cache.get("raw_this", [])
+        raw_next = cache.get("raw_next", [])
+    else:
+        raw_this, err_this = _fetch_ff_json(thisweek_url, timeout)
+        raw_next, err_next = _fetch_ff_json(nextweek_url, timeout)
+        fetch_errors: list[str] = []
+        if raw_this is None:
+            raw_this = []
+            fetch_errors.append(f"thisweek: {err_this}")
+        if raw_next is None:
+            raw_next = []
+            # 404 = la semaine suivante n'est pas encore publiée : pas une panne.
+            if err_next != "HTTP 404":
+                fetch_errors.append(f"nextweek: {err_next}")
+
+        # Repli cache si la semaine courante est injoignable (429/timeout).
+        if not raw_this and cache.get("raw_this"):
+            raw_this = cache.get("raw_this", [])
+            raw_next = cache.get("raw_next", [])
+        elif raw_this:
+            _save_cache(cache_path, raw_this, raw_next)
 
     all_raw = raw_this + raw_next
     reachable = bool(raw_this or raw_next)
@@ -144,7 +216,7 @@ def fetch_forexfactory_events(
         return (
             [],
             DataStatus.DEGRADED,
-            "ForexFactory inaccessible (les deux endpoints ont échoué)",
+            "ForexFactory inaccessible (429/timeout) — aucun cache disponible",
         )
 
     status = DataStatus.OK

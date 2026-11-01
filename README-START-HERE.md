@@ -28,3 +28,12 @@ conçu pour fonctionner depuis l'Algérie. Décrit : docs/PRODUCT_SPEC.md. Terme
 - Ne colle jamais tes clés dans le code ni dans le chat : uniquement dans .env.
 - Le dépôt vendor/gex-dashboard est du code tiers : l'audit de P02 est obligatoire avant exécution.
 - Outil d'aide à la préparation et à la discipline. Ce n'est ni un conseil d'investissement ni un signal.
+
+## Sources (clés optionnelles — point d'extension)
+Les sources sans clé sont privilégiées (RSS/JSON officiels : Fed, BEA, BLS, ISM,
+US Treasury, ECB). Les sources à clé (FRED, Twelve Data, Finnhub) ne sont pas
+implémentées : elles restent un point d'extension propre dans
+`src/nqcockpit/events/sources/` — ajouter un module `fetch_xxx_events()` qui
+retourne `(events, DataStatus, error_msg)` et l'enregistrer dans
+`events/radar.py`. En l'absence de clé, elles se dégradent proprement (statut
+DÉGRADÉ visible), jamais d'échec silencieux.

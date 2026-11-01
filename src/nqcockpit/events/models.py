@@ -165,6 +165,8 @@ class SourceHealth:
     events_count: int = 0
     error_msg: str | None = None
     fetched_utc: datetime | None = None
+    last_success_utc: datetime | None = None
+    stale: bool = False
 
 
 @dataclass

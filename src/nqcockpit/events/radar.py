@@ -19,10 +19,12 @@ from nqcockpit.events.models import DataStatus, EventRiskReport, SourceHealth
 from nqcockpit.events.risk import compute_event_risk
 from nqcockpit.events.sources.bea import fetch_bea_events
 from nqcockpit.events.sources.bls import fetch_bls_events
+from nqcockpit.events.sources.ecb import fetch_ecb_feed
 from nqcockpit.events.sources.fed import fetch_fed_events
 from nqcockpit.events.sources.forexfactory import fetch_forexfactory_events
 from nqcockpit.events.sources.fred import fetch_fred_events
 from nqcockpit.events.sources.ism import fetch_ism_events
+from nqcockpit.events.sources.treasury import fetch_treasury_feed
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +225,25 @@ def fetch_event_radar(
         source_health.append(SourceHealth(
             source="forexfactory", status=DataStatus.BLOCKED, error_msg=str(exc)
         ))
+
+    # 5b. Sources officielles sans clé (ECB, US Treasury) — santé uniquement (news)
+    for src_name, fetcher in (("ecb", fetch_ecb_feed), ("treasury", fetch_treasury_feed)):
+        try:
+            items, st, err = fetcher(now_utc=ref_utc)
+            source_health.append(SourceHealth(
+                source=src_name,
+                status=st,
+                events_count=len(items),
+                error_msg=err or None,
+                fetched_utc=datetime.now(UTC),
+                last_success_utc=datetime.now(UTC) if st == DataStatus.OK else None,
+            ))
+            log.info("%s: %d items [%s]", src_name, len(items), st.value)
+        except Exception as exc:  # noqa: BLE001
+            log.error("%s fetch exception: %s", src_name, exc)
+            source_health.append(SourceHealth(
+                source=src_name, status=DataStatus.BLOCKED, error_msg=str(exc)
+            ))
 
     # 6. Fusion + classification + divergences
     merged_events, divergences = merge_and_classify(
