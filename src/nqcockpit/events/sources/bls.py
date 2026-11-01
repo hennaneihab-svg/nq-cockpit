@@ -1,8 +1,8 @@
 """Source BLS : calendrier des publications (CPI, PPI, NFP, JOLTS).
 
-BLS retourne 403 sur les pages HTML depuis certains pays.
-Stratégie : données statiques 2026 + flag DÉGRADÉ si la page est inaccessible.
-Heures de publication BLS : toujours 08h30 ET.
+BLS exige un User-Agent avec une adresse de contact : sans elle, il renvoie 403.
+Stratégie : User-Agent identifié (email de contact), données statiques 2026 en
+repli, flag DÉGRADÉ si la page est inaccessible. Heures BLS : 08h30 ET.
 """
 
 from __future__ import annotations
@@ -124,12 +124,19 @@ def _make_utc(
     return naive.astimezone(UTC), f"table versionnée BLS ({h:02d}:{m:02d} ET)", DataStatus.OK
 
 
+# BLS exige un User-Agent avec une adresse de contact : sans elle, il renvoie 403.
+_BLS_USER_AGENT = (
+    "Mozilla/5.0 (compatible; NQCockpit/1.0; +https://nqcockpit.local; "
+    "contact@nqcockpit.local)"
+)
+
+
 def _check_bls_reachable(base_url: str, timeout: int = 5) -> bool:
-    """Tente d'accéder à une page BLS pour détecter le blocage géographique."""
+    """Tente d'accéder à une page BLS avec l'User-Agent exigé (email de contact)."""
     try:
         req = urllib.request.Request(
             f"{base_url}/cpi.htm",
-            headers={"User-Agent": "Mozilla/5.0 (compatible; NQCockpit/1.0)"},
+            headers={"User-Agent": _BLS_USER_AGENT},
         )
         with urllib.request.urlopen(req, timeout=timeout):
             pass
@@ -164,7 +171,7 @@ def fetch_bls_events(
     reachable = _check_bls_reachable(base_url, timeout=timeout)
     status = DataStatus.OK if reachable else DataStatus.DEGRADED
     error_msg = "" if reachable else (
-        "BLS schedule page inaccessible (403 géographique probable) "
+        "BLS schedule page inaccessible (User-Agent sans contact → 403) "
         "— calendrier statique 2026 utilisé"
     )
     if not reachable:

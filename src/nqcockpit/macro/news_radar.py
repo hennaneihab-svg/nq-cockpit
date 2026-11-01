@@ -741,6 +741,47 @@ def fetch_live_news_wire(
         log.warning("Échec flux Google News: %s", exc)
         degraded_sources.append(f"Google News US Macro : {exc}")
 
+    # 3. MarketWatch top stories (officiel, sans clé) — titres non directionnels
+    try:
+        from nqcockpit.events.sources.marketwatch import fetch_marketwatch_feed
+
+        mw_items, mw_status, _ = fetch_marketwatch_feed(timeout=5)
+        for mw in mw_items[:max_items_per_source]:
+            dt_utc = mw.published_utc or now_utc
+            age = _format_age(max(0.0, (now_utc - dt_utc).total_seconds()))
+            alg_str = dt_utc.astimezone(TZ_ALGIERS).strftime("%d/%m %H:%M Alger")
+            et_str = dt_utc.astimezone(TZ_ET).strftime("%d/%m %H:%M ET")
+            mw_ok = mw_status.value == "OK"
+            items.append(
+                NewsWireItem(
+                    title=mw.title,
+                    link=mw.link,
+                    source="MarketWatch",
+                    tag="MARCHÉS",
+                    tag_color="#94A3B8",
+                    timestamp_utc=dt_utc,
+                    timestamp_algiers_str=alg_str,
+                    timestamp_et_str=et_str,
+                    age_str=age,
+                    is_ok=mw_ok,
+                    status="OK" if mw_ok else "DÉGRADÉ",
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Échec flux MarketWatch: %s", exc)
+        degraded_sources.append(f"MarketWatch RSS : {exc}")
+
+    # Dédoublonnage par titre (insensible à la casse) entre toutes les sources.
+    seen_titles: set[str] = set()
+    deduped: list[NewsWireItem] = []
+    for it in items:
+        key = it.title.strip().lower()
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        deduped.append(it)
+    items = deduped
+
     items.sort(key=lambda x: x.timestamp_utc, reverse=True)
     is_overall_ok = len(degraded_sources) == 0 and len(items) > 0
 

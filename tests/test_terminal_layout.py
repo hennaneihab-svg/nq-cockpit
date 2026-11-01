@@ -396,7 +396,7 @@ def test_terminal_source_health_chip_and_panel(monkeypatch) -> None:
     markdown = _markdown(app)
     assert "1/2 sources OK" in markdown
     assert "Event sources" in markdown
-    assert "DÉGRADÉ" in markdown
+    assert "DEGRADED" in markdown
     assert "STALE" in markdown
     assert "flux vide" in markdown
     assert "fed" in markdown

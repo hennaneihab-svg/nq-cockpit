@@ -235,4 +235,118 @@ def test_source_health_summary_and_html():
     assert "fed" in html
     assert "STALE" in html
     assert "flux vide" in html
-    assert "DÉGRADÉ" in html
+    assert "DEGRADED" in html
+
+
+def test_load_latest_event_source_health_preserves_age_and_stale(tmp_path):
+    from nqcockpit.events.health import load_latest_event_source_health
+
+    ts = "2026-10-31T10:00:00+00:00"
+    payload = {
+        "source_health": [
+            {"source": "fed", "status": "OK", "events_count": 3,
+             "error_msg": None, "last_success_utc": ts, "stale": False},
+            {"source": "ecb", "status": "DÉGRADÉ", "events_count": 0,
+             "error_msg": "flux vide", "last_success_utc": None, "stale": True},
+        ]
+    }
+    (tmp_path / "events_20261031_1000.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    out = load_latest_event_source_health(str(tmp_path))
+    assert len(out) == 2
+    assert out[0].last_success_utc is not None
+    assert out[0].stale is False
+    assert out[1].last_success_utc is None
+    assert out[1].stale is True
+
+
+def test_status_pill_localisation():
+    from nqcockpit.events.health import _status_pill
+
+    assert "DEGRADED" in _status_pill(DataStatus.DEGRADED, fr=False)
+    assert "DÉGRADÉ" in _status_pill(DataStatus.DEGRADED, fr=True)
+    assert "DOWN" in _status_pill(DataStatus.BLOCKED, fr=False)
+    assert "HORS LIGNE" in _status_pill(DataStatus.BLOCKED, fr=True)
+
+
+def test_render_source_health_html_localisation_and_window_empty():
+    from nqcockpit.events.health import render_source_health_html
+
+    sh = [
+        SourceHealth(source="fed", status=DataStatus.OK, events_count=0,
+                     last_success_utc=datetime(2026, 10, 31, 10, 0, tzinfo=UTC)),
+        SourceHealth(source="ecb", status=DataStatus.DEGRADED, events_count=0,
+                     error_msg="x"),
+    ]
+    en = render_source_health_html(sh, fr=False)
+    assert "Status" in en and "Last success" in en and "Last error" in en
+    assert "0 (window empty)" in en
+    assert "DEGRADED" in en
+
+    fr = render_source_health_html(sh, fr=True)
+    assert "Statut" in fr and "Dernier succès" in fr and "Dernière erreur" in fr
+    assert "0 (fenêtre vide)" in fr
+    assert "DÉGRADÉ" in fr
+
+
+def test_bls_uses_contact_email_user_agent(monkeypatch):
+    import nqcockpit.events.sources.bls as bls
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["ua"] = req.get_header("User-agent")
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(bls.urllib.request, "urlopen", fake_urlopen)
+    _, status, _ = bls.fetch_bls_events(
+        "https://www.bls.gov/schedule/news_release",
+        now_utc=datetime(2026, 10, 31, tzinfo=UTC),
+    )
+    assert status == DataStatus.OK
+    assert "contact@" in seen["ua"]
+
+
+def test_news_wire_includes_marketwatch(monkeypatch):
+    import nqcockpit.macro.news_radar as nr
+    from nqcockpit.events.sources import marketwatch
+    from nqcockpit.events.sources.rss_adapter import NewsItem
+
+    def fake_urlopen(req, timeout):
+        class _Resp:
+            def read(self):
+                return b"<?xml version='1.0'?><rss><channel></channel></rss>"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(nr.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        marketwatch,
+        "fetch_marketwatch_feed",
+        lambda timeout=10: (
+            [NewsItem(title="Stocks rise", published_utc=datetime(2026, 10, 31, 10, 0, tzinfo=UTC),
+                      link="http://x", source="marketwatch")],
+            DataStatus.OK,
+            "",
+        ),
+    )
+
+    report = nr.fetch_live_news_wire(max_items_per_source=5)
+    titles = [i.title for i in report.items]
+    assert "Stocks rise" in titles
+    mw = next(i for i in report.items if i.title == "Stocks rise")
+    assert mw.source == "MarketWatch"
+    assert mw.age_str
