@@ -177,7 +177,12 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
 
 
 def get_db_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
-    """Ouvre une connexion SQLite avec WAL, foreign keys et row_factory activés."""
+    """Ouvre une connexion SQLite avec WAL, foreign keys, row_factory et schéma.
+
+    Applique les migrations manquantes : la première ouverture d'une base neuve
+    crée les tables (bars, snapshots, events, …) au lieu de lever
+    ``sqlite3.OperationalError: no such table``.
+    """
     if db_path is None:
         db_path = os.getenv("NQ_DATA_DB_PATH") or DEFAULT_DB_PATH
 
@@ -194,6 +199,7 @@ def get_db_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA synchronous = NORMAL;")
     conn.row_factory = sqlite3.Row
+    apply_migrations(conn)
     return conn
 
 

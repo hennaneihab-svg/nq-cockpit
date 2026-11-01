@@ -36,6 +36,31 @@ _KNOWN_SECRET_KEYS = (
 
 
 @pytest.fixture(autouse=True)
+def _block_real_network(monkeypatch):
+    """Bloque toute connexion socket réelle (localhost uniquement) en test.
+
+    Empêche toute régression vers un appel réseau réel (yfinance, requests,
+    httpx, feedparser, urllib…). Les tests qui ont besoin du réseau doivent le
+    mocker explicitement.
+    """
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def _guarded_connect(self, address):
+        host = ""
+        if isinstance(address, (tuple, list)) and address:
+            host = str(address[0])
+        else:
+            host = str(address)
+        if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+            return real_connect(self, address)
+        raise OSError("Réseau réel bloqué en test (localhost uniquement)")
+
+    monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_secrets_and_network(tmp_path, monkeypatch):
     """Empêche les tests de lire le vrai .env ou de joindre Telegram.
 

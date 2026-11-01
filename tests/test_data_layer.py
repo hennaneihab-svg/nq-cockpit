@@ -403,6 +403,28 @@ def test_fetcher_empty_data_handling(tmp_path: Path):
         assert series.count == 0
 
 
+def test_fetcher_yahoo_bars_5d5m_fallback(tmp_path: Path):
+    """1d/1m vide (NQ=F « possibly delisted ») -> repli 5d/5m avec statut DÉGRADÉ."""
+    fetcher = DataFetcher(cache=DiskCache(cache_dir=tmp_path))
+
+    fallback_df = pd.DataFrame(
+        {"Open": [28500.0], "High": [28510.0], "Low": [28490.0],
+         "Close": [28500.0], "Volume": [10.0]},
+        index=[pd.Timestamp("2026-10-30 17:00:00", tz="America/New_York")],
+    )
+
+    with patch("yfinance.Ticker") as mock_ticker:
+        instance = mock_ticker.return_value
+        instance.history.side_effect = [pd.DataFrame(), fallback_df]
+
+        series = fetcher.fetch_yahoo_bars(
+            "NQ=F", interval="1m", period="1d", max_retries=1, max_cache_age_seconds=0
+        )
+        assert series.count == 1
+        assert series.status == DataStatus.DEGRADED
+        assert "repli 5d/5m" in (series.notes or "")
+
+
 def test_bar_archiver_with_preloaded_series(mem_db):
     """Vérifie l'archivage en base SQLite sans appel réseau."""
     t0 = datetime(2026, 9, 28, 15, 0, 0, tzinfo=timezone.utc)

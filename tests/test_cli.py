@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,10 +28,22 @@ def test_cli_no_args(capsys):
 @pytest.mark.parametrize("subcmd", ["run", "check-sources", "snapshot", "brief", "ui"])
 def test_cli_subcommands(subcmd, capsys):
     """Verify each required subcommand runs and outputs notification."""
+    from nqcockpit.data.models import BarSeries, DataStatus
+
+    empty_series = BarSeries(
+        symbol="NQ=F", interval="1m", bars=[], source="mock",
+        fetched_at_utc=datetime.now(timezone.utc), status=DataStatus.OK,
+        latency_seconds=None, notes="",
+    )
+    snap = _fake_snapshot()
+
     with (
         patch("nqcockpit.sources.health.run_all_checks") as mock_checks,
         patch("nqcockpit.cli._handle_ui", return_value=0),
         patch("nqcockpit.levels.scheduler.LevelsScheduler"),
+        patch("nqcockpit.data.cboe.fetch_cboe_options_chain", return_value=None),
+        patch("nqcockpit.data.fetcher.DataFetcher.fetch_yahoo_bars", return_value=empty_series),
+        patch("nqcockpit.levels.engine.LevelsEngine.compute_snapshot", return_value=snap),
     ):
         mock_report = MagicMock()
         mock_report.render_console_table.return_value = "Mock Table"
@@ -40,6 +54,36 @@ def test_cli_subcommands(subcmd, capsys):
         assert code == 0
         captured = capsys.readouterr()
         assert f"'{subcmd}'" in captured.out
+
+
+def _fake_snapshot() -> SimpleNamespace:
+    """Snapshot minimal (tous champs None) pour un rendu console sans crash."""
+    from dataclasses import fields
+    from datetime import datetime, timezone
+
+    from nqcockpit.data.models import DataStatus
+    from nqcockpit.levels.models import LevelsSnapshot
+
+    names = [f.name for f in fields(LevelsSnapshot)]
+    snap = SimpleNamespace(**{name: None for name in names})
+    snap.timestamp_utc = datetime.now(timezone.utc)
+    snap.status = DataStatus.OK
+    snap.basis_status = DataStatus.OK
+    snap.live_basis_status = DataStatus.OK
+    snap.spot_ndx = 0.0
+    snap.spot_nq = 0.0
+    snap.basis = 0.0
+    snap.net_gex = 0.0
+    snap.regime = ""
+    snap.basis_label = ""
+    snap.oi_flag = ""
+    snap.wall_window_pct = 0.03
+    snap.cboe_reloaded = False
+    snap.spot_nq_is_stale = False
+    snap.basis_is_aligned = True
+    snap.basis_tolerance_minutes = 1.0
+    snap.cboe_age_stats = {}
+    return snap
 
 
 def test_cli_run_launches_scheduler_and_ui():

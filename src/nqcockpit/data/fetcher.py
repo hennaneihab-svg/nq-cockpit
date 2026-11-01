@@ -159,6 +159,61 @@ class DataFetcher:
                 log.warning("Tentative %d/%d pour %s a échoué: %s", attempt, max_retries, symbol, e)
                 time.sleep(1.0 * attempt)
 
+        # Repli intraday : Yahoo renvoie parfois « possibly delisted » sur 1d/1m
+        # pour les futures (NQ=F, MNQ=F) alors que 5d/5m répond. On tente 5d/5m.
+        if interval == "1m" and period == "1d":
+            try:
+                fallback_df = yf.Ticker(symbol).history(period="5d", interval="5m")
+                if fallback_df is not None and not fallback_df.empty:
+                    fallback_bars: list[Bar] = []
+                    for index, row in fallback_df.iterrows():
+                        if isinstance(index, pd.Timestamp):
+                            ts_utc = (
+                                index.tz_convert("UTC").to_pydatetime()
+                                if index.tzinfo is not None
+                                else index.to_pydatetime().replace(tzinfo=timezone.utc)
+                            )
+                        else:
+                            ts_utc = datetime.fromisoformat(str(index)).replace(
+                                tzinfo=timezone.utc
+                            )
+                        fallback_bars.append(
+                            Bar(
+                                timestamp_utc=ts_utc,
+                                open=float(row["Open"]),
+                                high=float(row["High"]),
+                                low=float(row["Low"]),
+                                close=float(row["Close"]),
+                                volume=float(row.get("Volume", 0.0)),
+                            )
+                        )
+                    last_ts = fallback_bars[-1].timestamp_utc
+                    latency_sec = max(0.0, (now_utc - last_ts).total_seconds())
+                    series = BarSeries(
+                        symbol=symbol,
+                        interval=interval,
+                        bars=fallback_bars,
+                        source="yfinance",
+                        fetched_at_utc=now_utc,
+                        status=DataStatus.DEGRADED,
+                        latency_seconds=latency_sec,
+                        notes="repli 5d/5m (1d/1m vide)",
+                    )
+                    self.cache.set(
+                        cache_key,
+                        {
+                            "symbol": symbol,
+                            "interval": interval,
+                            "fetched_at_utc": now_utc.isoformat(),
+                            "status": series.status.value,
+                            "latency_seconds": latency_sec,
+                            "bars": [b.to_dict() for b in fallback_bars],
+                        },
+                    )
+                    return series
+            except Exception as e:  # noqa: BLE001
+                log.warning("Repli 5d/5m pour %s a échoué: %s", symbol, e)
+
         # En cas d'échec total des retries
         return BarSeries(
             symbol=symbol,
